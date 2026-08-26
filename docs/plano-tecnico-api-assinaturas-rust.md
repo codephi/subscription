@@ -1,8 +1,11 @@
 # Plano técnico da API de assinaturas em Rust
 
-**Status:** planejamento arquitetural, sem implementação  
-**Data:** 25 de agosto de 2026  
-**Revisão:** `customer_wallet` em créditos, `item_wallet` em item units, Price `unit`/`tiered`, uso pendente e ciclos declarativos  
+**Status:** planejamento arquitetural, sem implementação
+
+**Data:** 25 de agosto de 2026
+
+**Revisão:** `customer_wallet` em créditos, `item_wallet` em item units, Price `unit`/`tiered`, uso pendente e ciclos declarativos
+
 **Objetivo:** definir o domínio, os contratos HTTP, as garantias transacionais e a sequência de entrega de uma API de créditos, assinaturas e consumo pós-pago por workspace.
 
 ## 1. Resumo executivo
