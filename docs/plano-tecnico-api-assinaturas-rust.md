@@ -93,7 +93,7 @@ Invariantes:
 - os dois modos podem estar habilitados simultaneamente;
 - desabilitar recorrência impede criar/reativar assinaturas, mas não apaga assinaturas nem o histórico;
 - Compensations administrativas e resgates promocionais não dependem dessas duas flags;
-- na fase interna inicial, qualquer chamada que informe um workspace existente pode alterar a configuração; não há autenticação ou autorização na aplicação.
+- qualquer chamada que informe um workspace existente pode alterar a configuração.
 
 ### 4.2 Wallet comum e especializações
 
@@ -117,7 +117,7 @@ Chaves e restrições:
 - check de tipo exige `ITEM => parent_customer_wallet_id IS NOT NULL AND item_id IS NOT NULL`;
 - `parent_customer_wallet_id` referencia a Wallet `CUSTOMER` do mesmo `customer_id`;
 - `item_id` referencia um Item faturável de Product `CREDIT_METERED` aplicável ao cluster/escopo do customer no instante do provisionamento;
-- nenhuma coluna de `Wallet` muda depois da criação; banco e permissões devem impedir `UPDATE` e `DELETE`;
+- nenhuma coluna de `Wallet` muda depois da criação; restrições do banco devem impedir `UPDATE` e `DELETE`;
 - `WalletLifecycleEvent` é único por `(wallet_id, sequence)`, só aceita inserção e não pode ser editado ou apagado;
 - o estado efetivo pode ser materializado em uma projeção reconstruível, mas essa projeção não substitui nem modifica a Wallet ou seu histórico.
 
@@ -166,7 +166,7 @@ Campos principais:
 - `metadata` opcional, objeto JSON imutável com limites de tamanho, profundidade, quantidade de chaves e valores escalares permitidos;
 - `source_channel`, distinguindo consumo por produto/item, crédito direto, recorrência, vale direto, cupom, promoção baseada em vale e Compensation administrativa;
 - instantâneo do cálculo de créditos;
-- `created_at`, `request_id` e referência opcional de ator informada pelo chamador, sem identidade verificada na fase interna.
+- `created_at`, `request_id` e referência opcional de origem informada pelo chamador.
 
 Invariantes:
 
@@ -176,7 +176,7 @@ Invariantes:
 - toda operação que efetivamente movimenta créditos produz exatamente uma entrada; pagamento confirmado de Plan produz uma entrada mesmo quando `granted_credit_units = 0`;
 - lançamento zero é válido somente para `SUBSCRIPTION_PAYMENT` e exige referência oficial ao Plan, assinatura e pagamento confirmado; qualquer outra origem com zero é rejeitada;
 - lançamentos não são alterados ou removidos;
-- `description` e `metadata` são somente contexto auditável: não alteram valor, tipo, autorização, idempotência, Price, entitlement ou referências tipadas;
+- `description` e `metadata` são somente contexto auditável: não alteram valor, tipo, idempotência, Price, entitlement ou referências tipadas;
 - `metadata` aceita chaves livres do cliente, é preservada na forma canônica e devolvida integralmente nas consultas da transação; não pode ser editada depois do commit;
 - metadata não cria uma transação genérica/manual: a operação continua obrigada a ter uma origem de domínio válida, como consumo, crédito direto, pagamento de Plan, Vale ou Compensation;
 - o registro de deduplicação preserva o hash de `description` e da forma canônica de `metadata` para auditoria, mas qualquer reutilização da chave retorna conflito, com payload igual ou diferente.
@@ -215,7 +215,7 @@ Campos principais:
 - regras explícitas e versionadas;
 - `created_at`, `updated_at`.
 
-`CREDIT_METERED` possui Items faturáveis com Price, provisiona item wallets e converte item units em wallet credits. Sua elegibilidade exige entitlement efetivo e `balance_credit_units >= 0`. `ENTITLEMENT_ONLY` pode possuir Items e subitens como catálogo de funcionalidades/permissões, mas proíbe Price, item wallet, UsageEvent e qualquer sensibilização de saldo; sua elegibilidade depende somente do entitlement efetivo.
+`CREDIT_METERED` possui Items faturáveis com Price, provisiona item wallets e converte item units em wallet credits. Sua elegibilidade exige entitlement efetivo e `balance_credit_units >= 0`. `ENTITLEMENT_ONLY` pode possuir Items e subitens como catálogo de funcionalidades, mas proíbe Price, item wallet, UsageEvent e qualquer sensibilização de saldo; sua elegibilidade depende somente do entitlement efetivo.
 
 Na v1 não haverá uma linguagem genérica de regras. Ausência de entitlement, assinatura comercial inadimplente e insuficiência de créditos são fatos distintos na resposta. Crédito direto ou Vale pode aumentar saldo, mas não concede por si só entitlement a Products. Alterar `usage_model` exige nova versão ou novo Product, pois muda contratos, provisionamento e auditoria.
 
@@ -472,21 +472,20 @@ Contrato mínimo de `BillingConnector`:
 - criar sessão hospedada/SDK de setup e transformar o resultado em `PaymentMethodBinding` tokenizado;
 - criar cobrança a partir de `CollectionRequest`, com idempotency key fornecida pelo núcleo;
 - consultar cobrança por ID externo para reconciliação ativa;
-- verificar autenticidade do webhook antes de interpretar o evento;
 - normalizar respostas síncronas e webhooks para os mesmos estados/eventos internos;
 - cancelar autorização (`VOID`) e solicitar devolução (`REFUND`) quando declarado;
-- produzir erro tipado, retryability e IDs externos sem vazar segredo ou payload sensível.
+- produzir erro tipado, retryability e IDs externos.
 
 Capacidades declarativas incluem, no mínimo, meios (`CARD`, `PIX`, `BOLETO`, wallet do provedor ou outros), `supports_setup_session`, `supports_vault`, `supports_off_session_charge`, `supports_payment_query`, `supports_webhook`, `supports_void`, `supports_full_refund`, `supports_partial_refund` e necessidade de ação do customer. O núcleo valida a operação contra essas capacidades antes de chamar o adaptador; ausência de capacidade nunca é tratada como sucesso.
 
-Para cartão ou wallet externa, dados brutos como PAN, CVV e credencial do pagador não atravessam nem são persistidos pela API quando o provedor oferece SDK, hosted fields ou checkout hospedado. O Billing guarda apenas tokens/IDs opacos e evidência de consentimento/mandato. Para Pix, boleto e meios semelhantes, a resposta normalizada pode expor instruções de pagamento seguras, como QR Code, código copiável, linha digitável e vencimento, sem tornar esses campos parte de Subscription.
+Para Pix, boleto e meios semelhantes, a resposta normalizada pode expor instruções de pagamento, como QR Code, código copiável, linha digitável e vencimento, sem tornar esses campos parte de Subscription.
 
-- `BillingConnection`: tipo de adaptador, customer/merchant externo, capacidades como `supports_void`, `supports_refund` e meios suportados, referência segura a credenciais e configuração de webhook; nunca armazena cartão bruto;
+- `BillingConnection`: tipo de adaptador, customer/merchant externo, capacidades como `supports_void`, `supports_refund`, meios suportados e configuração de webhook;
 - `PaymentMethodBinding`: token/ID opaco do meio salvo no provedor, consentimento/mandato e estado;
 - `CollectionRequest`: cobrança criada pelo motor de Subscription, única por assinatura + período/compra, com valor/moeda do snapshot do Plan e snapshot de `unexpected_payment_policy`;
 - `CollectionAttempt`: execução individual e imutável de uma `CollectionRequest`, numerada desde 1, com `scheduled_at`, início/fim, conector, meio, chave idempotente, resultado normalizado e próxima ação; uma nova tentativa nunca sobrescreve a anterior;
 - `BillingPayment`: pagamento normalizado associado à solicitação e à tentativa que o originou, com estados `PENDING`, `REQUIRES_ACTION`, `CONFIRMED`, `FAILED` ou `CANCELED`;
-- `WebhookInbox`: evento bruto imutável, assinatura verificada, ID externo único, instante recebido/processado e resultado;
+- `WebhookInbox`: evento bruto imutável, ID externo único, instante recebido/processado e resultado;
 - `ExternalSubscriptionBinding`: correlação técnica opcional; nunca torna a assinatura externa fonte de verdade.
 
 `UnmatchedPaymentCase` representa pagamento confirmado que não corresponde de forma inequívoca a uma `CollectionRequest` pendente. Guarda provedor, pagamento, valor/moeda, motivo tipado, assinatura candidata opcional, evidências, estado `OPEN`, `RECONCILED`, `REFUND_PENDING`, `REFUNDED` ou `CLOSED_WITH_JUSTIFICATION`, ator e histórico imutável.
@@ -507,13 +506,13 @@ Quando todas as tentativas se esgotam, Billing marca a cobrança como `EXHAUSTED
 
 #### 4.11.2 Eventos de Billing e fronteira com Notifications
 
-Billing mantém uma outbox transacional e publica eventos versionados depois de persistir a mudança de estado. O conjunto mínimo inclui `collection.created`, `collection.attempt_scheduled`, `collection.attempt_started`, `collection.awaiting_customer`, `collection.attempt_failed`, `collection.retry_scheduled`, `collection.exhausted`, `payment.confirmed`, `payment.unmatched`, `refund.requested` e `refund.completed`. Cada evento contém IDs correlatos, workspace/customer, assinatura e período quando aplicáveis, estado, motivo tipado e instante, sem credenciais nem dados brutos do meio de pagamento.
+Billing mantém uma outbox transacional e publica eventos versionados depois de persistir a mudança de estado. O conjunto mínimo inclui `collection.created`, `collection.attempt_scheduled`, `collection.attempt_started`, `collection.awaiting_customer`, `collection.attempt_failed`, `collection.retry_scheduled`, `collection.exhausted`, `payment.confirmed`, `payment.unmatched`, `refund.requested` e `refund.completed`. Cada evento contém IDs correlatos, workspace/customer, assinatura e período quando aplicáveis, estado, motivo tipado e instante.
 
 Regra normativa de cobertura: toda ação financeira ou integração externa observável do Billing produz pelo menos um evento de intenção antes do efeito externo e exatamente um resultado terminal correspondente depois, sem exigir eventos para cada passo puramente interno. Pares mínimos incluem cobrança `attempt.requested` → `attempt.succeeded|failed|pending`, consulta `reconciliation.requested` → `reconciliation.matched|unmatched|inconclusive`, concessão `credit_grant.requested` → `credit_grant.applied|failed`, e devolução `refund.requested` → `refund.completed|failed`. Estados intermediários podem gerar eventos adicionais, mas nunca substituem o resultado terminal.
 
 Todos os eventos usam um envelope comum com `billing_event_id`, `event_type`, `schema_version`, `occurred_at`, `workspace_id`, `correlation_id`, `causation_id`, identificadores da entidade/agregado, `attempt_number` quando aplicável e payload tipado. `correlation_id` acompanha toda a jornada da cobrança; `causation_id` aponta para o evento/comando que provocou o próximo passo. A unicidade de `billing_event_id` e a outbox transacional tornam a publicação ao menos uma vez, portanto consumidores devem deduplicar. A ordem é garantida somente dentro do mesmo agregado; consumidores não devem presumir ordem global.
 
-O catálogo completo, os destinos e o transporte dos eventos — broker, webhook de saída, API de polling ou combinação — serão detalhados em contrato próprio. Esta pendência não altera a obrigação atual de registrar eventos duráveis, versionados, correlacionáveis e seguros em cada fronteira de ação do Billing.
+O catálogo completo, os destinos e o transporte dos eventos — broker, webhook de saída, API de polling ou combinação — serão detalhados em contrato próprio. Esta pendência não altera a obrigação atual de registrar eventos duráveis, versionados e correlacionáveis em cada fronteira de ação do Billing.
 
 `collection.attempt_scheduled` é o fato apropriado para avisar antecipadamente que uma cobrança será tentada, com `attempt_number` e `scheduled_at`; ele pode ser emitido na criação da tentativa ou nos offsets de aviso declarados pela Subscription. `collection.attempt_started` significa que Billing efetivamente iniciou a chamada ao provedor e não deve ser usado como promessa antecipada. A política pode declarar `pre_charge_notice_offsets`, mas Notifications decide canal e conteúdo.
 
@@ -556,7 +555,7 @@ Na v1, todos os vales ligados ao mesmo cupom devem ter a mesma quantidade de `cr
 
 O código aceita apenas ASCII em caixa alta, dígitos, hífen e sublinhado. A API remove espaços externos e converte letras ASCII para caixa alta antes de validar e persistir; a unicidade usa esse valor normalizado. O código original não é uma segunda identidade.
 
-No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A string é opaca: comparação exata de bytes UTF-8, sem trim, mudança de caixa ou normalização Unicode. A persistência pode usar HMAC determinístico com segredo estável; a restrição única é `(coupon_id, user_id_digest)`. Uma rotação de segredo exige migração ou consulta simultânea aos digests antigo e novo para não reabrir o limite. A plataforma não cria perfil, não valida documento e não atribui significado ao valor.
+No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A string é opaca: comparação exata de bytes UTF-8, sem trim, mudança de caixa ou normalização Unicode. A restrição única representa `(coupon_id, unique_user_id)`. A plataforma não cria perfil, não valida documento e não atribui significado ao valor.
 
 `CouponUserRedemption` referencia cupom, digest do identificador, vale consumido, workspace e entrada do razão. Sua inserção, seleção do vale e crédito são atômicos.
 
@@ -569,7 +568,7 @@ No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A strin
 - `compensation_type_id`, código estável, nome e descrição;
 - sinais permitidos: crédito, débito ou ambos; zero é proibido;
 - limites opcionais por ocorrência e regras de evidência;
-- `approval_required` opcional como regra de workflow, sem alçada ou segregação de funções na v1;
+- `approval_required` opcional como regra de workflow;
 - estado administrativo e versão; o tipo não fixa obrigatoriamente o valor da ocorrência.
 
 - `compensation_id`, `workspace_id`, `customer_id` e `customer_wallet_id`;
@@ -583,13 +582,13 @@ No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A strin
 
 Criar, editar enquanto `DRAFT`, submeter, aprovar quando aplicável e executar são ações separadas e auditadas. Na submissão, um tipo sem aprovação obrigatória transita diretamente para `READY`; um tipo que exige aprovação transita para `PENDING_APPROVAL` e somente uma ação explícita de aprovação o leva a `READY`. Apenas `READY` pode ser executada. A execução exige `transaction_id` e `Idempotency-Key`, cria exatamente uma entrada `COMPENSATION` na `customer_wallet` com referência oficial à Compensation e muda seu estado para `EXECUTED` no mesmo commit. Nova execução ou reutilização de qualquer das chaves retorna `409`; alteração posterior do valor ou cancelamento depois de executada também são rejeitados.
 
-Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita/apaga lançamento anterior e não pode ser usada como atalho para consumo, pagamento de Plano ou resgate de Vale. Na fase interna inicial, qualquer chamada pode criar, aprovar, rejeitar e executar no workspace informado; `approval_required` controla apenas a passagem de estado e não constitui barreira de segurança.
+Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita/apaga lançamento anterior e não pode ser usada como atalho para consumo, pagamento de Plano ou resgate de Vale. `approval_required` controla apenas a passagem de estado do workflow.
 
 `CompensationBatch` é um agrupador operacional opcional para ações em massa. Guarda descrição/motivo comum, origem/importação, criador, contagens e estado, mas não movimenta saldo. Uma operação para cem customers materializa cem Compensations filhas, cada uma ligada a exatamente um customer, com valor, estado, execução e transação próprios. Falha de uma filha não desfaz as já executadas; retry atua apenas nas pendentes e nunca recria uma ocorrência executada.
 
 ## 5. Contratos HTTP principais
 
-Prefixo sugerido: `/v1`. Na fase interna inicial, o `workspace_id` vem no caminho ou no contrato da operação e não é confrontado com identidade ou credencial. A aplicação valida apenas existência e consistência do escopo. Essa versão só pode operar em rede interna confiável.
+Prefixo sugerido: `/v1`. O `workspace_id` vem no caminho ou no contrato da operação, e a aplicação valida sua existência e a consistência do escopo.
 
 Toda operação externa que possa gerar `CustomerWalletEntry` exige `transaction_id`, cabeçalho `Idempotency-Key`, `description` opcional e `metadata` opcional. O servidor copia os campos de domínio para o lançamento e registra separadamente a chave de deduplicação. `metadata` é contexto opaco da aplicação cliente, não substitui referências tipadas como assinatura, plano, Product, Item, Vale, Cupom ou Billing. Campos reservados pelo servidor não podem ser sobrescritos pelo cliente.
 
@@ -708,7 +707,7 @@ Essa consulta mostra o estado atual e não substitui o extrato da `item_wallet` 
 - `GET /v1/price-versions/{id}` — retorna modelo, bloco, faixas e regra declarativa imutável;
 - `POST /v1/price-versions/{id}/publish` — valida faixas e agenda/ativa a versão.
 
-Preço publicado não é editado. Correções criam nova versão com vigência posterior. Na fase interna inicial, operações de catálogo não exigem autenticação ou RBAC; controle de concorrência permanece obrigatório.
+Preço publicado não é editado. Correções criam nova versão com vigência posterior. Operações de catálogo preservam controle de concorrência.
 
 Exemplo de preço `unit`:
 
@@ -828,13 +827,13 @@ Reutilizar a mesma `Idempotency-Key` retorna `409 idempotency_key_already_used`;
 - `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/resume`;
 - `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/cancel`;
 - `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/payment-credit-grants` — integração interna do Billing após pagamento confirmado; exige `transaction_id`, `billing_payment_id` e período, mas usa `granted_credit_units` persistido no plano versionado.
-- `POST /v1/workspaces/{workspace_id}/billing-connections` e `GET /v1/workspaces/{workspace_id}/billing-connections/{id}` — configura adaptador e expõe endpoint de webhook sem revelar segredo;
-- `GET /v1/workspaces/{workspace_id}/billing-connections/{id}/capabilities` — expõe meios e operações efetivamente suportados pela conexão, sem revelar credenciais;
+- `POST /v1/workspaces/{workspace_id}/billing-connections` e `GET /v1/workspaces/{workspace_id}/billing-connections/{id}` — configura adaptador e expõe endpoint de webhook;
+- `GET /v1/workspaces/{workspace_id}/billing-connections/{id}/capabilities` — expõe meios e operações efetivamente suportados pela conexão;
 - `POST /v1/workspaces/{workspace_id}/billing-connections/{id}/payment-method-setup-sessions` — inicia tokenização, hosted fields ou checkout do provedor e devolve somente artefatos públicos necessários ao cliente;
-- `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET /v1/workspaces/{workspace_id}/payment-method-bindings` — conclui/lista vínculos tokenizados entre customer, conexão e, opcionalmente, assinatura; nunca recebe nem retorna PAN ou CVV bruto;
+- `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET /v1/workspaces/{workspace_id}/payment-method-bindings` — conclui/lista vínculos entre customer, conexão e, opcionalmente, assinatura;
 - `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/collection-requests` — cria/retorna solicitação idempotente; normalmente responde `202`;
 - `GET /v1/workspaces/{workspace_id}/collection-requests/{id}` — estado normalizado, tentativas, ação requerida e, quando aplicável, instruções seguras de Pix, boleto ou outro meio assíncrono;
-- `POST /v1/billing/webhooks/{connection_id}` — entrada pública por conexão, com verificação de assinatura antes do processamento;
+- `POST /v1/billing/webhooks/{connection_id}` — entrada de eventos por conexão;
 - `GET /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments?cursor=...` — fila operacional com motivo, evidências, capacidade de devolução e assinatura candidata;
 - `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/reconcile` — vincula a uma `CollectionRequest` válida após revalidação completa;
 - `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/refund` — cria `RefundRequest` idempotente com valor, motivo e aprovação; rejeita quando o conector/meio não possui capacidade;
@@ -870,7 +869,7 @@ Erros que não representam um débito aceito usam `application/problem+json`, co
 Mapeamento mínimo:
 
 - `400`: JSON ou sintaxe inválida;
-- `403 product_not_entitled`: o plano/entitlement não habilita o Product; não representa autorização de segurança;
+- `403 product_not_entitled`: o plano/entitlement não habilita o Product;
 - `404`: recurso inexistente no workspace informado;
 - `409 idempotency_key_already_used`: `Idempotency-Key` já utilizada, com payload igual ou diferente;
 - `409 transaction_already_exists`: `transaction_id` já existente, com payload igual ou diferente;
@@ -889,7 +888,7 @@ Nunca usar `402` para cupom esgotado, assinatura desabilitada ou falha técnica.
 
 ### 6.1 Registro de consumo e débito por bloco
 
-1. Validar a forma do `workspace_id` e a existência do workspace, sem autenticação ou autorização na fase interna.
+1. Validar a forma do `workspace_id` e a existência do workspace.
 2. Validar forma básica sem consultar saldo.
 3. Abrir transação de banco e tentar inserir `IdempotencyRecord(customer_id, idempotency_key)` e reservar `(customer_id, transaction_id)`. Restrições únicas fazem uma chamada concorrente aguardar o commit ou rollback da dona das chaves.
 4. Se qualquer chave já existir após a espera, devolver o `409` específico sem executar o domínio nem reproduzir a resposta original.
@@ -909,7 +908,7 @@ Não existe commit intermediário entre sensibilizar a `item_wallet` e, quando h
 
 ### 6.2 Crédito direto e Compensation
 
-Crédito direto segue a ordem: idempotência, validação da flag, bloqueio da `CustomerWallet`, `CustomerWalletEntry`, saldo de créditos, recibo e commit. Não há validação de identidade na fase interna.
+Crédito direto segue a ordem: idempotência, validação da flag, bloqueio da `CustomerWallet`, `CustomerWalletEntry`, saldo de créditos, recibo e commit.
 
 Compensation possui duas fases. Criar/submeter/aprovar persiste somente o recurso e sua auditoria, sem bloquear ou movimentar a Wallet. Executar uma Compensation aprovada valida idempotência e estado, bloqueia a `CustomerWallet`, cria a única `CustomerWalletEntry`, atualiza o saldo, grava referências/recibo e marca `EXECUTED` no mesmo commit. Nenhuma dessas fontes toca `ItemWallet`.
 
@@ -918,7 +917,7 @@ Compensation possui duas fases. Criar/submeter/aprovar persiste somente o recurs
 1. O motor de Subscription encontra período devido e cria uma única `CollectionRequest` por assinatura + período, usando o snapshot do plano.
 2. Um trabalhador cria `BillingPayment` e chama o adaptador com chave idempotente. A resposta pode ser pendente, exigir ação, confirmar ou falhar.
 3. A resposta síncrona é transformada no mesmo evento normalizado usado por webhook; o request HTTP não concede crédito por um caminho especial.
-4. O webhook autenticado entra em `WebhookInbox`, é deduplicado pelo ID do provedor e tenta avançar o mesmo `BillingPayment`; eventos antigos não regressam estado terminal.
+4. O webhook entra em `WebhookInbox`, é deduplicado pelo ID do provedor e tenta avançar o mesmo `BillingPayment`; eventos antigos não regressam estado terminal.
 5. Em Subscription `RECURRING`, falha reprograma nova tentativa segundo sua política persistida. Exaustão bloqueia `CREDIT_STRICT`/`ENTITLEMENT_ONLY`; em `CREDIT_FLEXIBLE`, mantém entitlement e deixa cada Product aplicar sua regra de saldo. Subscription `NON_RENEWING` não agenda renovação.
 6. Na primeira transição válida para `CONFIRMED`, validar assinatura, versão do Plan, valor, moeda e período/compra; ler `granted_credit_units` persistido no Plan, inclusive zero.
 7. Inserir `PaymentCreditGrant`, bloquear a `CustomerWallet` e criar `CustomerWalletEntry` `SUBSCRIPTION_PAYMENT`. Com delta positivo, atualizar o saldo mesmo que estivesse negativo; com delta zero, persistir `balance_before_credit_units = balance_after_credit_units` sem alterar a projeção numérica.
@@ -995,22 +994,7 @@ Concorrência de provisionamento:
 
 O nível de isolamento pode ser `READ COMMITTED` com bloqueios explícitos e restrições únicas, desde que todos os fluxos obedeçam à mesma ordem. Se o banco escolhido não oferecer essas garantias, a implementação deverá provar comportamento equivalente antes de avançar.
 
-## 8. Fronteira interna e auditoria
-
-- A fase inicial não implementa autenticação nem autorização. Qualquer processo com acesso de rede à API pode chamar qualquer endpoint e informar qualquer `workspace_id` existente.
-- A implantação é permitida somente em rede interna confiável, sem ingress público, exposição direta à internet ou acesso de clientes finais. Firewall, segmentação e controles da infraestrutura são pré-condições externas, não funcionalidades desta API.
-- Não existe RBAC, nível administrativo, alçada ou segregação de funções. Todas as operações estão disponíveis a qualquer chamador interno.
-- `actor_reference` ou campo semelhante pode ser informado para correlação, mas é dado não verificado e não prova identidade. `request_id`, timestamps, origem técnica e histórico imutável continuam obrigatórios.
-- Reconciliar, encerrar ou devolver pagamento não conciliado exige motivo para auditoria, mas não identidade ou permissão verificadas.
-- Resgate de Cupom é somente interno nesta fase. Proteção contra enumeração e rate limiting continuam recomendados, mas não tornam a rota adequada para exposição pública.
-- Callbacks de provedores externos não podem ser habilitados sem uma proteção de borda e verificação de autenticidade específica do provedor; essa verificação é distinta da autenticação da API e permanece obrigatória quando o Billing externo for ativado.
-- Código de cupom deve ter entropia suficiente quando não for deliberadamente promocional e adivinhável.
-- `unique_user_id` nunca aparece em logs, métricas ou eventos em texto puro.
-- Motivos, solicitante, aprovador e executor de Compensation são imutáveis e pesquisáveis após cada transição correspondente.
-- Logs não são fonte de verdade contábil; IDs de requisição e de lançamento apenas os correlacionam ao razão.
-- Toda resposta que altera créditos expõe `customer_wallet_entry_id`; consumo sempre expõe também `item_wallet_entry_id`.
-
-## 9. Observabilidade e reconciliação
+## 8. Observabilidade e reconciliação
 
 Métricas mínimas:
 
@@ -1039,7 +1023,7 @@ Rotina de reconciliação:
 
 Eventos para integrações futuras devem sair por outbox gravada na mesma transação do razão. Consumidores externos não participam do commit de créditos.
 
-## 10. Critérios de aceitação
+## 9. Critérios de aceitação
 
 ### Créditos internos e Price
 
@@ -1127,7 +1111,6 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 - adicionar um novo provedor exige somente um `BillingConnector` compatível; não altera contratos, estados ou invariantes de Subscription e Wallet;
 - o núcleo rejeita uma operação antes da chamada externa quando o conector não declara a capacidade ou o meio solicitado;
 - uma `CollectionRequest` usa o mesmo contrato normalizado para cartão, Pix, boleto ou outro meio, variando apenas capacidades e instruções retornadas pelo conector;
-- setup/tokenização persiste apenas IDs opacos e evidência de consentimento; PAN, CVV e credenciais do pagador nunca são persistidos nem registrados em logs;
 - `PaymentMethodBinding` pertence ao mesmo workspace, customer e `BillingConnection` da cobrança; vínculo opcional com assinatura não permite uso cruzado;
 - confirmação síncrona, consulta posterior e webhook convergem para o mesmo estado terminal e não duplicam cobrança, renovação ou lançamento;
 - webhook inválido não altera cobrança; webhook antigo não regride estado terminal; evento válido pode ser reprocessado pela `WebhookInbox`;
@@ -1153,16 +1136,15 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 
 ### Compensações e auditoria
 
-- qualquer chamador interno possui acesso integral às operações; não existem rotas públicas ou acesso direto de clientes finais nesta fase;
 - criar Compensation ou CompensationBatch não altera saldo; apenas uma Compensation `READY` pode ser executada;
-- tipo sem aprovação obrigatória vai a `READY` na submissão; tipo com aprovação vai a `PENDING_APPROVAL` e exige uma ação explícita de aprovação antes de `READY`, que pode ser realizada pelo mesmo chamador interno;
+- tipo sem aprovação obrigatória vai a `READY` na submissão; tipo com aprovação vai a `PENDING_APPROVAL` e exige uma ação explícita de aprovação antes de `READY`;
 - concorrência ou repetição na execução gera exatamente uma entrada `COMPENSATION`; a chamada perdedora recebe `409` e delta zero é rejeitado;
 - Compensation executada é terminal e preserva vínculo com tipo/versionamento, descrição, solicitante, aprovador quando houver, executor, Batch e lançamento original quando aplicável;
 - uma operação em massa materializa uma Compensation por customer; o Batch não produz lançamento agregado nem compartilha uma execução entre customers;
-- consultas e mutações permanecem logicamente filtradas pelo `workspace_id` informado, mas não há proteção contra um chamador interno que escolha outro workspace;
-- toda Compensation contém solicitante, descrição e tipo; quando houver aprovação, o ator e o instante são preservados, sem exigir segregação de funções;
+- consultas e mutações permanecem logicamente filtradas pelo `workspace_id` informado;
+- toda Compensation contém solicitante, descrição e tipo; quando houver aprovação, o ator e o instante são preservados;
 - toda transação aceita preserva `description`, metadata canônica e zero ou mais `WalletTransactionReference` oficiais no mesmo commit;
-- consultar por `transaction_id` devolve a metadata originalmente persistida sem depender de logs; metadata nunca é usada para autorizar, calcular ou substituir a referência oficial da origem;
+- consultar por `transaction_id` devolve a metadata originalmente persistida sem depender de logs; metadata nunca é usada para calcular ou substituir a referência oficial da origem;
 - buscar por referência de plano, assinatura, Vale, Cupom, Product, Item ou pagamento encontra todas as entradas correlatas sem consultar metadata;
 - ID colocado somente em metadata não satisfaz integridade referencial nem filtros de referência oficiais;
 - soma do extrato da `customer_wallet` reconcilia com saldo após testes concorrentes;
@@ -1182,12 +1164,12 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 - percorrer todas as páginas de cada cursor estável retorna cada entrada daquele extrato exatamente uma vez, mesmo com novas entradas concorrentes;
 - `balance_credit_units` retornado por `GET /customer-wallet` coincide com `balance_after_credit_units` da `CustomerWalletEntry` mais recente.
 
-## 11. Sequência futura de implementação
+## 10. Sequência futura de implementação
 
 Este documento não autoriza nem executa código. Quando a implementação for aprovada, a ordem recomendada é:
 
-1. **Descoberta do template e ADRs:** mapear framework HTTP, banco, migrações e convenções do template; registrar a fronteira de rede interna sem autenticação, além das decisões de `credit_units`, razão/projeção e idempotência.
-2. **Primitivas do domínio:** tipos seguros para IDs, créditos inteiros, quantidades, períodos e erros; testes de parsing, overflow e cálculo graduado.
+1. **Descoberta do template e ADRs:** mapear framework HTTP, banco, migrações e convenções do template; registrar as decisões de `credit_units`, razão/projeção e idempotência.
+2. **Primitivas do domínio:** tipos de domínio para IDs, créditos inteiros, quantidades, períodos e erros; testes de parsing, overflow e cálculo graduado.
 3. **Hierarquia materializada:** tabela `Wallet`, especializações `CustomerWallet`/`ItemWallet`, chaves parciais, vínculo pai/item, `WalletProvisioning` e reconciliação de escopo.
 4. **Customer wallet e idempotência:** `CustomerWalletEntry`, saldo global, transação comum e testes concorrentes; esta é a fundação das concessões e débitos.
 5. **Catálogo e Price versionado:** Product `CREDIT_METERED`/`ENTITLEMENT_ONLY`, Items/subitens, conversões `unit`/`tiered`, regra declarativa de ciclo, validação de faixas e publicação imutável.
@@ -1196,26 +1178,21 @@ Este documento não autoriza nem executa código. Quando a implementação for a
 8. **Subscription e Billing:** ofertas, Plans com preço/créditos, Subscription `RECURRING`/`NON_RENEWING`, entitlement, cobrança/retries locais, conexões/adaptadores, tokenização referenciada, `CollectionRequest`, `BillingPayment`, `WebhookInbox` e `PaymentCreditGrant` idempotente.
 9. **Vales:** ciclo de vida, resgate direto e auditoria promocional.
 10. **Cupons:** lote, seleção concorrente, modo livre e limite por identificador externo.
-11. **Compensações administrativas:** lifecycle de intenção/aprovação/execução, acesso administrativo integral na v1, auditoria de atores e lançamento idempotente.
+11. **Compensações administrativas:** lifecycle de intenção/aprovação/execução, auditoria de atores e lançamento idempotente.
 12. **Operação:** outbox, métricas, reconciliação de wallets/extratos, testes de carga/lock e documentação OpenAPI.
 
 Cada etapa deve terminar com migrações reversíveis, contrato OpenAPI atualizado, testes unitários e de integração, cenários concorrentes no banco real e evidência de que os invariantes anteriores continuam válidos. Consumo não começa antes do provisionamento materializado e da verificação de entitlement; concessão por pagamento confirmado, vale e cupom não começam antes de `CustomerWalletEntry`/idempotência passarem nos testes de concorrência.
 
-## 12. Pontos a ratificar antes da implementação
+## 11. Pontos a ratificar antes da implementação
 
-O plano adota defaults seguros para não bloquear o desenho, mas há decisões e detalhamentos que devem ser fechados antes de codificar seus módulos:
+O plano adota defaults definidos para não bloquear o desenho, mas há decisões e detalhamentos que devem ser fechados antes de codificar seus módulos:
 
-1. **Eventos de domínio e entrega:** catalogar eventos correlacionados para toda ação e transição de estado relevante de Product, Price, Wallet, Subscription, Billing, Vale, Cupom e Compensation; definir pares antes/depois quando houver efeito externo, schemas/versionamento, ordem por agregado, outbox, retry, deduplicação, dead-letter, retenção e transporte por broker, webhook de saída, polling ou combinação. Também definir cadastro de destinos, assinatura/autenticidade, filtros, replay operacional e observabilidade de entrega.
+1. **Eventos de domínio e entrega:** catalogar eventos correlacionados para toda ação e transição de estado relevante de Product, Price, Wallet, Subscription, Billing, Vale, Cupom e Compensation; definir pares antes/depois quando houver efeito externo, schemas/versionamento, ordem por agregado, outbox, retry, deduplicação, dead-letter, retenção e transporte por broker, webhook de saída, polling ou combinação. Também definir cadastro de destinos, filtros, replay operacional e observabilidade de entrega.
 2. **Pausa, retomada, troca e cancelamento:** definir instante efetivo, efeito no período já pago, entitlement, cobrança pendente, saldo remanescente, Products habilitados, Price/Plan versionados, prorrata ou ausência dela e eventos emitidos para cada transição.
 3. **Consultas, relatórios e métricas:** separar consultas operacionais de recursos individuais, relatórios agregados exportáveis e métricas técnicas. Definir filtros, paginação, consistência temporal, exportação e retenção para extratos, consumo, saldo, concessões, assinaturas, cobranças, falhas, Vales/Cupons e Compensations. Métricas são séries agregadas para operação; relatórios são dados de negócio consultáveis/exportáveis e não substituem o razão.
-4. **Retenção e privacidade:** classificar dados pessoais, financeiros, técnicos e metadata; definir limites e campos proibidos, mascaramento, criptografia, expurgo/anonimização permitido, prazos por entidade, atendimento a solicitações de privacidade e exceções necessárias para preservar razão, auditoria e prevenção de duplicidade.
-5. **Rotinas de reconciliação:** detalhar jobs, frequência, cursores, tolerâncias, alertas e reparos seguros para comparar saldo com extrato, item units com blocos/pendente, PaymentCreditGrant com pagamentos, assinatura com cobrança, estoque de Vales com resgates e Compensations com lançamentos. Divergência nunca autoriza edição destrutiva; reparo usa reprocessamento idempotente ou lançamento compensatório.
-6. **Tarefa de desenho de meios de pagamento do Billing:** especificar separadamente o fluxo completo de cada meio inicialmente suportado, como cartão, Pix, boleto e wallet de provedor. Para cada meio, definir criação/captura, tokenização ou instrução de pagamento, vínculo com customer e assinatura, autorização para cobrança recorrente/off-session, estados síncronos e assíncronos, expiração, consulta, webhook, conciliação, retentativa, cancelamento, devolução, capacidades exigidas do conector, eventos antes/depois e respostas HTTP. Também deve ser decidido o contrato definitivo entre `BillingConnection`, rotas aceitas pela oferta, instrumento tokenizado do customer e vínculo escolhido pela assinatura. A proposta discutida nesta revisão é referência de trabalho, não contrato fechado.
-7. **Autenticação antes de exposição externa:** antes de ingress público, acesso de clientes finais, webhooks de saída ou consumo por terceiros, definir autenticação de usuários e máquinas, autorização por workspace, gestão/rotação de credenciais, proteção contra replay, rate limiting, auditoria de identidade e migração segura dos campos não verificados da fase interna.
+4. **Rotinas de reconciliação:** detalhar jobs, frequência, cursores, tolerâncias, alertas e reparos para comparar saldo com extrato, item units com blocos/pendente, PaymentCreditGrant com pagamentos, assinatura com cobrança, estoque de Vales com resgates e Compensations com lançamentos. Divergência nunca permite edição destrutiva; reparo usa reprocessamento idempotente ou lançamento compensatório.
+5. **Tarefa de desenho de meios de pagamento do Billing:** especificar separadamente o fluxo completo de cada meio inicialmente suportado, como cartão, Pix, boleto e wallet de provedor. Para cada meio, definir criação/captura, tokenização ou instrução de pagamento, vínculo com customer e assinatura, mandato para cobrança recorrente/off-session, estados síncronos e assíncronos, expiração, consulta, webhook, conciliação, retentativa, cancelamento, devolução, capacidades exigidas do conector, eventos antes/depois e respostas HTTP. Também deve ser decidido o contrato definitivo entre `BillingConnection`, rotas aceitas pela oferta, instrumento tokenizado do customer e vínculo escolhido pela assinatura. A proposta discutida nesta revisão é referência de trabalho, não contrato fechado.
 
-Decisões ratificadas nesta revisão:
-
-- todos os Vales vinculados ao mesmo Cupom devem possuir exatamente a mesma quantidade de `credit_units`. A publicação/vinculação rejeita lote heterogêneo, e alterações posteriores não podem quebrar essa homogeneidade;
-- a fase inicial é exclusivamente interna e não possui autenticação, autorização, papéis, alçadas ou segregação de funções. Isolamento de rede é pré-condição; `workspace_id` não representa autorização; referências de ator não são verificadas; autenticação torna-se gate obrigatório antes de qualquer exposição externa.
+Decisão ratificada nesta revisão: todos os Vales vinculados ao mesmo Cupom devem possuir exatamente a mesma quantidade de `credit_units`. A publicação/vinculação rejeita lote heterogêneo, e alterações posteriores não podem quebrar essa homogeneidade.
 
 Alterar qualquer uma dessas respostas exige atualizar este documento e os critérios de aceitação antes da implementação; nenhuma delas impede concluir o planejamento atual.
