@@ -93,7 +93,7 @@ Invariantes:
 - os dois modos podem estar habilitados simultaneamente;
 - desabilitar recorrência impede criar/reativar assinaturas, mas não apaga assinaturas nem o histórico;
 - Compensations administrativas e resgates promocionais não dependem dessas duas flags;
-- alteração exige permissão de administração do workspace.
+- alteração exige ator administrativo autenticado e pertencente ao workspace; na v1 não há autorização granular por ação.
 
 ### 4.2 Wallet comum e especializações
 
@@ -569,7 +569,7 @@ No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A strin
 - `compensation_type_id`, código estável, nome e descrição;
 - sinais permitidos: crédito, débito ou ambos; zero é proibido;
 - limites opcionais por ocorrência e regras de evidência;
-- `approval_required` e política opcional de segregação de funções/alçada;
+- `approval_required` opcional como regra de workflow, sem alçada ou segregação de funções na v1;
 - estado administrativo e versão; o tipo não fixa obrigatoriamente o valor da ocorrência.
 
 - `compensation_id`, `workspace_id`, `customer_id` e `customer_wallet_id`;
@@ -583,7 +583,7 @@ No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A strin
 
 Criar, editar enquanto `DRAFT`, submeter, aprovar quando aplicável e executar são ações separadas e auditadas. Na submissão, um tipo sem aprovação obrigatória transita diretamente para `READY`; um tipo que exige aprovação transita para `PENDING_APPROVAL` e somente uma decisão autorizada o leva a `READY`. Apenas `READY` pode ser executada. A execução exige `transaction_id` e `Idempotency-Key`, cria exatamente uma entrada `COMPENSATION` na `customer_wallet` com referência oficial à Compensation e muda seu estado para `EXECUTED` no mesmo commit. Nova execução ou reutilização de qualquer das chaves retorna `409`; alteração posterior do valor ou cancelamento depois de executada também são rejeitados.
 
-Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita/apaga lançamento anterior e não pode ser usada como atalho para consumo, pagamento de Plano ou resgate de Vale. Permissões distintas protegem criação e execução; aprovação e separação entre solicitante/aprovador/executor são aplicadas somente quando o `CompensationType` ou a política do workspace exigir.
+Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita/apaga lançamento anterior e não pode ser usada como atalho para consumo, pagamento de Plano ou resgate de Vale. Na v1, qualquer ator administrativo autenticado do workspace pode criar, aprovar, rejeitar e executar; `approval_required` controla apenas a passagem de estado e não exige outro papel ou outro ator.
 
 `CompensationBatch` é um agrupador operacional opcional para ações em massa. Guarda descrição/motivo comum, origem/importação, criador, contagens e estado, mas não movimenta saldo. Uma operação para cem customers materializa cem Compensations filhas, cada uma ligada a exatamente um customer, com valor, estado, execução e transação próprios. Falha de uma filha não desfaz as já executadas; retry atua apenas nas pendentes e nunca recria uma ocorrência executada.
 
@@ -708,7 +708,7 @@ Essa consulta mostra o estado atual e não substitui o extrato da `item_wallet` 
 - `GET /v1/price-versions/{id}` — retorna modelo, bloco, faixas e regra declarativa imutável;
 - `POST /v1/price-versions/{id}/publish` — valida faixas e agenda/ativa a versão.
 
-Preço publicado não é editado. Correções criam nova versão com vigência posterior. Operações de catálogo exigem permissão administrativa e controle de concorrência.
+Preço publicado não é editado. Correções criam nova versão com vigência posterior. Operações de catálogo exigem ator administrativo autenticado do workspace e controle de concorrência, sem RBAC granular na v1.
 
 Exemplo de preço `unit`:
 
@@ -909,7 +909,7 @@ Não existe commit intermediário entre sensibilizar a `item_wallet` e, quando h
 
 ### 6.2 Crédito direto e Compensation
 
-Crédito direto segue a ordem: idempotência, validação de permissão/flag, bloqueio da `CustomerWallet`, `CustomerWalletEntry`, saldo de créditos, recibo e commit.
+Crédito direto segue a ordem: idempotência, validação do ator administrativo e da flag, bloqueio da `CustomerWallet`, `CustomerWalletEntry`, saldo de créditos, recibo e commit.
 
 Compensation possui duas fases. Criar/submeter/aprovar persiste somente o recurso e sua auditoria, sem bloquear ou movimentar a Wallet. Executar uma Compensation aprovada valida idempotência e estado, bloqueia a `CustomerWallet`, cria a única `CustomerWalletEntry`, atualiza o saldo, grava referências/recibo e marca `EXECUTED` no mesmo commit. Nenhuma dessas fontes toca `ItemWallet`.
 
@@ -998,8 +998,8 @@ O nível de isolamento pode ser `READ COMMITTED` com bloqueios explícitos e res
 ## 8. Segurança e auditoria
 
 - Escopo de workspace deve vir de credencial confiável ou ser conferido contra ela em toda rota.
-- Rotas de catálogo, configuração, vale e Compensation têm permissões distintas de consumo e resgate público.
-- Reconciliar, encerrar ou devolver pagamento não conciliado exige permissão específica, motivo e identidade do ator; devolução manual pode exigir aprovação adicional conforme valor/política.
+- Na v1 existe um único nível de acesso administrativo: qualquer ator administrativo autenticado do workspace possui acesso integral a catálogo, configuração, Wallet, Vale, Cupom, Billing, conciliação, devolução e Compensation. Não há RBAC por recurso, ação, alçada ou segregação de funções.
+- Reconciliar, encerrar ou devolver pagamento não conciliado exige motivo e identidade do ator para auditoria, mas não uma permissão administrativa específica.
 - O resgate de cupom é uma superfície pública de API, mas o workspace beneficiado precisa ser autenticado/autorizado; rate limiting e proteção contra enumeração são obrigatórios.
 - Código de cupom deve ter entropia suficiente quando não for deliberadamente promocional e adivinhável.
 - `unique_user_id` nunca aparece em logs, métricas ou eventos em texto puro.
@@ -1148,16 +1148,16 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 - cupom esgotado não deixa registro parcial de usuário;
 - repetição de resgate retorna `409` pela chave reutilizada e nunca seleciona outro Vale, mesmo após mudança posterior do estoque.
 
-### Compensações, auditoria e autorização
+### Compensações e auditoria
 
-- usuário comum não cria vale, muda preço, configura billing ou opera Compensation;
+- ator administrativo autenticado do workspace possui acesso integral às operações administrativas da v1; clientes finais e rotas públicas continuam limitados aos contratos públicos correspondentes;
 - criar Compensation ou CompensationBatch não altera saldo; apenas uma Compensation `READY` pode ser executada;
-- tipo sem aprovação obrigatória vai a `READY` na submissão; tipo com aprovação vai a `PENDING_APPROVAL` e exige decisão autorizada antes de `READY`;
+- tipo sem aprovação obrigatória vai a `READY` na submissão; tipo com aprovação vai a `PENDING_APPROVAL` e exige uma ação explícita de aprovação antes de `READY`, que pode ser realizada pelo mesmo ator administrativo;
 - concorrência ou repetição na execução gera exatamente uma entrada `COMPENSATION`; a chamada perdedora recebe `409` e delta zero é rejeitado;
 - Compensation executada é terminal e preserva vínculo com tipo/versionamento, descrição, solicitante, aprovador quando houver, executor, Batch e lançamento original quando aplicável;
 - uma operação em massa materializa uma Compensation por customer; o Batch não produz lançamento agregado nem compartilha uma execução entre customers;
 - acesso cruzado entre workspaces é negado e não revela existência de dados;
-- toda Compensation contém solicitante, descrição e tipo; aprovação e segregação de funções são preservadas quando exigidas pela política;
+- toda Compensation contém solicitante, descrição e tipo; quando houver aprovação, o ator e o instante são preservados, sem exigir segregação de funções;
 - toda transação aceita preserva `description`, metadata canônica e zero ou mais `WalletTransactionReference` oficiais no mesmo commit;
 - consultar por `transaction_id` devolve a metadata originalmente persistida sem depender de logs; metadata nunca é usada para autorizar, calcular ou substituir a referência oficial da origem;
 - buscar por referência de plano, assinatura, Vale, Cupom, Product, Item ou pagamento encontra todas as entradas correlatas sem consultar metadata;
@@ -1193,7 +1193,7 @@ Este documento não autoriza nem executa código. Quando a implementação for a
 8. **Subscription e Billing:** ofertas, Plans com preço/créditos, Subscription `RECURRING`/`NON_RENEWING`, entitlement, cobrança/retries locais, conexões/adaptadores, tokenização referenciada, `CollectionRequest`, `BillingPayment`, `WebhookInbox` e `PaymentCreditGrant` idempotente.
 9. **Vales:** ciclo de vida, resgate direto e auditoria promocional.
 10. **Cupons:** lote, seleção concorrente, modo livre e limite por identificador externo.
-11. **Compensações administrativas:** lifecycle de intenção/aprovação/execução, autorização reforçada, segregação de funções e lançamento idempotente.
+11. **Compensações administrativas:** lifecycle de intenção/aprovação/execução, acesso administrativo integral na v1, auditoria de atores e lançamento idempotente.
 12. **Operação:** outbox, métricas, reconciliação de wallets/extratos, testes de carga/lock e documentação OpenAPI.
 
 Cada etapa deve terminar com migrações reversíveis, contrato OpenAPI atualizado, testes unitários e de integração, cenários concorrentes no banco real e evidência de que os invariantes anteriores continuam válidos. Consumo não começa antes do provisionamento materializado e da verificação de entitlement; concessão por pagamento confirmado, vale e cupom não começam antes de `CustomerWalletEntry`/idempotência passarem nos testes de concorrência.
@@ -1204,12 +1204,14 @@ O plano adota defaults seguros para não bloquear o desenho, mas há decisões e
 
 1. **Eventos de domínio e entrega:** catalogar eventos correlacionados para toda ação e transição de estado relevante de Product, Price, Wallet, Subscription, Billing, Vale, Cupom e Compensation; definir pares antes/depois quando houver efeito externo, schemas/versionamento, ordem por agregado, outbox, retry, deduplicação, dead-letter, retenção e transporte por broker, webhook de saída, polling ou combinação. Também definir cadastro de destinos, assinatura/autenticidade, filtros, replay operacional e observabilidade de entrega.
 2. **Pausa, retomada, troca e cancelamento:** definir instante efetivo, efeito no período já pago, entitlement, cobrança pendente, saldo remanescente, Products habilitados, Price/Plan versionados, prorrata ou ausência dela e eventos emitidos para cada transição.
-3. **Papéis e permissões administrativas:** criar matriz de ações por recurso e escopo para catálogo, Price, Plans, Wallet, Vales, Cupons, BillingConnection, conciliação/devolução, CompensationType/Batch/Compensation, aprovação e execução; definir segregação de funções, alçadas, credenciais de máquina e auditoria de acesso negado.
-4. **Consultas, relatórios e métricas:** separar consultas operacionais de recursos individuais, relatórios agregados exportáveis e métricas técnicas. Definir filtros, paginação, consistência temporal, exportação, autorização e retenção para extratos, consumo, saldo, concessões, assinaturas, cobranças, falhas, Vales/Cupons e Compensations. Métricas são séries agregadas para operação; relatórios são dados de negócio consultáveis/exportáveis e não substituem o razão.
-5. **Retenção e privacidade:** classificar dados pessoais, financeiros, técnicos e metadata; definir limites e campos proibidos, mascaramento, criptografia, expurgo/anonimização permitido, prazos por entidade, atendimento a solicitações de privacidade e exceções necessárias para preservar razão, auditoria e prevenção de duplicidade.
-6. **Rotinas de reconciliação:** detalhar jobs, frequência, cursores, tolerâncias, alertas e reparos seguros para comparar saldo com extrato, item units com blocos/pendente, PaymentCreditGrant com pagamentos, assinatura com cobrança, estoque de Vales com resgates e Compensations com lançamentos. Divergência nunca autoriza edição destrutiva; reparo usa reprocessamento idempotente ou lançamento compensatório.
-7. **Tarefa de desenho de meios de pagamento do Billing:** especificar separadamente o fluxo completo de cada meio inicialmente suportado, como cartão, Pix, boleto e wallet de provedor. Para cada meio, definir criação/captura, tokenização ou instrução de pagamento, vínculo com customer e assinatura, autorização para cobrança recorrente/off-session, estados síncronos e assíncronos, expiração, consulta, webhook, conciliação, retentativa, cancelamento, devolução, capacidades exigidas do conector, eventos antes/depois e respostas HTTP. Também deve ser decidido o contrato definitivo entre `BillingConnection`, rotas aceitas pela oferta, instrumento tokenizado do customer e vínculo escolhido pela assinatura. A proposta discutida nesta revisão é referência de trabalho, não contrato fechado.
+3. **Consultas, relatórios e métricas:** separar consultas operacionais de recursos individuais, relatórios agregados exportáveis e métricas técnicas. Definir filtros, paginação, consistência temporal, exportação, autorização e retenção para extratos, consumo, saldo, concessões, assinaturas, cobranças, falhas, Vales/Cupons e Compensations. Métricas são séries agregadas para operação; relatórios são dados de negócio consultáveis/exportáveis e não substituem o razão.
+4. **Retenção e privacidade:** classificar dados pessoais, financeiros, técnicos e metadata; definir limites e campos proibidos, mascaramento, criptografia, expurgo/anonimização permitido, prazos por entidade, atendimento a solicitações de privacidade e exceções necessárias para preservar razão, auditoria e prevenção de duplicidade.
+5. **Rotinas de reconciliação:** detalhar jobs, frequência, cursores, tolerâncias, alertas e reparos seguros para comparar saldo com extrato, item units com blocos/pendente, PaymentCreditGrant com pagamentos, assinatura com cobrança, estoque de Vales com resgates e Compensations com lançamentos. Divergência nunca autoriza edição destrutiva; reparo usa reprocessamento idempotente ou lançamento compensatório.
+6. **Tarefa de desenho de meios de pagamento do Billing:** especificar separadamente o fluxo completo de cada meio inicialmente suportado, como cartão, Pix, boleto e wallet de provedor. Para cada meio, definir criação/captura, tokenização ou instrução de pagamento, vínculo com customer e assinatura, autorização para cobrança recorrente/off-session, estados síncronos e assíncronos, expiração, consulta, webhook, conciliação, retentativa, cancelamento, devolução, capacidades exigidas do conector, eventos antes/depois e respostas HTTP. Também deve ser decidido o contrato definitivo entre `BillingConnection`, rotas aceitas pela oferta, instrumento tokenizado do customer e vínculo escolhido pela assinatura. A proposta discutida nesta revisão é referência de trabalho, não contrato fechado.
 
-Decisão ratificada nesta revisão: todos os Vales vinculados ao mesmo Cupom devem possuir exatamente a mesma quantidade de `credit_units`. A publicação/vinculação rejeita lote heterogêneo, e alterações posteriores não podem quebrar essa homogeneidade.
+Decisões ratificadas nesta revisão:
+
+- todos os Vales vinculados ao mesmo Cupom devem possuir exatamente a mesma quantidade de `credit_units`. A publicação/vinculação rejeita lote heterogêneo, e alterações posteriores não podem quebrar essa homogeneidade;
+- a v1 adota acesso administrativo integral por workspace, sem papéis granulares, alçadas ou segregação de funções. Autenticação, isolamento entre workspaces e auditoria de ator permanecem obrigatórios.
 
 Alterar qualquer uma dessas respostas exige atualizar este documento e os critérios de aceitação antes da implementação; nenhuma delas impede concluir o planejamento atual.
