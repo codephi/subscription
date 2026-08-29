@@ -12,11 +12,11 @@
 
 A API mantém dois tipos de wallet/subledger. A `customer_wallet` é a carteira principal da conta/customer, guarda saldo fungível somente em `credit_units` e possui extrato completo. A `item_wallet`, única por customer + item, contabiliza item units consumidas, pendentes e convertidas, também com extrato próprio. Nenhuma delas armazena moeda ou valor monetário.
 
-O consumo é sempre pós-pago. Uma chamada válida primeiro registra as item units e atualiza o medidor/extrato da `item_wallet`. Cada Price define a conversão por bloco entre item units e wallet credits, por exemplo `1 -> 1`, `10 -> 1` ou `10 -> 10`. Quando o acumulado completa blocos, a mesma transação emite o débito correspondente na `customer_wallet`; o resto permanece pendente na `item_wallet`. Se esse débito produzir saldo de créditos negativo, tudo é persistido e a resposta é `402 Payment Required`. O `402` informa insuficiência de wallet credits após consumo aceito; não significa rollback nem cobrança monetária.
+O consumo é sempre pós-pago. Uma chamada válida primeiro registra as item units e atualiza o medidor/extrato da `item_wallet`. Cada Price define a conversão por bloco entre item units e wallet credits, por exemplo `1 -> 1`, `10 -> 1` ou `10 -> 10`. Quando o acumulado completa blocos, a mesma transação emite o débito correspondente na `customer_wallet`; o resto permanece pendente na `item_wallet`. Na V1 `CREDIT_STRICT`, o débito só é aceito se mantiver o saldo maior ou igual a zero; insuficiência rejeita integralmente a chamada, sem registrar consumo, pendente, bloco ou lançamento. O modelo de saldo negativo e recibo `402` fica reservado à capacidade futura `CREDIT_FLEXIBLE`.
 
-Produto é o agrupador de regras e elegibilidade e não contém preço. Product `CREDIT_METERED` possui Items com Prices versionados `unit` ou `tiered`, que convertem item units em débitos de wallet credits. Product `ENTITLEMENT_ONLY` possui Items/subitens de acesso, sem Price ou item wallet. A `customer_wallet` recebe créditos por concessão direta, pagamento confirmado de plano, Vale ou Compensation e também registra pagamentos de plano com delta zero; ela é a única fonte da parcela financeira da elegibilidade. A assinatura é a fonte de entitlement.
+Produto é o agrupador de regras e elegibilidade e não contém preço. Product `CREDIT_METERED` possui Items com Prices versionados `unit` ou `tiered`, que convertem item units em débitos de wallet credits. Product `ENTITLEMENT_ONLY` possui Items/subitens de acesso, sem Price ou item wallet. A `customer_wallet` é única e seu saldo é a projeção das concessões/lotes de crédito ainda disponíveis; ela recebe créditos-base de ciclos de assinatura, concessão direta, Vale/Cupom ou Compensation. A assinatura é a fonte de entitlement e de sua franquia-base por ciclo.
 
-O catálogo de Subscription pode declarar o preço comercial monetário de um plano e quantos wallet credits um pagamento confirmado concede, mantendo os dois campos conceitualmente separados. Cobrança e confirmação do pagamento pertencem ao Billing externo; a Wallet recebe somente a concessão inteira de créditos autorizada. A conversão do Price de Item é somente de item units consumidas para wallet credits debitados; não é câmbio nem conversão de dinheiro.
+O catálogo de `SubscriptionPlanVersion` de cada `Subscription` comercial declara a única oferta que pode criar, iniciar ou manter um `CustomerPlan` principal: preço, recorrência, admissão, meios aceitos e créditos-base por ciclo. Cobrança e confirmação pertencem ao Billing externo; a confirmação do ciclo efetiva atomicamente seu entitlement e, quando `granted_credit_units > 0`, sua concessão-base na Wallet. Plan nunca seleciona Voucher ou Cupom. `OnDemandPlan` é um catálogo separado de adicional de crédito dentro da mesma Subscription comercial e não é uma segunda assinatura nem um tipo de `SubscriptionPlanVersion`. A conversão do Price de Item é somente de item units consumidas para wallet credits debitados; não é câmbio nem conversão de dinheiro.
 
 ## 2. Decisões normativas da v1
 
@@ -29,7 +29,7 @@ O catálogo de Subscription pode declarar o preço comercial monetário de um pl
 6. Cada chamada válida de consumo produz exatamente uma entrada na `item_wallet`, independentemente do saldo de créditos. Ela só produz débito na `customer_wallet` quando, somada ao pendente do item, completa pelo menos um bloco.
 7. Um Price no modelo `unit` define `unit_block_size` item units e `credit_units` wallet credits por bloco, ambos inteiros positivos. Assim, `1 -> 1`, `10 -> 1` e `10 -> 10` são configurações válidas. No modelo `tiered`, cada faixa define sua própria razão `unit_block_size -> credit_units`, permitindo mudar tanto o tamanho do bloco quanto os créditos debitados conforme o acumulado avança.
 8. Para cada `item_wallet` vale permanentemente `total_received_item_units = total_converted_item_units + pending_item_units`. O acumulador satisfaz `0 <= pending_item_units < pending_unit_block_size` e nenhuma item unit pode ser descartada, reaproveitada ou convertida duas vezes.
-9. Se uma chamada completar blocos, o débito na `customer_wallet` é registrado independentemente do saldo. Saldo resultante negativo produz `402`; saldo zero ou positivo produz `201`. Uma chamada que apenas aumenta o pendente produz somente `ItemWalletEntry`, sem transação na `customer_wallet`, e retorna `201`.
+9. Na V1, se uma chamada completar blocos, o débito na `customer_wallet` só é registrado se o saldo resultante for zero ou positivo; caso contrário, a chamada é rejeitada integralmente sem efeito. Uma chamada que apenas aumenta o pendente produz somente `ItemWalletEntry`, sem transação na `customer_wallet`, e retorna `201`. O débito aceito independentemente do saldo e o `402` pertencem exclusivamente à futura capacidade `CREDIT_FLEXIBLE`.
 10. Um Price tem `pricing_model = unit` ou `tiered`. Em `unit`, todo bloco converte para a quantidade fixa de wallet credits. Em `tiered`, faixas progressivas graduadas são aplicadas às item units convertidas acumuladas por customer + item + versão de Price + ciclo. `accumulation_cycle` ausente significa que o acumulado nunca reinicia; presente, contém uma regra recorrente declarativa escolhida pelo cliente. Cada bloco posterior usa a faixa correspondente sem reprecificar débitos já lançados.
 11. A consulta de elegibilidade sempre exige entitlement efetivo. Para `CREDIT_METERED`, também exige `balance_credit_units >= 0`; para `ENTITLEMENT_ONLY`, não consulta saldo. Ela não reserva créditos e nunca autoriza sozinha consumo ou débito. A `item_wallet` não participa do saldo elegível.
 12. Toda alteração externa de créditos e toda chamada de consumo recebem `transaction_id`. Para recorrência, a chave natural adicional é assinatura + período. Para cupom no modo por usuário, `unique_user_id` é uma chave de limite distinta do `transaction_id`.
@@ -37,8 +37,15 @@ O catálogo de Subscription pode declarar o preço comercial monetário de um pl
 14. Datas e períodos são armazenados em UTC. Agendamentos mensais usam calendário, e não uma duração fixa de dias.
 15. Wallets são materializadas no provisionamento. Criar customer materializa sua `customer_wallet` e uma `item_wallet` somente para cada Item faturável aplicável de Product `CREDIT_METERED`; consumo não cria wallets de forma preguiçosa.
 16. Product possui `usage_model` imutável após publicação: `CREDIT_METERED` ou `ENTITLEMENT_ONLY`. O primeiro usa Price, item wallet e saldo; o segundo concede apenas acesso por assinatura e proíbe Price, item wallet e lançamento de consumo.
-17. Subscription é a fonte de verdade de entitlement e calendário. Billing é adaptador de cobrança assíncrona; resposta síncrona e webhook convergem para a mesma tentativa, e somente pagamento `CONFIRMED` pode conceder créditos recorrentes.
-18. Uma `SubscriptionOffering` declara exatamente um de três perfis: `CREDIT_STRICT`, `CREDIT_FLEXIBLE` ou `ENTITLEMENT_ONLY`. O perfil fixa compatibilidade de Products, concessão de créditos e efeito da cobrança; combinações fora da matriz são rejeitadas na publicação.
+17. CustomerPlan é a fonte de verdade de entitlement, calendário e franquia-base por ciclo; `Subscription` comercial é a raiz de catálogo. Billing é adaptador de cobrança assíncrona; resposta síncrona e webhook convergem para a mesma tentativa, e pagamento `CONFIRMED` efetiva o entitlement e a concessão-base daquele ciclo uma única vez.
+18. A arquitetura modela `CREDIT_STRICT`, `CREDIT_FLEXIBLE` e `ENTITLEMENT_ONLY`, mas a V1 expõe, publica e comercializa exclusivamente `CREDIT_STRICT`; os demais perfis são capacidade futura e não podem ser ativados. `CREDIT_STRICT` fixa compatibilidade de Products, concessão de créditos e efeito da cobrança; combinações fora da matriz são rejeitadas na publicação.
+19. O único meio de pagamento da V1 é `CARD` por provedor externo. O sistema guarda apenas IDs/tokens opacos e referências do provedor; nunca PAN, CVV ou qualquer dado sensível do cartão.
+20. A primeira contratação cria a assinatura em estado comercial `ACTIVE`; quando o plano for pago, o entitlement só se torna efetivo após a confirmação definitiva do pagamento, inclusive depois de autenticação adicional exigida pelo emissor. Plano gratuito não cria cobrança. Uma renovação de plano pago usa o cartão salvo e realiza exatamente uma tentativa comercial na data de renovação: não há antecipação nem repetição automática dentro do ciclo.
+21. A V1 é webhook-first: Billing processa somente eventos assinados do provedor, deduplicados e correlacionados à `CollectionRequest`/PaymentIntent persistida. Ausência, atraso, timeout ou resposta incerta não prova falha, não autoriza nova cobrança nem cancelamento; o estado conhecido é preservado e evento válido tardio ainda passa pela máquina de estados idempotente. Consulta automática ao provedor não existe na V1.
+22. `SubscriptionPlanVersion` define a oferta comercial completa, incluindo `granted_credit_units` não negativo como franquia-base por ciclo; ele não possui nem seleciona Voucher ou Cupom. Voucher, Cupom e Compensation são agregados independentes e não são emitidos automaticamente por aderir a um plano.
+23. A admissão da assinatura é decidida por uma política de elegibilidade independente do plano e do preço. Ela pode permitir adesão livre ou exigir evidências dinâmicas, como e-mail/identidade verificada ou referência antifraude de cartão validado pelo provedor. Essa política bloqueia ou permite criar a assinatura; uma campanha, separadamente, pode avaliar o contexto de assinatura e emitir um Voucher. Nenhuma regra de uso único é obrigatória sem aprovação explícita.
+24. Toda concessão positiva materializa um lote de crédito auditável com origem, saldo residual e validade quando aplicável. A franquia-base de assinatura expira no fim do ciclo materializado enquanto continuar classificada como assinatura; crédito de `OnDemandPlan`, inclusive residual reclassificado em troca de plano, acumula e não expira pela renovação. O consumo `CREDIT_STRICT` aloca primeiro o lote de assinatura que expira no ciclo atual e depois créditos persistentes, sem aceitar débito quando a soma disponível não cobrir o valor.
+25. Para cada par `customer_id` + `Subscription` comercial pode existir no máximo um `CustomerPlan` principal em condição comercial ativa. `CustomerPlan` chega à Subscription comercial exclusivamente por `CustomerPlan → SubscriptionPlanVersion → Subscription`; Products/Subscriptions comerciais distintos podem ter CustomerPlans ativos distintos. Troca de plano atua nesse vínculo único e `OnDemandPlan` nunca cria CustomerPlan.
 
 ## 3. Limites do escopo
 
@@ -47,14 +54,14 @@ Incluído na v1:
 - `customer_wallet` e razão de wallet credits por conta/workspace;
 - `item_wallet`, extrato e medidor de item units por customer + item faturável;
 - catálogo de produtos, itens e versões de preço;
-- Products medidos por crédito e Products somente por entitlement;
+- Products medidos por crédito; Products somente por entitlement permanecem modelados para evolução, mas não são publicados na V1;
 - elegibilidade de produto combinando plano, estado de entitlement e, quando aplicável, saldo;
 - registro e acumulação de consumo pós-pago por customer + item;
 - débitos por blocos completos e consulta de item units pendentes/convertidas;
 - crédito direto;
-- ofertas de Subscription, Plans versionados com preço/créditos, subscriptions recorrentes ou não renováveis, Products habilitados, modalidade de entitlement e adesão do customer;
-- concessão recorrente de créditos somente após confirmação externa de pagamento;
-- fronteira de Billing, conectores de provedor, tentativas, webhooks e conciliação assíncrona;
+- ofertas `CREDIT_STRICT`, Plans versionados com preço, recorrência e créditos-base por ciclo, subscriptions gratuitas ou pagas com adesão do customer e política de admissão extensível;
+- Vouchers, Cupons e Compensations independentes da franquia-base do plano;
+- fronteira de Billing para cartão tokenizado por provedor externo, uma tentativa comercial por renovação, webhooks e conciliação assíncrona;
 - vales e cupons;
 - Compensations administrativas;
 - histórico, auditoria, idempotência e reconciliação.
@@ -62,7 +69,9 @@ Incluído na v1:
 Fora da v1:
 
 - armazenamento ou processamento de dados brutos de cartão; meios ficam tokenizados no provedor;
-- regras fiscais, impostos, câmbio, emissão fiscal e semântica completa de refund/chargeback; integrações iniciais apenas normalizam esses fatos para tratamento posterior;
+- Pix, boleto, wallet de provedor e qualquer meio que não seja cartão tokenizado por provedor externo;
+- `CREDIT_FLEXIBLE`, `ENTITLEMENT_ONLY`, saldo negativo e consumo com recibo `402`; a arquitetura os preserva apenas como capacidade futura não ativável;
+- produto de estorno: a V1 não oferece tela, endpoint, elegibilidade, política comercial nem automação de refund; cancelamento de assinatura não gera estorno automático;
 - fórmula dinâmica ou taxa de câmbio entre dinheiro e `credit_units`; o plano apenas persiste preço comercial e concessão de créditos como termos independentes;
 - estorno que apaga uma operação original;
 - reserva prévia de saldo;
@@ -72,7 +81,7 @@ Fora da v1:
 - transferência de saldo entre workspaces;
 - transferência de item units entre `item_wallets` ou conversão entre unidades de itens diferentes;
 - saldo de wallet credits dentro da `item_wallet`;
-- expiração automática de dívida ou de saldo.
+- expiração geral/indeterminada de dívida ou saldo; a única expiração de crédito fechada na V1 é a baixa auditável do lote de franquia-base de assinatura no fim de seu ciclo.
 
 ## 4. Modelo de domínio
 
@@ -136,7 +145,7 @@ Invariantes:
 
 - uma única especialização para cada Wallet `CUSTOMER`;
 - não existe campo de moeda ou valor monetário;
-- saldo negativo é válido;
+- o tipo numérico suporta sinal para evolução, mas a V1 impede qualquer débito que deixaria saldo negativo;
 - `balance_credit_units` após cada operação deve coincidir com `balance_after_credit_units` da última `CustomerWalletEntry`;
 - a linha nasce materializada com saldo inicial zero durante o provisionamento do customer, nunca durante consumo ou crédito.
 
@@ -150,7 +159,8 @@ Tipos:
 
 - `DEBIT`;
 - `DIRECT_CREDIT`;
-- `SUBSCRIPTION_PAYMENT`;
+- `SUBSCRIPTION_CREDIT`;
+- `CREDIT_EXPIRY_FORFEITURE`;
 - `VOUCHER_CREDIT`;
 - `COMPENSATION`.
 
@@ -159,12 +169,12 @@ Campos principais:
 - `customer_wallet_entry_id`;
 - `customer_id`;
 - `type`;
-- `signed_credit_units`: inteiro com sinal; positivo adiciona saldo e negativo remove. Zero é aceito exclusivamente em `SUBSCRIPTION_PAYMENT` de Plan com `granted_credit_units = 0`;
+- `signed_credit_units`: inteiro com sinal; positivo adiciona saldo e negativo remove; zero é rejeitado;
 - `balance_before_credit_units`, `balance_after_credit_units`;
 - `transaction_id`, quando a origem for uma chamada externa;
 - `description` opcional, texto humano imutável com tamanho limitado;
 - `metadata` opcional, objeto JSON imutável com limites de tamanho, profundidade, quantidade de chaves e valores escalares permitidos;
-- `source_channel`, distinguindo consumo por produto/item, crédito direto, recorrência, vale direto, cupom, promoção baseada em vale e Compensation administrativa;
+- `source_channel`, distinguindo consumo por produto/item, crédito-base de ciclo de assinatura, crédito direto, vale direto, cupom, promoção baseada em vale e Compensation administrativa;
 - instantâneo do cálculo de créditos;
 - `created_at`, `request_id` e referência opcional de origem informada pelo chamador.
 
@@ -173,18 +183,30 @@ Invariantes:
 - `balance_after_credit_units = balance_before_credit_units + signed_credit_units`;
 - uma operação de domínio produz no máximo uma entrada no razão;
 - toda mudança de saldo produz exatamente uma entrada no razão;
-- toda operação que efetivamente movimenta créditos produz exatamente uma entrada; pagamento confirmado de Plan produz uma entrada mesmo quando `granted_credit_units = 0`;
-- lançamento zero é válido somente para `SUBSCRIPTION_PAYMENT` e exige referência oficial ao Plan, assinatura e pagamento confirmado; qualquer outra origem com zero é rejeitada;
+- toda operação que efetivamente movimenta créditos produz exatamente uma entrada; um ciclo de assinatura com `granted_credit_units > 0` produz exatamente uma entrada `SUBSCRIPTION_CREDIT`;
+- lançamento zero é rejeitado para toda origem; ciclo com `granted_credit_units = 0` efetiva somente entitlement e não cria entrada;
 - lançamentos não são alterados ou removidos;
 - `description` e `metadata` são somente contexto auditável: não alteram valor, tipo, idempotência, Price, entitlement ou referências tipadas;
 - `metadata` aceita chaves livres do cliente, é preservada na forma canônica e devolvida integralmente nas consultas da transação; não pode ser editada depois do commit;
 - metadata não cria uma transação genérica/manual: a operação continua obrigada a ter uma origem de domínio válida, como consumo, crédito direto, pagamento de Plan, Vale ou Compensation;
 - o registro de deduplicação preserva o hash de `description` e da forma canônica de `metadata` para auditoria, mas qualquer reutilização da chave retorna conflito, com payload igual ou diferente.
 
+#### Lotes de crédito, alocação e expiração
+
+Cada entrada positiva que disponibiliza créditos materializa um `CreditLot` imutável na origem e com estado materializado auditável: `credit_lot_id`, entrada concessora, `source_kind`, quantidade original, saldo residual, `expires_at` opcional, `customer_plan_cycle_id` quando a origem é a franquia-base e histórico append-only de consumo, reclassificação e expiração. O saldo único da `customer_wallet` continua sendo a projeção da soma dos lotes disponíveis, conciliada com o razão; o lote não substitui nem altera a `CustomerWalletEntry` original.
+
+`SUBSCRIPTION_CREDIT` cria lote de assinatura vinculado ao ciclo materializado. Seu residual expira integralmente em `current_period_end`: não acumula na renovação, que cria somente a nova franquia do ciclo seguinte. `DIRECT_CREDIT` originado por `OnDemandPlan` cria lote de compra extra persistente: permanece disponível através de renovações e trocas de plano, sem política geral de expiração própria na V1. Outras origens declaram sua própria validade quando aplicável; ausência de validade não permite inferir expiração automática.
+
+Em toda troca de plano, antes do reset do ciclo, `CreditLotReclassification` converte idempotente e auditavelmente o residual disponível de cada lote `SUBSCRIPTION_CREDIT` para `ON_DEMAND` persistente. O evento guarda lote, quantidade preservada, classificação/validade anterior e nova, `customer_plan_cycle_id`, `plan_transition_id`, ator e instante; é único por lote + transição. Ele preserva a mesma quantidade de `credit_units`, zera sua expiração de assinatura e conserva a proveniência do crédito original. Não cria nem edita `CustomerWalletEntry`, não altera `balance_credit_units` e não é preço, câmbio, desconto, conversão monetária ou prorrata. Depois disso, o residual convertido participa da segunda prioridade de consumo, junto com os créditos sob demanda persistentes.
+
+No consumo `CREDIT_STRICT`, o débito bloqueia a Wallet e os lotes elegíveis, verifica que a soma de seus residuais cobre todo o valor e grava `CreditLotAllocation` imutável para cada lote utilizado. A ordem normativa é: (1) créditos de assinatura disponíveis que expiram no ciclo atual, depois (2) créditos persistentes, inclusive `OnDemandPlan`; os critérios de desempate dentro da mesma classe são estáveis e auditáveis. Se a soma não cobrir o débito, a chamada é rejeitada integralmente com `409 insufficient_credit`. Assim, o extrato e as alocações revelam exatamente quais concessões suportaram cada consumo.
+
+Ao fim do ciclo, o residual de lote de assinatura é baixado por uma `CREDIT_EXPIRY_FORFEITURE` negativa, idempotente e referenciada ao lote/ciclo, e o estado materializado passa a expirado. Expiração jamais edita ou apaga o crédito/debito original, saldo ou alocações. A baixa e a atualização da projeção ocorrem atomicamente, ou por saga/outbox idempotente equivalente, preservando a reconciliação do razão com os lotes.
+
 `WalletTransactionReference` é a tabela filha 1:N que mantém relações oficiais sem inflar `CustomerWalletEntry` com dezenas de colunas nulas:
 
 - `wallet_transaction_reference_id`, `customer_wallet_entry_id` e `reference_kind`;
-- exatamente um alvo tipado por linha, como `subscription_id`, `plan_version_id`, `voucher_id`, `coupon_id`, `product_id`, `item_id`, `usage_event_id`, `item_wallet_entry_id`, `debit_id`, `collection_request_id`, `billing_payment_id` ou `external_reference`;
+- exatamente um alvo tipado por linha, como `subscription_id` (Subscription comercial), `customer_plan_id`, `customer_plan_cycle_id`, `plan_version_id`, `credit_lot_id`, `voucher_id`, `coupon_id`, `product_id`, `item_id`, `usage_event_id`, `item_wallet_entry_id`, `debit_id`, `collection_request_id`, `billing_payment_id` ou `external_reference`;
 - check exige exatamente um alvo compatível com `reference_kind` e FKs são aplicadas a todos os recursos internos;
 - unicidade em `(customer_wallet_entry_id, reference_kind, target)` impede duplicação da mesma relação;
 - índices por `(reference_kind, target, customer_wallet_entry_id)` permitem localizar o extrato a partir de plano, Vale, Product, pagamento ou outra origem;
@@ -193,9 +215,9 @@ Invariantes:
 
 Referências esperadas por origem:
 
-- consumo: `item_wallet_id`, `item_wallet_entry_id`, `usage_event_id`, `debit_id`, `product_id`, `item_id`, IDs dos blocos convertidos, versões de Price, item units recebidas/convertidas/pendentes e `transaction_id`;
+- consumo: `item_wallet_id`, `item_wallet_entry_id`, `usage_event_id`, `debit_id`, `product_id`, `item_id`, IDs dos blocos convertidos, versões de Price, item units recebidas/convertidas/pendentes, `CreditLotAllocation` e `transaction_id`;
+- crédito-base de assinatura: `customer_plan_id`, `customer_plan_cycle_id`, `plan_version_id`, `credit_lot_id`, `collection_request_id`/`billing_payment_id` quando pago e instantâneo de `granted_credit_units`;
 - crédito direto: `direct_credit_id`, referência externa opcional e `transaction_id`;
-- pagamento de plano: `subscription_id`, `plan_version_id`, `collection_request_id`, `billing_payment_id`, período/compra e `payment_credit_grant_id`;
 - vale direto: `voucher_id` e `transaction_id`;
 - cupom: `coupon_id`, `voucher_id`, `coupon_user_redemption_id` quando aplicável e `transaction_id`;
 - promoção: sempre referencia o `voucher_id` que materializou o benefício e, quando existir, campanha/cupom correlato; não há crédito promocional destrutivo ou sem vale;
@@ -351,11 +373,11 @@ O provisionador pode processar lotes em múltiplas transações, mas o estado do
 - `unit_offset_start` e `unit_offset_end`;
 - detalhamento de alocação por versão de preço e faixa;
 - referência obrigatória a `ItemWalletEntry` e referências opcionais a `Debit`/`CustomerWalletEntry`, ausentes quando nenhum bloco é completado;
-- status HTTP original (`201` ou `402`) e recibo original.
+- status HTTP original e recibo original; na V1, chamadas aceitas retornam `201` e insuficiência de crédito retorna `409` sem recibo de consumo.
 
 `Debit` existe somente quando o evento completa um ou mais blocos. Ele agrega, em uma única `CustomerWalletEntry`, todos os blocos completados atomicamente pela chamada e preserva uma decomposição imutável por Price/faixa. `debited_credit_units` é a soma dos wallet credits configurados nos blocos, nunca inclui `pending_item_units_after` e nunca arredonda uma fração para cima.
 
-O item deve pertencer ao produto informado e ambos devem estar ativos no primeiro processamento. Falhas de catálogo não registram evento nem alteram acumulador. Falta de saldo nunca bloqueia o evento, o acumulador ou um débito devido.
+O item deve pertencer ao produto informado e ambos devem estar ativos no primeiro processamento. Falhas de catálogo não registram evento nem alteram acumulador. Na V1 `CREDIT_STRICT`, se o débito completo necessário deixaria a Wallet negativa, a insuficiência bloqueia integralmente o evento, acumulador e débito.
 
 ### 4.8 IdempotencyRecord e unicidade transacional
 
@@ -392,27 +414,45 @@ Concessão de créditos sob demanda solicitada pelo workspace:
 
 A API da wallet não precifica nem aprova pagamentos. Um serviço comercial externo pode cobrar dinheiro e, após sua própria confirmação, solicitar a concessão de uma quantidade explícita de `credit_units` com `external_reference`. O valor monetário, a moeda e a lógica que escolheu essa quantidade não entram na wallet nem no razão de créditos.
 
-### 4.10 SubscriptionOffering, SubscriptionPlan e CustomerSubscription
+`OnDemandPlan` é um catálogo comercial separado e exclusivo de crédito extra, pertencente a uma única `Subscription` comercial. Ele não é um tipo de `SubscriptionPlanVersion`, não pode ser escolhido como plano inicial de adesão e nunca cria, inicia, mantém ou substitui um `CustomerPlan`. A única oferta capaz de criar/manter esse vínculo principal é `SubscriptionPlanVersion` (`FREE` ou `PAID`, recorrente ou `NONE`).
 
-`SubscriptionOffering` é o modelo comercial, como `One Vibe Pro`, e agrupa planos alternativos. Ele não cobra, confirma pagamento nem movimenta Wallet.
+Uma compra OnDemand existe somente dentro de um `CustomerPlan` principal em condição comercial `ACTIVE`, com `activation_status = ACTIVATED` e versão não revogada, tanto na criação quanto na efetivação. `ACTIVE` comercial não basta enquanto a ativação original obrigatória ainda estiver pendente. O `OnDemandPlan` deve pertencer à mesma `Subscription` comercial inferida pelo `SubscriptionPlanVersion` contratado; plano sob demanda de outra Subscription comercial é rejeitado. Ela referencia esse CustomerPlan e o `OnDemandPlan`, cria uma `CollectionRequest` sujeita à `payment_completion_window` e, depois da cobrança confirmada e nova validação dessas condições, cria somente `DIRECT_CREDIT`/lote persistente na Wallet. Não possui ciclo, renovação ou entitlement próprios e não altera versão, recorrência, âncora ou plano principal. Saldo zero não encerra CustomerPlan nem impede a compra quando ele continua elegível. `PAST_DUE`/`RENEWAL_INACTIVE`, `EXPIRED`, `CANCELED` e `REVOKED` não podem iniciar nem efetivar nova compra OnDemand, ainda que a Wallet tenha saldo. Isso só veda a nova compra: consumo de crédito já disponível segue a elegibilidade `CREDIT_STRICT` própria. CustomerPlan inativo, ativação pendente, versão revogada, Subscription comercial diferente, expiração da solicitação ou confirmação ausente não produzem crédito.
 
-Cada oferta possui `subscription_model` imutável após publicação. O contrato aceita exatamente os três valores abaixo; não existe um quarto modelo `HYBRID`. Recorrência não é atributo do Plan: a `CustomerSubscription` define `renewal_mode = RECURRING | NON_RENEWING`, regra/âncora e política de retentativas.
+Na V1, um CustomerPlan comercialmente `ACTIVE` e com `activation_status = ACTIVATED` pode acessar qualquer `OnDemandPlan` publicado e não revogado pertencente à mesma Subscription comercial. Não há allowlist por `SubscriptionPlanVersion` e não há acesso a OnDemandPlan de outra Subscription comercial. Essa compatibilidade e a ativação são verificadas antes de criar a `CollectionRequest`, sem transformar o adicional em plano de adesão ou entitlement.
 
-- `CREDIT_STRICT`: aceita somente Products `CREDIT_METERED`; exige `renewal_mode = RECURRING` e um Plan com `granted_credit_units > 0`. Falha definitiva da renovação suspende todos os Products mesmo com saldo restante. Antes do vencimento, saldo insuficiente bloqueia o Product, mas não cancela a assinatura.
-- `CREDIT_FLEXIBLE`: aceita Products `CREDIT_METERED` e `ENTITLEMENT_ONLY` na mesma oferta, exige `renewal_mode = RECURRING` e um Plan com `granted_credit_units > 0`. Falha da renovação deixa o estado comercial inadimplente, mas preserva entitlement até cancelamento. Cada Product decide o acesso: `ENTITLEMENT_ONLY` continua disponível; `CREDIT_METERED` continua somente enquanto `balance_credit_units > 0`.
-- `ENTITLEMENT_ONLY`: aceita somente Products `ENTITLEMENT_ONLY` e usa Plan com `granted_credit_units = 0`. A Subscription pode ser `RECURRING`, no qual cada renovação mantém o acesso e a falha definitiva o suspende, ou `NON_RENEWING`, no qual um único pagamento confirmado ativa o entitlement sem prazo final.
+### 4.10 Subscription, SubscriptionPlanVersion, OnDemandPlan e CustomerPlan
+
+`Subscription` é o agregado comercial raiz, como `One Vibe Pro`, e possui catálogo próprio de `SubscriptionPlanVersion` e `OnDemandPlan`. Outra Subscription comercial possui catálogo separado. Ela não cobra, confirma pagamento nem movimenta Wallet. Na V1, ela é disponível no instante da criação e não possui máquina de estados: não há rascunho, publicação posterior, ativação posterior, pausa, arquivamento ou revogação da Subscription raiz.
+
+Hierarquia canônica:
+
+```text
+Subscription comercial
+├── SubscriptionPlanVersion (oferta aderível)
+└── OnDemandPlan (crédito extra)
+
+CustomerPlan ──> SubscriptionPlanVersion ──> Subscription comercial
+```
+
+`Subscription` identifica o catálogo comercial; `SubscriptionPlanVersion` é o plano de assinatura versionado desse catálogo; `OnDemandPlan` é o adicional de crédito desse mesmo catálogo; e `CustomerPlan` é o agregado individual rico do customer. O CustomerPlan não persiste `subscription_id`: essa relação é sempre derivada pelo plano contratado. A disponibilidade de adesão, troca e renovação é decidida exclusivamente pelas `SubscriptionPlanVersion` pertencentes à Subscription e pela revogação de cada versão; a raiz não oferece controles de lifecycle para isso.
+
+Cada `Subscription` possui `subscription_model` imutável desde a criação, quando já se torna disponível; o contrato aceita exatamente os três valores abaixo e não existe um quarto modelo `HYBRID`. A criação de `SubscriptionPlanVersion` compõe dimensões explícitas de modelo comercial, recorrência, admissão e meios aceitos; essa composição substitui tipos rígidos de plano e pode ganhar novas dimensões/valores em versão futura sem reclassificar os planos já publicados.
+
+- `CREDIT_STRICT`: único perfil publicável na V1; aceita somente Products `CREDIT_METERED`. Um Plan pode ser gratuito ou pago, e sua recorrência é uma dimensão enumerada própria. Falha definitiva/expiração de renovação paga coloca a renovação em condição inativa, sem novo ciclo, cobrança automática ou franquia nova, mas não revoga o uso de créditos já disponíveis. Consumo só é aceito se mantiver o saldo maior ou igual a zero.
+- `CREDIT_FLEXIBLE`: capacidade futura não ativável/comercializável na V1. Quando habilitada em versão posterior, aceita Products `CREDIT_METERED` e `ENTITLEMENT_ONLY` na mesma oferta.
+- `ENTITLEMENT_ONLY`: capacidade futura não ativável/comercializável na V1. Quando habilitada em versão posterior, aceita somente Products `ENTITLEMENT_ONLY`.
 
 Matriz normativa:
 
 | `subscription_model` | Nome funcional | Plano base | Products permitidos | Wallet | Regra de acesso |
 | --- | --- | --- | --- | --- | --- |
-| `CREDIT_STRICT` | recorrente de créditos estrita | obrigatório, com concessão de créditos após pagamento confirmado | somente `CREDIT_METERED` | saldo é verificado durante o período ativo | bloqueia todos os Products mesmo com créditos restantes |
-| `CREDIT_FLEXIBLE` | recorrente de créditos flexível | obrigatório, com concessão de créditos após pagamento confirmado | `CREDIT_METERED` e/ou `ENTITLEMENT_ONLY` | saldo é verificado somente por cada Product medido | após falha, Products sem medição continuam; Products medidos exigem `balance_credit_units > 0` |
-| `ENTITLEMENT_ONLY` | somente por entitlement | Plan com zero créditos; Subscription `RECURRING` ou `NON_RENEWING` | somente `ENTITLEMENT_ONLY` | não consulta saldo; cada pagamento gera lançamento zero na customer wallet | recorrente bloqueia se não renovar; não renovável ativa sem vencimento |
+| `CREDIT_STRICT` | assinatura estrita com créditos independentes | preço, recorrência e `granted_credit_units` como franquia-base do ciclo; Voucher/Cupom/Compensation/OnDemand continuam fontes separadas | somente `CREDIT_METERED` | saldo é verificado para uso, inclusive após renovação inativa | falha de renovação bloqueia apenas novo ciclo/franquia/cobrança automática; crédito já disponível continua utilizável |
+| `CREDIT_FLEXIBLE` | capacidade futura | regras comerciais e de crédito a definir separadamente | `CREDIT_METERED` e/ou `ENTITLEMENT_ONLY` | regra futura | não ativável na V1 |
+| `ENTITLEMENT_ONLY` | capacidade futura | preço e recorrência sem créditos embutidos | somente `ENTITLEMENT_ONLY` | não consulta saldo | não ativável na V1 |
 
 Exemplos de decisão:
 
-- `CREDIT_STRICT`: a Wallet ainda tem 40 créditos, mas a renovação falhou após todas as tentativas; `access_allowed = false` por `SUBSCRIPTION_PAYMENT_REQUIRED`.
+- `CREDIT_STRICT`: a Wallet ainda tem 40 créditos e a única tentativa comercial de renovação falhou definitivamente; `renewal_status = RENEWAL_INACTIVE`, mas `access_allowed = true` para Product habilitado enquanto o débito couber no saldo. Não há novo ciclo, cobrança automática ou franquia nova.
 - `CREDIT_FLEXIBLE`: a renovação falhou e a Wallet tem 40 créditos; Products medidos permanecem disponíveis até o saldo deixar de ser positivo, enquanto Products `ENTITLEMENT_ONLY` continuam disponíveis até cancelamento. Não há concessão de novos créditos sem pagamento.
 - `ENTITLEMENT_ONLY` recorrente: a renovação está confirmada; `access_allowed = true` sem ler Wallet. Se falhar definitivamente, `access_allowed = false`.
 - `ENTITLEMENT_ONLY` vitalício: o único pagamento é confirmado, ativa sem crédito e persiste `next_renewal_at = null` e `entitlement_ends_at = null`; não existe scheduler de renovação.
@@ -421,49 +461,176 @@ Exemplos de decisão:
 
 “Híbrida” é somente um caso de uso de `CREDIT_FLEXIBLE`, não enum, entidade, estado ou quarto perfil. Ela ocorre quando a mesma oferta flexível inclui ao menos um Product `CREDIT_METERED` e um `ENTITLEMENT_ONLY`. A API aplica a regra de cada Product individualmente: o primeiro depende de saldo; o segundo depende apenas do entitlement persistente até cancelamento. Uma oferta `CREDIT_FLEXIBLE` contendo apenas Products medidos continua sendo o mesmo modelo.
 
-Cada `CustomerSubscription` referencia exatamente um `SubscriptionPlanVersion` vigente usado em sua ativação e, se recorrente, em cada renovação. O mesmo Plan descreve preço e créditos; a Subscription decide se ele será cobrado novamente. Outros Plans da oferta podem ser comprados sob demanda para créditos extras, sem alterar ou quitar a renovação.
+Cada `SubscriptionPlanVersion` pertence a uma única `Subscription` comercial e é a única oferta aderível: cria e mantém um `CustomerPlan`. Cada `OnDemandPlan` também pertence a uma única Subscription comercial, mas não é aderível nem é `SubscriptionPlanVersion`. O `CustomerPlan` referencia diretamente o `SubscriptionPlanVersion` que estava ativo e não revogado em sua ativação; a Subscription comercial é inferida por esse plano, sem campo redundante no CustomerPlan. Quando recorrente, ele usa essa versão em cada renovação enquanto ela permanecer não revogada. Na V1, ele pode nascer comercialmente `ACTIVE` com ativação ainda pendente: em plano pago, entitlement e `activation_status = ACTIVATED` só se tornam efetivos após a primeira confirmação definitiva do cartão, inclusive após eventual autenticação adicional exigida pelo emissor; em `FREE` que exige cartão, isso ocorre após a confirmação definitiva do setup/validação; e em `FREE` de adesão livre ocorre imediatamente. Plano gratuito não gera cobrança. O Plan descreve a composição comercial; o CustomerPlan materializa os períodos e resultados dessa composição, sem poder alterá-la.
 
 Cada `SubscriptionPlanVersion` é imutável depois de publicado e define:
 
-- `plan_version_id`, `offering_id`, nome e vigência;
-- preço comercial em unidade monetária inteira mínima e `currency` ISO 4217; esses campos pertencem somente ao catálogo comercial, nunca à Wallet;
-- `granted_credit_units`, inteiro não negativo aplicado a cada pagamento confirmado que use essa versão do Plan;
+- `plan_version_id`, `subscription_id`, nome e vigência;
+- `commercial_model`, enum `FREE | PAID`: `FREE` não possui cobrança, moeda ou valor; `PAID` exige `currency` ISO 4217 e valor monetário inteiro mínimo estritamente maior que zero. Não existe plano `PAID` de valor zero. Validação de cartão ou autorização de valor zero não é cobrança nem preço;
+- `recurrence`, enum de V1 `NONE | WEEKLY | MONTHLY | QUARTERLY | ANNUALLY`. `NONE` é contratação única; os demais valores são recorrentes. O enum é uma escolha deliberada da V1 e pode ser estendido em versão futura sem criar tipos rígidos de plano;
+- não possui duração, data de expiração nem término automático configurável. A recorrência somente define se existem ciclos/renovações futuras; `NONE` não cria cobrança nem ciclo futuro e não encerra o CustomerPlan pela passagem do tempo;
+- `granted_credit_units`, inteiro não negativo de créditos-base da assinatura por ciclo. Zero representa entitlement sem créditos-base; valor positivo é concedido no máximo uma vez por ciclo materializado, nunca por Voucher/Cupom;
+- `admission_policy_id`, referência à política versionada que controla a criação da assinatura;
+- meios aceitos pelo plano quando houver cobrança ou validação. Na V1, o único meio permitido é `CARD` tokenizado via provedor; Pix, boleto e outros permanecem futuros e não podem ser ativados;
 - conjunto versionado de `product_id` habilitados;
-- estado `DRAFT`, `SCHEDULED`, `ACTIVE` ou `RETIRED`.
+- estado `DRAFT`, `SCHEDULED`, `ACTIVE`, `RETIRED` ou `REVOKED`. `REVOKED` é uma revogação administrativa terminal da versão publicada, distinta de retirar uma versão ainda não contratável do catálogo.
 
-`CustomerSubscription` representa a adesão do customer a uma versão do plano:
+`SubscriptionPlanVersion` é a regra de produto versionada: governa modelo comercial, preço, recorrência, política de admissão e meios aceitos. A recorrência pertence exclusivamente a essa versão do plano. Depois de publicada, a versão é imutável: não se edita preço, créditos, recorrência, admissão, meios aceitos ou Products; uma oferta comercial nova exige criar outra versão/plano. Uma versão nunca expira pela passagem do tempo; só fica indisponível por sua revogação administrativa.
 
-- `subscription_id`, `customer_id`, `plan_version_id`;
-- `renewal_mode`, enum `RECURRING` ou `NON_RENEWING`;
-- em `RECURRING`, regra declarativa, âncora UTC, máximo de tentativas, intervalos, janela final e consequência da falha;
-- `unexpected_payment_policy`, enum `MANUAL_REVIEW` ou `AUTO_REFUND`, versionada e copiada para cada solicitação de cobrança;
-- estado comercial derivado de eventos `PENDING`, `ACTIVE_PAID`, `PAST_DUE`, `PAUSED`, `EXPIRED` ou `CANCELED`;
-- início, fim opcional e referências comerciais externas;
-- próximo período somente em `RECURRING` e histórico append-only de ativação, pausa, retomada, troca de plano e cancelamento.
+`OnDemandPlan` possui ao menos `on_demand_plan_id`, `subscription_id`, quantidade positiva de `credit_units` e estado de publicação/revogação. Seu `subscription_id` referencia a mesma Subscription comercial que delimita a compra; ele não possui `recurrence`, política de admissão, ciclo ou estado de assinatura. Na V1, somente um OnDemandPlan publicado e não revogado da mesma Subscription comercial do CustomerPlan é comprável.
 
-Subscription é camada de regra e entitlement. Ela informa o modelo comercial, a recorrência, a concessão prevista e os Products permitidos, mas nunca executa cobrança. Um domínio de Billing cobra e confirma o pagamento. Somente uma confirmação confiável pode solicitar a transação `SUBSCRIPTION_PAYMENT` na `customer_wallet`, com o delta persistido pelo plano, inclusive zero.
+#### Revogação administrativa de `SubscriptionPlanVersion`
 
-`PaymentCreditGrant` liga toda confirmação de pagamento ao lançamento da Wallet, inclusive quando o plano concede zero. Possui chave única `(subscription_id, billing_period_start_or_purchase_id)` e também `billing_payment_id` globalmente único. Ele persiste o instantâneo de `plan_version_id`, período/compra, `granted_credit_units >= 0`, Products contratados e referencia exatamente uma `CustomerWalletEntry` `SUBSCRIPTION_PAYMENT` com o mesmo delta. Uma segunda chamada externa para aplicar a confirmação retorna `409` e não repete o lançamento; eventos internos duplicados convergem sem novo efeito e são apenas reconhecidos pelo consumidor.
+O operador autorizado pode revogar uma versão publicada, com razão, ator e instante auditáveis. A revogação de plano é terminal e tem efeito imediato sobre a oferta: bloqueia novas adesões/`CustomerPlan`, trocas para a versão e qualquer renovação futura dela. Não há migração ou substituição automática, nova cobrança, Voucher/Cupom, estorno, Compensation, e-mail ou outro outreach na V1.
+
+Ela não é a revogação administrativa de um `CustomerPlan`: esta última encerra imediatamente um vínculo individual em `REVOKED`; a revogação de plano preserva os vínculos já confirmados somente até o `current_period_end` do ciclo em andamento. No fim materializado, o CustomerPlan encerra de modo idempotente em `EXPIRED` com `end_reason = PLAN_REVOKED`, sem tentativa de cobrança, novo ciclo ou nova franquia-base. Créditos já disponíveis na Wallet permanecem sob suas regras de origem/lote, sem remoção, estorno ou Compensation automática. Também não se confunde com `cancel_at_period_end` solicitado pelo customer nem com `PAST_DUE`/`RENEWAL_INACTIVE` por falha de pagamento.
+
+Uma `CollectionRequest` de adesão, renovação, regularização, transição ou OnDemand que ainda esteja pendente para a versão revogada é terminalizada idempotentemente em `CANCELED` com `terminal_reason = PLAN_REVOKED`. A validação de efetivação confere que a versão continua não revogada, além de vínculo, valor, moeda, estado e prazo; webhook tardio dessa solicitação não pode efetivar ciclo, entitlement, crédito, troca de versão ou nova cobrança. Um pagamento externo sem solicitação ainda efetivável segue a trilha de `UnmatchedPaymentCase`/revisão manual, nunca uma reativação automática.
+
+Matriz de composição da V1:
+
+| Modelo comercial | Recorrência | Permanência do CustomerPlan | Admissão/início | Créditos-base | Cobrança futura |
+| --- | --- | --- | --- | --- | --- |
+| `FREE` | `NONE` | permanece ativo por tempo indeterminado, salvo transição explícita | livre ou exige cartão `CARD` já validado | uma vez na ativação, se positivo | não há cobrança automática |
+| `FREE` | `WEEKLY`, `MONTHLY`, `QUARTERLY` ou `ANNUALLY` | permanece ativo; ciclos não são prazo de término | livre ou exige cartão `CARD` já validado | ativação e cada virada de ciclo, se positivo | não há cobrança automática; a recorrência é calendário do direito, não preço |
+| `PAID` | `NONE` | permanece ativo por tempo indeterminado após a confirmação única, salvo transição explícita | exige pagamento inicial `CARD` definitivamente confirmado | uma vez após confirmação, se positivo | não há cobrança automática posterior |
+| `PAID` | `WEEKLY`, `MONTHLY`, `QUARTERLY` ou `ANNUALLY` | permanece ativo enquanto cada ciclo for renovado ou até transição explícita | exige pagamento inicial `CARD` definitivamente confirmado | uma vez por ciclo pago confirmado, se positivo | uma única tentativa comercial no cartão salvo, na data de cada renovação |
+
+São inválidas na V1: `PAID` sem moeda/valor positivo; `PAID` efetivar entitlement antes do primeiro pagamento confirmado; `FREE` com cobrança; qualquer meio ativo que não seja `CARD`; e criar nova cobrança para resolver uma resposta incerta.
+
+#### Exemplos normativos de composição e campanhas
+
+Um plano é composto por `commercial_model`, `recurrence`, política de admissão, meios aceitos e `granted_credit_units`. Voucher, Cupom e Compensation não são dimensões do plano. Os créditos-base são originados pelo ciclo materializado da assinatura e sua versão de plano; Voucher/campanha concede apenas bônus excepcional fora dessa franquia padrão. Nenhum plano possui duração ou expiração temporal configurável.
+
+- **FREE, adesão livre:** a política aprova o CustomerPlan sem cartão e sem `CollectionRequest`; não existe cobrança nem término automático por tempo, e o ciclo de ativação concede `granted_credit_units` uma única vez quando positivo.
+- **FREE, `CARD` validado, sem cobrança:** o CustomerPlan pode ficar comercialmente `ACTIVE` com `activation_status = PENDING_CARD_VALIDATION` enquanto o setup seguro ocorre no provedor. Essa validação não é preço, autorização de cobrança nem cobrança; somente o webhook assinado que a confirma muda para `ACTIVATED`, efetiva o entitlement `FREE` e permite OnDemand.
+- **FREE com ciclo de calendário:** um plano `FREE + MONTHLY`, por exemplo, materializa ciclos mensais de entitlement e, sem Stripe, concede a franquia `granted_credit_units` de cada ciclo uma única vez quando positiva.
+- **PAID + NONE:** o CustomerPlan é criado com `PENDING_INITIAL_PAYMENT`, gera uma única cobrança inicial `CARD` e efetiva o entitlement e a franquia `granted_credit_units` somente quando a confirmação definitiva o muda para `ACTIVATED`. Não há cobrança, ciclo ou término automático futuro.
+- **PAID recorrente:** um plano `PAID + MONTHLY` ou `PAID + ANNUALLY` exige a cobrança inicial confirmada e, em cada ciclo posterior, faz exatamente uma tentativa comercial no cartão salvo na data de renovação. Cada confirmação concede a franquia do ciclo uma única vez quando positiva. Timeout ou resposta incerta são reconciliados na mesma tentativa; nunca originam segunda cobrança.
+
+Campanhas promocionais são agregados próprios e podem manter uma relação opcional com `customer_plan_id`, `subscription_id` comercial e/ou `plan_version_id` somente como condição de elegibilidade, por exemplo “customer possui CustomerPlan ativo no plano X”. Essa relação não faz o plano conter, selecionar ou emitir Voucher/Cupom.
+
+- **Voucher inicial de campanha:** depois de aprovada/criada uma Subscription, a campanha verifica suas condições (inclusive plano ativo, se houver), emite um Voucher próprio e rastreável e o crédito só ocorre no resgate desse Voucher. A criação da Subscription, por si, não cria o Voucher.
+- **Cupom de campanha para cobrança futura:** uma campanha pode emitir um Cupom que habilita desconto ou condição numa futura cobrança `PAID`, conforme seu contrato próprio. O Cupom é avaliado na `CollectionRequest` elegível e não modifica preço, recorrência ou definição da `SubscriptionPlanVersion`; esse uso de desconto de cobrança requer o contrato de campanha/Billing correspondente antes de ser ativado.
+
+#### Política de admissão da assinatura
+
+`SubscriptionAdmissionPolicy` é uma política versionada, reutilizável e definida fora da precificação; o plano a referencia como uma dimensão de composição. Ela decide se uma adesão pode ser criada, sem alterar preço, cobrança, entitlement, Voucher, Cupom ou saldo. A política pode ser livre ou exigir fatos/evidências verificáveis, como e-mail ou identidade confirmados, ou uma referência antifraude para um cartão já validado pelo provedor. O sistema armazena somente a referência opaca e o resultado da validação; nunca dados sensíveis de cartão. Para `PAID` na V1, a política não substitui a confirmação definitiva do primeiro pagamento exigida antes de efetivar entitlement.
+
+Uma política reprovada retorna erro de admissão e não cria CustomerPlan. Quando a única pendência é a validação de cartão exigida por um plano `FREE`, ela cria o CustomerPlan com ativação pendente, sem entitlement, crédito ou OnDemand até o webhook assinado confirmar o setup. Uma campanha promocional é outro conceito: ela pode analisar o contexto da assinatura criada e, se suas próprias regras forem satisfeitas, emitir um Voucher rastreável. Nem a aprovação da admissão nem a criação da assinatura causam Voucher ou crédito automaticamente. Limites como “um único Voucher por customer” pertencem à campanha e só existem quando explicitamente definidos nela.
+
+`CustomerPlan` é o agregado individual rico do customer com uma `SubscriptionPlanVersion`. Ele mantém estado, datas, ciclos materializados, referências de cobrança, entitlement e efeitos de Wallet; não é uma mera join table e não escolhe nem redefine preço, recorrência ou admissão. Ele aponta diretamente ao plano contratado; a `Subscription` comercial é inferida pela relação `CustomerPlan → SubscriptionPlanVersion → Subscription` e não é armazenada redundante. A passagem do tempo isolada nunca encerra CustomerPlan:
+
+- `customer_plan_id`, `customer_id`, `plan_version_id`;
+- instantâneo de `commercial_model`, `recurrence`, `granted_credit_units`, política de admissão e meios aceitos da versão contratada;
+- para recorrência diferente de `NONE`, âncora calendária UTC preservada, períodos `[current_period_start, current_period_end)` derivados do enum e consequência da falha; em `PAID` há exatamente uma tentativa comercial na data de renovação calculada por essa âncora, sem antecipação ou retentativa automática;
+- `payment_completion_window`, política de comportamento da Subscription, distinta de qualquer carência de inadimplência/renovação: define por quanto tempo uma solicitação pode aguardar confirmação e é aplicada à contratação inicial `PAID`, renovação, regularização manual de renovação, transição paga e compra de `OnDemandPlan`;
+- `unexpected_payment_policy = MANUAL_REVIEW` na V1, versionada e copiada para cada solicitação de cobrança; ela exige avaliação operacional e nunca aciona refund local;
+- estado comercial derivado de eventos `ACTIVE` (inclusive enquanto aguarda a primeira confirmação), `ACTIVE_PAID`, `PAST_DUE`, `EXPIRED`, `CANCELED` ou `REVOKED`;
+- `activation_status`, separado do estado comercial e usado pela elegibilidade de OnDemand: `PENDING_CARD_VALIDATION` enquanto um plano `FREE` exige cartão ainda não confirmado; `PENDING_INITIAL_PAYMENT` enquanto um plano `PAID` aguarda confirmação definitiva; ou `ACTIVATED` depois de satisfeitas todas as condições obrigatórias. `FREE` com admissão livre entra diretamente em `ACTIVATED`. O estado comercial `ACTIVE` com ativação pendente não concede entitlement nem autoriza OnDemand;
+- `renewal_status`, derivado e separado do uso: `CURRENT` ou `RENEWAL_INACTIVE`. Falha definitiva ou expiração de `CollectionRequest` de renovação coloca `PAST_DUE`/`RENEWAL_INACTIVE` imediatamente, impede novo ciclo, franquia e cobrança automática, mas não é revogação de créditos já disponíveis;
+- início, `current_period_end`/fim materializado quando aplicável, pedido de cancelamento opcional e referências comerciais externas;
+- próximo período somente quando `recurrence != NONE` e histórico append-only de ativação, falha/regularização de renovação, troca de plano, cancelamento e revogação.
+
+CustomerPlan aplica no tempo a composição já publicada do plano e nunca a modifica silenciosamente. Ele pode ficar `ACTIVE`, pendente de pagamento, encerrado ou em outro estado comercial, sem adquirir uma recorrência própria. Na V1, seu encerramento decorre somente de transição explícita: cancelamento, revogação administrativa individual ou revogação da versão de plano ao fim do ciclo vigente; fim de ciclo, expiração de lote, `CollectionRequest` expirada, `PAST_DUE` ou passagem do tempo isolada não o encerram. Uma mudança comercial futura exige nova `SubscriptionPlanVersion` ou transição explícita e auditável de plano; nunca mutação implícita do CustomerPlan. Cada ciclo materializado possui identidade única por CustomerPlan + período/ativação e pode gerar no máximo uma entrada `SUBSCRIPTION_CREDIT`, vinculada tipadamente ao ciclo e à versão do plano. Um domínio de Billing cobra e confirma o pagamento de um plano pago; essa confirmação efetiva atomicamente entitlement e, quando positivo, a franquia-base na `customer_wallet`.
+
+#### Cálculo calendário dos ciclos da assinatura
+
+Para recorrência diferente de `NONE`, o CustomerPlan conserva uma âncora calendária em UTC. Ela é capturada quando a série de ciclos inicia e é copiada em cada ciclo materializado; renovação normal calcula o próximo período a partir dessa mesma âncora, sem a substituir pela data encurtada de um mês anterior. Upgrade, downgrade e regularização manual confirmada iniciam uma nova série e redefinem a âncora no instante efetivo já definido para cada fluxo. Todo período é o intervalo semiaberto `[current_period_start, current_period_end)`: início inclusivo, fim exclusivo, sem sobreposição; um evento exatamente no fim pertence ao próximo período.
+
+- `WEEKLY`: cada próximo fim é a âncora mais múltiplos de 7 dias, preservando dia da semana e horário UTC.
+- `MONTHLY`: preserva dia e horário UTC originais da âncora. Se o mês de destino não possuir esse dia, usa seu último dia; o cálculo seguinte continua referenciado ao dia original, voltando a ele assim que o mês comportá-lo. Exemplo: `31 jan → 28/29 fev → 31 mar → 30 abr → 31 mai`.
+- `QUARTERLY`: usa a mesma regra mensal para o mês obtido ao somar três meses por período à âncora preservada; mês curto não altera o dia-alvo dos trimestres seguintes.
+- `ANNUALLY`: preserva mês, dia e horário UTC. Uma âncora em 29 de fevereiro cai no último dia de fevereiro em ano não bissexto e volta ao dia 29 quando o ano de destino for bissexto.
+- `NONE`: não materializa nem agenda ciclo ou cobrança futura e não encerra o CustomerPlan pela passagem do tempo.
+
+O scheduler usa essa aritmética exclusivamente para materializar a virada de ciclo e, quando `PAID`, agendar a única cobrança na respectiva `current_period_end`; `FREE` materializa a virada/concessão sem Stripe. Não há prorrata, cálculo monetário adicional, Stripe Subscriptions ou deslocamento de fuso local nessa regra.
+
+#### Exclusividade da assinatura principal ativa
+
+Há no máximo um CustomerPlan principal em condição comercial ativa por `(customer_id, subscription_id)` da Subscription comercial inferida pelo plano contratado. Para esta regra, a condição `ACTIVE` inclui a realização paga `ACTIVE_PAID`; `PAST_DUE`/`RENEWAL_INACTIVE`, `EXPIRED`, `CANCELED` e `REVOKED` não ocupam a chave. Como `CustomerPlan` não armazena `subscription_id`, a implementação cria/bloqueia uma reserva relacional `ActiveCustomerPlanSlot(customer_id, subscription_id, customer_plan_id)`, derivada de `plan_version_id → SubscriptionPlanVersion → Subscription`, com unicidade em `(customer_id, subscription_id)`. Essa garantia transacional não introduz `subscription_id` redundante no CustomerPlan e não limita o customer a uma única Subscription comercial.
+
+A criação e qualquer transição que entre na condição ativa — inclusive confirmação inicial ou regularização manual — bloqueiam/verificam `ActiveCustomerPlanSlot` na mesma transação que materializa CustomerPlan, ciclo e efeitos. Duas adesões concorrentes com chaves de idempotência diferentes não podem vencer: uma cria/ativa o vínculo e a outra retorna `409 active_customer_plan_already_exists`, sem cobrança, ciclo, entitlement ou crédito novo. Repetição com a mesma `Idempotency-Key` preserva o contrato geral de `409 idempotency_key_already_used`; a API pode apontar o CustomerPlan ativo existente para consulta. Troca de plano não cria um segundo CustomerPlan: ela usa o vínculo que já ocupa a chave e altera sua versão somente pela transição auditável. `OnDemandPlan` referencia esse vínculo e cria somente sua `CollectionRequest`/crédito, nunca um CustomerPlan.
 
 Regras:
 
 - Subscription controla entitlement, mas nunca altera saldo diretamente;
-- `CREDIT_STRICT` suspende entitlement após falhar a janela de cobrança, mesmo com saldo positivo;
-- `CREDIT_FLEXIBLE` preserva entitlement após falha de renovação até cancelamento; em Product medido o acesso ainda exige `balance_credit_units > 0`, enquanto Product sem medição ignora saldo; inadimplência impede novos créditos daquele ciclo;
-- `ENTITLEMENT_ONLY` nunca altera o saldo, mas cada pagamento confirmado cria lançamento zero na customer wallet; em `RECURRING` suspende após falhar a renovação, e em `NON_RENEWING` ativa por prazo indeterminado após o pagamento único;
-- apenas pagamento confirmado aplica `granted_credit_units` do Plan, inclusive zero;
-- o crédito confirmado é aplicado mesmo que a Wallet esteja negativa: `-10 + 20 = +10`;
-- falha, pendência, estorno ou ausência de pagamento não geram crédito automaticamente;
-- pausa/cancelamento afetam entitlement conforme seu instante efetivo e não revertem créditos anteriores;
-- troca de plano cria nova referência versionada; não reescreve períodos, direitos ou concessões anteriores;
+- `payment_completion_window` não é carência de inadimplência nem política de falha de renovação; expirar uma solicitação encerra somente aquela solicitação, e a consequência comercial de uma falha de renovação continua sendo aplicada separadamente pela regra já publicada;
+- `CREDIT_FLEXIBLE` e `ENTITLEMENT_ONLY` permanecem capacidade futura não ativável na V1;
+- pagamento confirmado ativa ou renova o entitlement comercial e concede, uma única vez, `granted_credit_units` positivo do ciclo; nunca aplica Voucher ou Cupom;
+- falha, pendência, estorno ou ausência de pagamento não geram franquia-base, Voucher ou Cupom e não alteram a Wallet;
+- falha definitiva ou expiração de renovação muda a condição de renovação para inativa imediatamente, sem criar outro ciclo/tentativa; não muda, por si só, a autorização de consumir crédito já disponível;
+- cancelamento e revogação afetam entitlement conforme seu instante efetivo e não revertem créditos anteriores;
+- troca de plano é transição explícita, versionada e auditável; preserva o histórico e os lançamentos anteriores, mas pode reiniciar a âncora e o fim materializado do ciclo conforme a política V1 abaixo;
 - um Product `ENTITLEMENT_ONLY` ignora saldo; um Product `CREDIT_METERED` exige entitlement e saldo elegível;
-- Billing não define calendário, política de retries, entitlement ou quantidade de créditos; ele materializa e executa o calendário e os retries declarados pela Subscription.
+- Billing não define preço, calendário, política de retries, entitlement ou quantidade de créditos; ele materializa a composição publicada do plano. Para `FREE`, não cria cobrança; para `PAID`, executa a cobrança inicial e as renovações previstas.
+
+#### Regularização manual de renovação inativa
+
+Em `PAST_DUE`/`RENEWAL_INACTIVE`, não existe retry, carência automática ou pós-pago. O customer pode atualizar ou escolher cartão na superfície segura do provedor e iniciar explicitamente uma regularização. Essa ação cria uma nova `CollectionRequest` idempotente de propósito `RENEWAL_REGULARIZATION`, com novo `payment_expires_at`, nova idempotency key externa e correlação/metadata próprias; ela é distinta da solicitação falha ou expirada e nunca a reabre, reutiliza ou cobra novamente.
+
+Até a confirmação definitiva, o CustomerPlan permanece `PAST_DUE`/`RENEWAL_INACTIVE`: não há novo ciclo, franquia-base nem cobrança automática, embora o consumo de crédito já disponível continue sob a elegibilidade `CREDIT_STRICT`. Somente o webhook assinado que confirma a nova solicitação, após validar PaymentIntent, vínculo, valor, moeda, transição de estado e idempotência, retorna o CustomerPlan à condição `ACTIVE_PAID`/`CURRENT`, inicia um novo ciclo com âncora na efetivação e cria no máximo uma franquia-base integral do plano vigente. Não há concessão retroativa do período `PAST_DUE`; lotes de assinatura e OnDemand preservam suas regras próprias de expiração/persistência.
+
+#### Cancelamento normal, pendência e revogação administrativa
+
+Não existe pausa nem retomada de `CustomerPlan` na V1, por customer ou por operação: não há estados, endpoints, transições ou mecanismo que congele ciclo, créditos ou cobrança. Os caminhos de interrupção/encerramento relevantes são cancelamento normal `cancel_at_period_end`, revogação administrativa e falha de renovação seguida de regularização manual; troca de plano continua sendo a transição comercial distinta já definida.
+
+Na V1, cancelamento normal solicitado pelo customer de um `CustomerPlan` recorrente significa `cancel_at_period_end`: desabilita a próxima renovação e qualquer `CollectionRequest` futura, mas não encerra o ciclo já confirmado. Até `current_period_end` — ou a data final materializada do ciclo atual — o CustomerPlan permanece `ACTIVE`, mantém o entitlement, pode consumir saldo conforme `CREDIT_STRICT` e, se `activation_status = ACTIVATED`, pode iniciar/efetivar compra `OnDemandPlan` publicado/não revogado da mesma Subscription comercial. Cancelamento normal não gera estorno automático, não remove créditos e não cria Compensation.
+
+No fim desse ciclo confirmado, a transição idempotente usa `CANCELED` como estado terminal canônico: não materializa novo ciclo, não cria nova `CollectionRequest` nem concede créditos-base. Repetir o pedido de cancelamento apenas retorna o mesmo agendamento/estado; nunca antecipa o término por acidente.
+
+`PENDING_PAYMENT` é estado de solicitação/contratação ainda não confirmada, distinto de cancelar um CustomerPlan `ACTIVE` em período confirmado. Cancelar nessa fase encerra apenas a `CollectionRequest`/intenção pendente de forma idempotente, sem entitlement, ciclo efetivo ou crédito; ela não é reaberta e cliques posteriores preservam as regras de idempotência e prevenção de cobrança duplicada. Uma nova contratação posterior segue como nova intenção conforme a política de expiração já definida.
+
+Revogação administrativa individual é ação distinta, restrita a operador autorizado e auditada com razão, ator, instante e referências correlatas. Ela é a transição de maior prioridade do CustomerPlan: no mesmo commit/serialização que o marca terminalmente como `REVOKED`, cancela ou terminaliza toda `CollectionRequest` ainda pendente vinculada a ele — adesão inicial, upgrade, downgrade que exija cobrança, regularização, renovação ou OnDemand — com `terminal_reason = CUSTOMER_PLAN_REVOKED`. A operação preserva as referências de cada solicitação e sua tentativa, mas nenhuma é reaberta, reutilizada ou substituída por nova cobrança.
+
+Todo comando não administrativo e toda efetivação de webhook revalidam o CustomerPlan bloqueado antes de produzir efeitos. Depois de `REVOKED`, regularização, upgrade, downgrade, cancelamento normal, OnDemand, renovação e qualquer outra transição comercial retornam `409 customer_plan_revoked`; webhook tardio ou corrida que perder a revogação apenas converge/audita a solicitação terminalizada e não pode efetivar plano, ciclo, entitlement, crédito ou cobrança nova. A revogação vence pendências ainda não efetivadas e não permite reativação.
+
+Ela não é cancelamento normal no fim do ciclo, nem revogação da `SubscriptionPlanVersion`, nem falha de renovação: somente a primeira encerra imediatamente este vínculo individual. Revogar não produz estorno, remoção de crédito, perda/edição de Wallet ou Compensation automática; qualquer consequência financeira continua excepcional, manual e submetida à política de Compensation/estorno externo da V1.
+
+#### Troca de plano no meio do ciclo
+
+Na V1, troca de plano é imediata após sua condição de entrada e reinicia a âncora na data/hora efetiva. `CustomerPlan` permanece o vínculo; `SubscriptionPlanVersion` é a regra escolhida; `CollectionRequest` é somente a cobrança que uma transição exigir. A nova versão deve pertencer à mesma Subscription comercial inferida pelo plano atual; a transição não cruza catálogos comerciais. A transição append-only registra versão anterior/nova, classificação `UPGRADE|DOWNGRADE`, ator, instante, âncora e `current_period_end` antigo/novo, além de referências de cobrança quando houver. Saldo de crédito nunca é estado de CustomerPlan.
+
+**Upgrade.** Criar uma `CollectionRequest` idempotente de propósito `PLAN_UPGRADE` para o valor integral do novo plano e aguardar o webhook assinado de confirmação. Só então o residual de assinatura existente é reclassificado para `ON_DEMAND` persistente, o CustomerPlan muda para a nova versão da mesma Subscription comercial, inicia novo ciclo na hora efetiva e concede integralmente `granted_credit_units` do novo plano como novo crédito de assinatura expirável. Não há desconto, bônus, Voucher/Cupom, prorrata, preço convertido, câmbio ou cálculo proporcional. Enquanto a cobrança estiver `PENDING_PAYMENT` ou se falhar/expirar, plano, ciclo, entitlement, Wallet e âncora permanecem inalterados; a mesma intenção segue as regras existentes de idempotência e não duplica cobrança.
+
+**Downgrade.** O residual de assinatura existente é imediatamente reclassificado para `ON_DEMAND` persistente, e então a nova versão é aplicada, sem `CollectionRequest`, cobrança ou concessão de crédito novo nesse momento, iniciando novo ciclo na hora da troca. A primeira cobrança do plano menor acontece apenas no fim desse novo ciclo; não há estorno, Compensation, desconto, Voucher/Cupom, preço convertido, câmbio ou proporcionalidade automáticos.
+
+Nos dois sentidos, o saldo residual de lotes de assinatura existentes é preservado por reclassificação para crédito sob demanda persistente e fica utilizável junto aos lotes `OnDemandPlan`; não permanece classificado como franquia de assinatura nem expira no fim do novo ciclo. Lotes `OnDemandPlan`, inclusive os reclassificados, não expiram porque houve renovação/troca. A reclassificação não cria crédito adicional nem muda o saldo da Wallet. A concessão adicional do upgrade é exclusivamente a franquia-base integral do novo ciclo confirmado; downgrade não concede franquia nova.
 
 ### 4.11 BillingConnection, CollectionRequest, BillingPayment e WebhookInbox
 
-Nosso sistema é sempre a fonte de verdade da assinatura. Provedores como Stripe, PayPal ou PagBank armazenam/tokenizam o meio de pagamento e processam cobranças iniciadas pelo Billing, sem governar o plano ou calendário local.
+Nosso sistema é sempre a fonte de verdade da assinatura. Na V1, um provedor externo de cartão armazena/tokeniza o meio e processa cobranças iniciadas pelo Billing, sem governar o plano ou calendário local. O sistema mantém somente IDs/tokens opacos e referências correlatas: PAN, CVV e dados sensíveis de cartão nunca transitam nem são persistidos aqui.
 
 O núcleo de Billing é agnóstico a provedor. Um provedor só participa depois que um adaptador implementa `BillingConnector`; “suportar qualquer provedor” significa poder adicionar conectores sem alterar Subscription, Wallet ou a máquina de estados normalizada, não integração automática sem implementação.
+
+#### Fluxo operacional de cartão na V1 (Stripe)
+
+A aplicação apresenta o plano e aplica suas regras; Stripe não seleciona, cria nem conhece `Subscription` comercial, `SubscriptionPlanVersion`, `OnDemandPlan` ou `CustomerPlan` do domínio. O frontend usa uma superfície segura do Stripe, como Checkout hospedado ou Payment Element, para que PAN e CVV sejam enviados somente ao provedor, nunca ao backend.
+
+**Etapa 1 — setup/validação do cartão.** O backend cria o contexto de setup, o cliente informa o cartão ao Stripe e a confirmação bem-sucedida produz um método de pagamento tokenizado/vaulted vinculado ao Customer Stripe. O domínio retém apenas IDs/referências opacas e metadados seguros. Essa confirmação prova que o cartão foi configurado/validado para uso futuro; não aprova nem garante qualquer cobrança futura. Na V1, o backend observa a confirmação definitiva por webhook/evento assinado do provedor; o retorno do navegador, isoladamente, não é autoridade. Para `FREE` que exige cartão, o CustomerPlan permanece `PENDING_CARD_VALIDATION` até esse evento; para `PAID`, setup válido ainda não remove `PENDING_INITIAL_PAYMENT`.
+
+**Etapa 2 — cobrança condicional.** Para `FREE` cuja admissão exige `CARD` validado, a etapa 1 basta: não existe cobrança; o webhook de setup muda o CustomerPlan para `ACTIVATED`, efetiva entitlement e concede sua franquia-base quando positiva. Para `PAID`, Billing cria uma cobrança separada, rastreável e idempotente no cartão salvo, no valor daquela contratação. Só a confirmação definitiva dessa cobrança muda `PENDING_INITIAL_PAYMENT` para `ACTIVATED` e efetiva atomicamente o entitlement e a franquia-base do ciclo. Uma cobrança posterior pode falhar por saldo, limite, recusa ou autenticação adicional apesar de o cartão estar salvo/validado; nesse caso, o plano pago e quaisquer efeitos dependentes do pagamento, inclusive a franquia-base, não são efetivados.
+
+**Correlação de cobrança e metadata.** Antes de chamar Stripe, Billing persiste a `CollectionRequest` interna e, ao criar o PaymentIntent, envia metadata opaca com ao menos `collection_request_id`, `customer_plan_id`, `plan_version_id`, `subscription_id` da Subscription comercial e `purpose` (`initial_subscription`, `renewal`, `renewal_regularization`, `top_up` ou `plan_upgrade`). `customer_id` ou `user_id` interno só pode ser incluído quando necessário e permitido pela política. Esses valores retornam nos eventos/webhooks e apoiam operação e conciliação. A autoridade continua sendo o registro Billing criado antes da chamada e seu vínculo persistido ao `payment_intent_id` do Stripe; metadata/description são redundância auditável, não autorização nem chave única de efetivação.
+
+Metadata e description não podem conter e-mail, nome, endereço, PAN/CVV, documento ou qualquer PII/dado sensível. Na efetivação, o backend valida assinatura do webhook, PaymentIntent, vínculo interno, valor, moeda e transição de estado antes de convergir idempotentemente cobrança, entitlement e a única concessão-base do ciclo.
+
+Renovação e recarga extra reutilizam a mesma fronteira: Billing, e não Stripe Subscriptions, decide data e valor e cria uma única cobrança rastreável no Stripe. A renovação segue a tentativa única na data prevista; a recarga extra é solicitada pelo usuário e só produz seu efeito após confirmação definitiva. Nenhuma dessas operações permite ao provedor criar a Subscription local ou mover a Wallet por conta própria.
+
+**Múltiplos cartões e escolha.** Um Customer pode ter várias referências `CARD` tokenizadas/vaulted. Em uma cobrança iniciada pela aplicação, o Payment Element ou Checkout seguro configurado para esse Customer exibe cartões salvos e permite selecionar um ou cadastrar outro. O frontend não lê PAN/CVV: recebe apenas a referência opaca selecionada e o backend a vincula à `CollectionRequest`. Após sucesso, o domínio pode registrar essa referência como método padrão daquele `CustomerPlan` para renovações. Escolher um cartão para a cobrança atual não troca esse padrão; a troca do padrão é uma ação explícita e auditável do CustomerPlan.
+
+**Recuperação manual da primeira cobrança `PAID`.** Setup/tokenização válida não garante a cobrança. A recuperação preserva a mesma `CollectionRequest` e a mesma intenção de pagamento do provedor como tentativa rastreável; trocar cartão ou voltar à superfície Stripe não cria uma segunda cobrança comercial.
+
+| Resultado normalizado | Ação permitida |
+| --- | --- |
+| `REQUIRES_ACTION` / autenticação adicional | levar o usuário de volta ao Stripe para autenticar o mesmo cartão e a mesma intenção; |
+| saldo insuficiente ou recusa recuperável | não efetivar o plano nem invalidar automaticamente o cartão; permitir que o usuário selecione cartão salvo ou cadastre outro no Stripe e continue a mesma intenção; |
+| cartão expirado, removido ou definitivamente inutilizável | solicitar novo cartão no Stripe, registrar a nova referência e tornar a anterior inativa conforme evento/estado do provedor; |
+| timeout, ausência ou estado incerto | preservar a mesma intenção e o estado conhecido; aguardar webhook assinado, sem criar outra cobrança ou iniciar consulta automática. |
+
+Essa recuperação on-session de uma cobrança pendente é interação manual do usuário, não uma nova tentativa automática de renovação. A V1 continua sem retentativa automática de renovação: uma falha na única tentativa do ciclo só pode ser resolvida por fluxo manual explícito, sem duplicar a cobrança original.
+
+`PaymentMethodBinding` mantém um estado normalizado mínimo: `ACTIVE/USABLE`, `REPLACED`, `DETACHED/INACTIVE` ou `INVALID`. Metadados exibíveis restringem-se a marca, últimos dígitos e expiração quando fornecidos pelo provedor. Atualização ou substituição do cartão pelo provedor é observada por evento assinado e auditada; falta de saldo não atualiza estado nem substitui token. A abstração continua agnóstica a provedor: cartões exigem setup/tokenização e cobrança futura, enquanto meios futuros podem não ser tokenizáveis. Na V1, somente `CARD` está ativo.
 
 Contrato mínimo de `BillingConnector`:
 
@@ -471,44 +638,54 @@ Contrato mínimo de `BillingConnector`:
 - criar ou localizar customer externo quando o provedor exigir;
 - criar sessão hospedada/SDK de setup e transformar o resultado em `PaymentMethodBinding` tokenizado;
 - criar cobrança a partir de `CollectionRequest`, com idempotency key fornecida pelo núcleo;
-- consultar cobrança por ID externo para reconciliação ativa;
 - normalizar respostas síncronas e webhooks para os mesmos estados/eventos internos;
-- cancelar autorização (`VOID`) e solicitar devolução (`REFUND`) quando declarado;
 - produzir erro tipado, retryability e IDs externos.
 
-Capacidades declarativas incluem, no mínimo, meios (`CARD`, `PIX`, `BOLETO`, wallet do provedor ou outros), `supports_setup_session`, `supports_vault`, `supports_off_session_charge`, `supports_payment_query`, `supports_webhook`, `supports_void`, `supports_full_refund`, `supports_partial_refund` e necessidade de ação do customer. O núcleo valida a operação contra essas capacidades antes de chamar o adaptador; ausência de capacidade nunca é tratada como sucesso.
+Na V1, as capacidades obrigatórias são `CARD`, `supports_setup_session`, `supports_vault`, `supports_off_session_charge` e `supports_webhook`; consulta automática por pagamento, polling e watchdog não são capacidades ativas. Capacidades de outros meios permanecem apenas no desenho extensível e não podem ser habilitadas. O núcleo valida a operação contra essas capacidades antes de chamar o adaptador; ausência de capacidade nunca é tratada como sucesso.
 
-Para Pix, boleto e meios semelhantes, a resposta normalizada pode expor instruções de pagamento, como QR Code, código copiável, linha digitável e vencimento, sem tornar esses campos parte de Subscription.
-
-- `BillingConnection`: tipo de adaptador, customer/merchant externo, capacidades como `supports_void`, `supports_refund`, meios suportados e configuração de webhook;
+- `BillingConnection`: tipo de adaptador, customer/merchant externo, meios suportados e configuração de webhook; capacidades de refund podem existir apenas como informação de conciliação futura, não autorizam ação local na V1;
 - `PaymentMethodBinding`: token/ID opaco do meio salvo no provedor, consentimento/mandato e estado;
-- `CollectionRequest`: cobrança criada pelo motor de Subscription, única por assinatura + período/compra, com valor/moeda do snapshot do Plan e snapshot de `unexpected_payment_policy`;
+- `CollectionRequest`: cobrança criada pelo motor de Subscription, única por assinatura + período/compra/transição/regularização, com `purpose` (`INITIAL_SUBSCRIPTION`, `RENEWAL`, `RENEWAL_REGULARIZATION`, `ON_DEMAND` ou `PLAN_UPGRADE`), valor/moeda do snapshot do Plan, snapshot de `unexpected_payment_policy`, `payment_expires_at` imutável e `terminal_reason` tipado quando encerrada. Revogação administrativa do CustomerPlan terminaliza qualquer solicitação pendente correlata em `CANCELED/CUSTOMER_PLAN_REVOKED`, impedindo nova tentativa ou efetivação tardia;
 - `CollectionAttempt`: execução individual e imutável de uma `CollectionRequest`, numerada desde 1, com `scheduled_at`, início/fim, conector, meio, chave idempotente, resultado normalizado e próxima ação; uma nova tentativa nunca sobrescreve a anterior;
 - `BillingPayment`: pagamento normalizado associado à solicitação e à tentativa que o originou, com estados `PENDING`, `REQUIRES_ACTION`, `CONFIRMED`, `FAILED` ou `CANCELED`;
 - `WebhookInbox`: evento bruto imutável, ID externo único, instante recebido/processado e resultado;
 - `ExternalSubscriptionBinding`: correlação técnica opcional; nunca torna a assinatura externa fonte de verdade.
 
-`UnmatchedPaymentCase` representa pagamento confirmado que não corresponde de forma inequívoca a uma `CollectionRequest` pendente. Guarda provedor, pagamento, valor/moeda, motivo tipado, assinatura candidata opcional, evidências, estado `OPEN`, `RECONCILED`, `REFUND_PENDING`, `REFUNDED` ou `CLOSED_WITH_JUSTIFICATION`, ator e histórico imutável.
+`UnmatchedPaymentCase` representa pagamento confirmado que não corresponde de forma inequívoca a uma `CollectionRequest` pendente. Guarda provedor, pagamento, valor/moeda, motivo tipado, assinatura candidata opcional, evidências, estado `OPEN`, `RECONCILED` ou `CLOSED_WITH_JUSTIFICATION`, ator e histórico imutável. Na V1 ele nunca dispara devolução automática.
 
-`RefundRequest` representa devolução idempotente e referencia o caso, `BillingPayment`, valor, moeda, motivo, capacidade usada (`VOID` antes de captura ou `REFUND` depois), IDs externos e estados `PENDING`, `PROCESSING`, `COMPLETED` ou `FAILED`. Unicidade impede devolver duas vezes o mesmo valor do mesmo pagamento; a soma devolvida nunca excede o capturado.
+Suspeita de webhook perdido, divergência de valor/moeda/vínculo ou situação que o evento não permita decidir entra em investigação manual diretamente no painel do provedor. A V1 não cria polling, watchdog, cron de consulta, fila automática de divergências nem autoefetivação a partir dessa suspeita. Se a investigação justificar uma consequência interna excepcional, o operador usa a operação manual e auditável aplicável, como Compensation; isso não transforma a exceção em cobrança, confirmação ou refund local automático.
 
-Resposta síncrona e webhook alimentam a mesma máquina de estados. Mesmo uma confirmação imediata é normalizada como o mesmo evento interno. Eventos duplicados ou fora de ordem não podem repetir concessão. Somente a primeira transição válida para `CONFIRMED` pode criar `PaymentCreditGrant`; falha agenda nova tentativa conforme a política persistida na assinatura. Billing não concede crédito diretamente: ele solicita a transação idempotente da `customer_wallet`.
+Quando um operador, por incidente, erro ou decisão comercial excepcional fora do produto, executa o estorno diretamente no provedor, Billing somente concilia o evento/resultado externo em um `ExternalRefundObservation` imutável, com IDs opacos do provedor, `BillingPayment`/`CollectionRequest` correlatos, valor, moeda, estado normalizado, instante e evidências. Isso não é uma solicitação de refund nem faz Billing disparar, repetir ou prometer devolução.
+
+#### Política de estorno da V1
+
+A V1 não oferece estorno como feature de produto: não há endpoint, tela, botão, solicitação pelo customer, regra automática ou política comercial de elegibilidade de refund. Cancelar uma Subscription não gera estorno automático. Em necessidade excepcional, o operador autorizado usa diretamente os controles do meio de pagamento/provedor (por exemplo, Stripe, PayPal ou outro) e o domínio local apenas recebe e concilia o fato externo. Billing não inicia, não duplica e não simula um refund.
+
+Após a conciliação de um estorno externo, uma Compensation pode ser criada manualmente, se o operador concluir que há consequência interna de créditos. Ela deve usar tipo versionado, motivo explícito, referências tipadas à cobrança/`CollectionRequest` e ao identificador externo do refund quando existir, além de metadata canônica limitada e sem PII/dados de cartão. A Compensation é decisão administrativa independente: o estorno não a cria automaticamente. Ela pode creditar ou debitar unidades, sempre como lançamento imutável; nunca altera ou apaga saldo diretamente.
+
+Voucher é benefício promocional de campanha; Cupom modifica condição/desconto de cobrança; Compensation é ajuste excepcional administrativo. Em `CREDIT_STRICT`, um débito compensatório deve respeitar as invariantes documentadas de saldo e estado. Se o caso não puder respeitá-las, ele permanece caso operacional explicitamente auditado, sem inventar pós-pago, saldo negativo ou fluxo automático.
+
+Resposta síncrona e webhook alimentam a mesma máquina de estados, mas a confirmação definitiva da V1 é efetivada por webhook assinado. Mesmo uma confirmação imediata é normalizada como o mesmo evento interno. Eventos duplicados ou fora de ordem não podem repetir renovação ou concessão-base. Falha definitiva informada pelo provedor encerra a única tentativa comercial do ciclo; timeout, ausência ou resposta incerta preservam a solicitação e jamais criam nova cobrança, cancelamento ou consulta automática. Depois de validar a confirmação, Billing solicita a transação idempotente que efetiva o ciclo e sua franquia-base na `customer_wallet`.
 
 #### 4.11.1 Orquestração durável de cobranças e retentativas
 
-`CustomerSubscription` é dona da intenção comercial: regra e âncora de recorrência, janela de renovação e política de retentativas, incluindo quantidade máxima, intervalos declarativos e condição de encerramento. Ao abrir um período, esses valores são copiados para a `CollectionRequest`; alterações posteriores na assinatura só afetam períodos futuros.
+`CustomerPlan` é dono da intenção comercial: regra e âncora de recorrência, consequência da falha e `payment_completion_window`. Esta última é a janela de conclusão da solicitação de cobrança, não uma carência de inadimplência/renovação. Na V1, a política é fixa: uma única tentativa comercial exatamente na data de renovação, sem tentativa antecipada nem retentativa automática. Ao abrir um período ou uma compra sob demanda, esses valores são copiados para a `CollectionRequest`; alterações posteriores no CustomerPlan só afetam solicitações futuras.
 
-Billing é dono da execução operacional. Um scheduler durável encontra solicitações vencidas por `next_action_at`, adquire lease/lock, cria a próxima `CollectionAttempt` e chama o conector com uma chave idempotente estável. Reinício do processo, execução concorrente do scheduler ou timeout externo não pode criar duas tentativas lógicas para o mesmo número nem duas cobranças efetivas. A unicidade mínima é `(collection_request_id, attempt_number)` e a chave enviada ao provedor deriva dessa identidade.
+Billing é dono da execução operacional. Um scheduler durável apenas encontra ações comerciais já agendadas, como a única tentativa na data de renovação calculada pela âncora UTC preservada ou a expiração comercial em `payment_expires_at`; ele materializa as viradas de ciclo com a regra calendária do CustomerPlan e adquire lease/lock antes de chamar o conector com uma chave idempotente estável quando a ação for a cobrança prevista. Ele não consulta o provedor, não faz polling/watchdog de webhook e não cancela por ausência de evento. Reinício do processo, execução concorrente do scheduler ou timeout externo não pode criar duas tentativas lógicas para o mesmo número nem duas cobranças efetivas. A unicidade mínima é `(collection_request_id, attempt_number)` e a chave enviada ao provedor deriva dessa identidade.
 
-Cada `CollectionRequest` expõe o progresso completo: total permitido, tentativas realizadas, tentativas restantes, última falha normalizada, `next_action_at` e estado `SCHEDULED`, `COLLECTING`, `AWAITING_CUSTOMER`, `PAID`, `RETRY_SCHEDULED`, `EXHAUSTED`, `CANCELED` ou `UNMATCHED`. Falhas classificadas como definitivas não são repetidas automaticamente; falhas transitórias seguem o snapshot da política. Meios que dependem de ação do customer, como Pix ou boleto, podem gerar nova instrução ou apenas aguardar vencimento conforme a capacidade e a regra do conector.
+Cada `CollectionRequest` expõe o progresso completo: total permitido, tentativas realizadas, tentativas restantes, última falha normalizada, `next_action_at`, `payment_expires_at` e estado `SCHEDULED`, `COLLECTING`, `PENDING_PAYMENT`, `PAID`, `EXHAUSTED`, `EXPIRED`, `CANCELED` ou `UNMATCHED`. `PENDING_PAYMENT` cobre a espera por confirmação ou autenticação adicional antes de `payment_expires_at`. `EXPIRED` é o estado terminal canônico para o prazo comercial de conclusão vencido sem confirmação; “abortada” é apenas linguagem/motivo operacional, não um segundo estado sinônimo. A expiração não é watchdog técnico de webhook nem cancelamento da Subscription. Na V1, total permitido é um; resultado incerto preserva a mesma tentativa e aguarda webhook assinado, e falha definitiva não é repetida automaticamente.
 
-Quando todas as tentativas se esgotam, Billing marca a cobrança como `EXHAUSTED`, publica o fato e solicita à Subscription a transição prevista pelo modelo contratado. Ele não decide por conta própria se o entitlement será suspenso ou preservado. Uma confirmação válida antes do encerramento cancela jobs futuros; confirmação posterior passa pela conciliação e não renova automaticamente outro período.
+Ao criar qualquer solicitação, CustomerPlan calcula e persiste `payment_expires_at`; Billing apenas o observa, não inventa nem estende o prazo. Até esse instante a solicitação pode ficar `PENDING_PAYMENT`, mas não efetiva novo entitlement, ciclo ou crédito. Após o prazo sem confirmação definitiva, uma transição atômica e idempotente marca `EXPIRED` e não ativa plano/ciclo nem concede crédito. A transição disputa o mesmo lock/compare-and-set da confirmação de webhook: confirmação válida antes do vencimento pode efetivar uma única vez; expiração já efetivada faz evento posterior convergir sem renovar ou creditar.
+
+Enquanto a mesma intenção do cliente estiver pendente e dentro da janela, cliques repetidos localizam e devolvem a mesma `CollectionRequest` e a mesma intenção externa, sem duplicar cobrança. Depois de `EXPIRED`, uma nova intenção explícita cria nova `CollectionRequest`; a expirada nunca é reaberta nem reutilizada como se fosse nova. Expirar solicitação `ON_DEMAND` encerra somente a solicitação e não altera o vínculo existente. Expirar renovação encerra a solicitação e aplica a regra comercial própria: `PAST_DUE`/`RENEWAL_INACTIVE`, sem cancelar a Subscription, revogar saldo ou criar nova cobrança.
+
+Quando a única tentativa comercial de renovação termina em falha definitiva reportada pelo provedor, ou sua `CollectionRequest` expira, Billing marca a cobrança como `EXHAUSTED`/`EXPIRED`, publica o fato e o CustomerPlan transita idempotentemente para `PAST_DUE` com `renewal_status = RENEWAL_INACTIVE`. Não cria novo ciclo, nova cobrança automática nem franquia-base. Essa condição não é revogação: Product habilitado e crédito já disponível continuam utilizáveis sob `CREDIT_STRICT`; Billing não decide débito de Wallet. Ausência de webhook não esgota tentativa nem cancela jobs. Evento válido tardio continua a ser processado pela máquina de estados; se o estado comercial já for terminal incompatível, ele é auditado/convergido sem renovar automaticamente outro período.
 
 #### 4.11.2 Eventos de Billing e fronteira com Notifications
 
-Billing mantém uma outbox transacional e publica eventos versionados depois de persistir a mudança de estado. O conjunto mínimo inclui `collection.created`, `collection.attempt_scheduled`, `collection.attempt_started`, `collection.awaiting_customer`, `collection.attempt_failed`, `collection.retry_scheduled`, `collection.exhausted`, `payment.confirmed`, `payment.unmatched`, `refund.requested` e `refund.completed`. Cada evento contém IDs correlatos, workspace/customer, assinatura e período quando aplicáveis, estado, motivo tipado e instante.
+Billing mantém uma outbox transacional e publica eventos versionados depois de persistir a mudança de estado. O conjunto mínimo inclui `collection.created`, `collection.attempt_scheduled`, `collection.attempt_started`, `collection.awaiting_customer`, `collection.attempt_failed`, `collection.retry_scheduled`, `collection.exhausted`, `collection.expired`, `payment.confirmed`, `payment.unmatched` e `external_refund.observed`. Cada evento contém IDs correlatos, workspace/customer, assinatura e período quando aplicáveis, estado, motivo tipado e instante.
 
-Regra normativa de cobertura: toda ação financeira ou integração externa observável do Billing produz pelo menos um evento de intenção antes do efeito externo e exatamente um resultado terminal correspondente depois, sem exigir eventos para cada passo puramente interno. Pares mínimos incluem cobrança `attempt.requested` → `attempt.succeeded|failed|pending`, consulta `reconciliation.requested` → `reconciliation.matched|unmatched|inconclusive`, concessão `credit_grant.requested` → `credit_grant.applied|failed`, e devolução `refund.requested` → `refund.completed|failed`. Estados intermediários podem gerar eventos adicionais, mas nunca substituem o resultado terminal.
+Regra normativa de cobertura: toda ação financeira ou integração externa observável do Billing produz pelo menos um evento de intenção antes do efeito externo e exatamente um resultado terminal correspondente depois, sem exigir eventos para cada passo puramente interno. Pares mínimos incluem cobrança `attempt.requested` → `attempt.succeeded|failed|pending`, processamento de webhook `webhook.received` → `webhook.applied|unmatched|rejected`, concessão `credit_grant.requested` → `credit_grant.applied|failed`, e estorno externo já realizado `external_refund.observed` → `external_refund.reconciled|inconclusive`. Estados intermediários podem gerar eventos adicionais, mas nunca substituem o resultado terminal.
 
 Todos os eventos usam um envelope comum com `billing_event_id`, `event_type`, `schema_version`, `occurred_at`, `workspace_id`, `correlation_id`, `causation_id`, identificadores da entidade/agregado, `attempt_number` quando aplicável e payload tipado. `correlation_id` acompanha toda a jornada da cobrança; `causation_id` aponta para o evento/comando que provocou o próximo passo. A unicidade de `billing_event_id` e a outbox transacional tornam a publicação ao menos uma vez, portanto consumidores devem deduplicar. A ordem é garantida somente dentro do mesmo agregado; consumidores não devem presumir ordem global.
 
@@ -516,7 +693,7 @@ O catálogo completo, os destinos e o transporte dos eventos — broker, webhook
 
 `collection.attempt_scheduled` é o fato apropriado para avisar antecipadamente que uma cobrança será tentada, com `attempt_number` e `scheduled_at`; ele pode ser emitido na criação da tentativa ou nos offsets de aviso declarados pela Subscription. `collection.attempt_started` significa que Billing efetivamente iniciou a chamada ao provedor e não deve ser usado como promessa antecipada. A política pode declarar `pre_charge_notice_offsets`, mas Notifications decide canal e conteúdo.
 
-Após iniciar uma tentativa, Billing classifica a resposta em três grupos. Uma confirmação terminal conclui a cobrança e cancela jobs restantes. Uma falha terminal, como recusa confirmada, persiste o motivo tipado e agenda a próxima tentativa permitida. Um resultado `PENDING` ou `REQUIRES_ACTION` não é tratado como falha apenas porque o pagamento ainda não apareceu: Billing aguarda webhook até o prazo, pode consultar o provedor quando suportado e só então decide falha, expiração ou nova tentativa. O scheduler trabalha sobre `next_action_at` persistido; ele não infere ausência de pagamento apenas pela passagem do cron.
+Após iniciar uma tentativa, Billing classifica a resposta em três grupos. Uma confirmação terminal só efetiva efeitos após o webhook assinado correspondente. Na V1, uma falha terminal, como recusa confirmada pelo provedor, persiste o motivo tipado e encerra o ciclo sem nova tentativa. Um resultado `PENDING` ou `REQUIRES_ACTION` não é tratado como falha apenas porque o pagamento ainda não apareceu: Billing aguarda webhook até o prazo comercial, sem consulta automática. O scheduler só executa ações comerciais persistidas; ele não infere ausência de pagamento pela passagem do cron nem atua como watchdog técnico.
 
 Billing decide que um fato financeiro ocorreu e que ele deve ser comunicado; não envia e-mail, WhatsApp ou mensagem de canal diretamente. Um domínio separado de Notifications consome os eventos, escolhe template, destinatário, canal e provedor, controla preferências e entrega. A aplicação também pode registrar webhooks de saída para receber os mesmos fatos. Falha de notificação não reabre cobrança, não repete pagamento e não altera conciliação; o consumidor possui idempotência própria pelo `billing_event_id`.
 
@@ -575,14 +752,14 @@ No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A strin
 - `compensation_type_id` e versão aplicada;
 - `signed_credit_units`, inteiro diferente de zero, positivo ou negativo;
 - descrição/justificativa obrigatória e imutável depois da submissão;
-- referências tipadas à transação original, Vale, Plano, pagamento, incidente ou outra origem quando aplicável;
+- referências tipadas à transação original, Vale, Plano, pagamento, `CollectionRequest`, incidente ou outra origem quando aplicável; para consequência de estorno externo, referência ao identificador do refund/provedor quando disponível;
 - identidade do solicitante, aprovador quando exigido, executor, observação opcional de execução e timestamps;
 - `compensation_batch_id` opcional;
 - estados `DRAFT`, `PENDING_APPROVAL`, `READY`, `EXECUTED`, `CANCELED` ou `REJECTED`.
 
 Criar, editar enquanto `DRAFT`, submeter, aprovar quando aplicável e executar são ações separadas e auditadas. Na submissão, um tipo sem aprovação obrigatória transita diretamente para `READY`; um tipo que exige aprovação transita para `PENDING_APPROVAL` e somente uma ação explícita de aprovação o leva a `READY`. Apenas `READY` pode ser executada. A execução exige `transaction_id` e `Idempotency-Key`, cria exatamente uma entrada `COMPENSATION` na `customer_wallet` com referência oficial à Compensation e muda seu estado para `EXECUTED` no mesmo commit. Nova execução ou reutilização de qualquer das chaves retorna `409`; alteração posterior do valor ou cancelamento depois de executada também são rejeitados.
 
-Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita/apaga lançamento anterior e não pode ser usada como atalho para consumo, pagamento de Plano ou resgate de Vale. `approval_required` controla apenas a passagem de estado do workflow.
+Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita/apaga lançamento anterior e não pode ser usada como atalho para consumo, pagamento de Plano ou resgate de Vale. Não é criada automaticamente por refund: um operador avalia o fato externo e decide se cria a ocorrência. Em `CREDIT_STRICT`, um débito compensatório somente executa quando respeita as invariantes de saldo/estado; caso contrário, permanece pendente como exceção operacional auditada, sem converter o domínio em pós-pago. `approval_required` controla apenas a passagem de estado do workflow.
 
 `CompensationBatch` é um agrupador operacional opcional para ações em massa. Guarda descrição/motivo comum, origem/importação, criador, contagens e estado, mas não movimenta saldo. Uma operação para cem customers materializa cem Compensations filhas, cada uma ligada a exatamente um customer, com valor, estado, execução e transação próprios. Falha de uma filha não desfaz as já executadas; retry atua apenas nas pendentes e nunca recria uma ocorrência executada.
 
@@ -603,11 +780,17 @@ Toda operação externa que possa gerar `CustomerWalletEntry` exige `transaction
 - `GET /v1/workspaces/{workspace_id}/customer-wallet/transactions/{transaction_id}` — localiza a operação no workspace informado e retorna lançamento, descrição, metadata canônica e referências tipadas; para consumo ainda pendente, retorna o `UsageEvent`/`ItemWalletEntry` mesmo sem lançamento global.
 - `GET /v1/workspaces/{workspace_id}/billing-config` — flags de crédito.
 - `PUT /v1/workspaces/{workspace_id}/billing-config` — alteração administrativa com versão esperada.
-- `GET /v1/workspaces/{workspace_id}/products/{product_id}/eligibility` — consulta não vinculante que retorna `usage_model`, estado comercial, entitlement efetivo e, somente para `CREDIT_METERED`, suficiência de créditos.
+- `GET /v1/workspaces/{workspace_id}/products/{product_id}/eligibility` — consulta não vinculante que retorna `usage_model`, estado comercial, `renewal_status`, entitlement efetivo e, somente para `CREDIT_METERED`, suficiência de créditos; `RENEWAL_INACTIVE` não bloqueia por si só o uso de saldo existente.
 - `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet` — medidor atual de item units, vínculo à customer wallet e próximo bloco.
 - `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement?cursor=...` — extrato completo de consumo do item, incluindo chamadas que não emitiram débito.
 - `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement/{item_wallet_entry_id}` — detalhe e correlação opcional com o débito na customer wallet.
 - `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/pricing-accumulators?price_version_id=...&cursor=...` — acumuladores vitalícios ou por ciclo.
+
+#### Decisão de elegibilidade de uso
+
+A elegibilidade de cada consumo `CREDIT_STRICT` avalia quatro conceitos distintos, nesta ordem prática: (1) **vínculo utilizável** — existe um `CustomerPlan` que não está pendente, encerrado, cancelado ou revogado; `ACTIVE`, `ACTIVE_PAID` e `PAST_DUE` são vínculos utilizáveis para saldo já disponível; (2) **entitlement de produto** — a versão de plano efetivada habilita o Product/Item solicitado; (3) **condição de renovação** — `CURRENT` ou `RENEWAL_INACTIVE`, exposta separadamente e sem decidir sozinha o uso; (4) **disponibilidade de crédito** — a `CustomerWallet` e a `ItemWallet` materializada permitem o débito calculado sem tornar o saldo negativo. O resultado principal é `customer_plan_not_active`, `entitlement_not_granted`, `insufficient_credit` ou `eligible`. `renewal_inactive` é condição/reason secundário informativo, não bloqueio de consumo quando os três demais requisitos permitem.
+
+`insufficient_credit` bloqueia somente o consumo cujo débito não cabe no saldo. Ele não cancela, encerra, rebaixa nem altera o status do CustomerPlan: é resultado derivado da Wallet, nunca estado persistido de CustomerPlan. Analogamente, `RENEWAL_INACTIVE` impede somente novo ciclo, cobrança automática e franquia nova; não revoga créditos já disponíveis, qualquer que seja sua origem/lote compatível. Assim, um CustomerPlan `PAST_DUE` com Product habilitado e saldo suficiente pode consumir em `CREDIT_STRICT`; se o saldo não basta, o resultado é `insufficient_credit`, não `customer_plan_not_active`. O customer pode regularizar manualmente cartão/cobrança pela UI segura do provedor e pelos fluxos já definidos, sem retentativa automática ou carência automática. A compra `OnDemandPlan` é uma decisão separada: exige CustomerPlan em condição comercial `ACTIVE`, `activation_status = ACTIVATED` e mesma Subscription comercial tanto na criação quanto na confirmação. Enquanto a ativação inicial estiver pendente, retorna `409 customer_plan_activation_pending` e não cria/efetiva `CollectionRequest`; `PAST_DUE`/`RENEWAL_INACTIVE` e estados terminais também não podem iniciar nem efetivar compra, mesmo com saldo existente. Ela não é condição para usar outro crédito já disponível.
 
 Resumo da hierarquia para um cluster com 10 Items faturáveis:
 
@@ -642,23 +825,25 @@ Resposta de elegibilidade:
 {
   "product_id": "prod_...",
   "usage_model": "CREDIT_METERED",
-  "eligible": false,
-  "reasons": ["INSUFFICIENT_CREDIT"],
-  "subscription": {
-    "commercial_status": "ACTIVE_PAID",
+  "eligible": true,
+  "reason": "eligible",
+  "customer_plan": {
+    "commercial_status": "PAST_DUE",
+    "renewal_status": "RENEWAL_INACTIVE",
+    "renewal_reason": "renewal_inactive",
     "subscription_model": "CREDIT_STRICT",
     "entitled": true
   },
   "wallet": {
     "wallet_type": "customer_wallet",
-    "balance_credit_units": "-10",
+    "balance_credit_units": "250",
     "version": "42"
   },
   "evaluated_at": "2026-08-25T20:00:00Z"
 }
 ```
 
-Razões iniciais: `PRODUCT_INACTIVE`, `SUBSCRIPTION_REQUIRED`, `SUBSCRIPTION_PAYMENT_REQUIRED`, `SUBSCRIPTION_CANCELED`, `PRODUCT_NOT_ENTITLED` e, apenas em `CREDIT_METERED`, `INSUFFICIENT_CREDIT`. Saldo igual a zero é elegível pela regra de créditos; saldo negativo não é. Em `ENTITLEMENT_ONLY`, `wallet` e `credit_sufficient` são nulos/omitidos. A resposta é informativa e pode mudar antes do consumo.
+Razões normativas principais: `customer_plan_not_active`, `entitlement_not_granted`, `insufficient_credit` ou `eligible`. `renewal_inactive` é razão secundária de renovação, presente com `PAST_DUE`, e pode coexistir com `eligible`; ela informa que não haverá ciclo/franquia/cobrança automática nova, não que o saldo existente foi bloqueado. Em `CREDIT_STRICT`, saldo zero só é elegível quando o débito calculado para o consumo também for zero; um consumo positivo que não caiba retorna `insufficient_credit`. Em `ENTITLEMENT_ONLY`, futuro/fora da V1, `wallet` e `credit_sufficient` são nulos/omitidos. A resposta é informativa e pode mudar antes do consumo.
 
 Cada item do extrato da `customer_wallet` expõe, no mínimo: sequência estável, `customer_wallet_entry_id`, instante, tipo, canal de origem, `signed_credit_units`, `balance_before_credit_units`, `balance_after_credit_units`, `transaction_id` e referências à `item_wallet` quando a origem for consumo. Não há campos de item balance, moeda ou dinheiro.
 
@@ -774,7 +959,7 @@ Requisição:
 }
 ```
 
-Toda chamada inédita válida cria `UsageEvent` e `ItemWalletEntry`. Se não completar bloco, retorna `201 Created` sem `Debit` e sem `CustomerWalletEntry`. Se completar bloco e `balance_after_credit_units` for zero ou positivo, cria o débito global e retorna `201`. Se completar bloco e o saldo da `customer_wallet` ficar negativo, persiste ambos os extratos e retorna `402 Payment Required`.
+Na V1, toda chamada válida que não leve a saldo negativo cria `UsageEvent` e `ItemWalletEntry`. Se não completar bloco, retorna `201 Created` sem `Debit` e sem `CustomerWalletEntry`; se completar bloco e `balance_after_credit_units` for zero ou positivo, cria o débito global e retorna `201`. Se o débito deixaria saldo negativo, retorna `409 insufficient_credit` sem persistir nenhum efeito da chamada. O `402` é reservado à futura capacidade `CREDIT_FLEXIBLE` e não é emitido na V1.
 
 Exemplo para bloco de 1.000 requests a 100 créditos, recebendo 1.012 com pendente inicial zero:
 
@@ -819,24 +1004,25 @@ Reutilizar a mesma `Idempotency-Key` retorna `409 idempotency_key_already_used`;
 ### 5.4 Créditos
 
 - `POST /v1/workspaces/{workspace_id}/credits/direct` — exige modo direto habilitado, `transaction_id`, `credit_units` positivo e `external_reference` opcional.
-- `POST /v1/subscription-offerings` e `POST /v1/subscription-offerings/{id}/plans` — catálogo administrativo e versões de planos.
-- `GET /v1/subscription-offerings/{id}` e `GET /v1/subscription-plans/{id}` — a oferta expõe modelos/Products permitidos; o Plan expõe preço comercial e `granted_credit_units`, sem recorrência.
-- `POST /v1/workspaces/{workspace_id}/subscriptions` — adere a uma versão de Plan e define `renewal_mode`; quando recorrente, recebe regra, âncora e política de retentativas. Não cobra nem credita.
-- `GET /v1/workspaces/{workspace_id}/subscriptions/{id}`;
-- `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/pause`;
-- `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/resume`;
-- `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/cancel`;
-- `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/payment-credit-grants` — integração interna do Billing após pagamento confirmado; exige `transaction_id`, `billing_payment_id` e período, mas usa `granted_credit_units` persistido no plano versionado.
+- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/on-demand-purchases` — compra adicional dentro de um CustomerPlan já comercialmente `ACTIVE` e com `activation_status = ACTIVATED`, não uma adesão. Exige versão não revogada e `OnDemandPlan` publicado/não revogado da mesma Subscription comercial; ativação pendente retorna `409 customer_plan_activation_pending` sem criar cobrança. A operação cria cobrança idempotente vinculada ao CustomerPlan e só credita a Wallet se todas essas condições ainda valerem na confirmação, sem criar CustomerPlan, ciclo, renovação, entitlement ou alterar recorrência/plano principal. `PAST_DUE`/`RENEWAL_INACTIVE`, estados terminais, versão revogada ou Subscription comercial diferente são rejeitados mesmo com saldo.
+- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/renewal-regularizations` — disponível para `PAST_DUE`/`RENEWAL_INACTIVE`; cria/retorna nova `CollectionRequest` idempotente de regularização, nunca reutiliza a tentativa terminal anterior e só reativa após webhook confirmado.
+- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/plan-transitions` — solicita `UPGRADE` ou `DOWNGRADE` para nova `SubscriptionPlanVersion` da mesma Subscription comercial; upgrade cria/retorna a única `CollectionRequest` pendente, downgrade aplica a transição imediata auditável e ambos reiniciam a âncora somente quando efetivados.
+- `POST /v1/subscriptions` e `POST /v1/subscriptions/{id}/plans` — catálogo administrativo de Subscription comercial, suas versões de plano de assinatura e seus OnDemandPlans. Criar a Subscription raiz a torna disponível imediatamente, sem endpoint ou estado posterior de publicação/ativação/pausa/arquivamento/revogação; versões publicadas de plano continuam não editáveis. Caso exista caminho histórico `/subscription-offerings`, ele é apenas alias de catálogo e não muda o domínio canônico.
+- `POST /v1/subscription-plans/{id}/revoke` — revoga administrativamente a versão, com razão auditável; bloqueia adesões, transições e renovações futuras, terminaliza solicitações pendentes sem efetivação e não revoga imediatamente os CustomerPlans já confirmados.
+- `GET /v1/subscriptions/{id}` e `GET /v1/subscription-plans/{id}` — catálogo comercial: a Subscription expõe seus `SubscriptionPlanVersion` e `OnDemandPlan` publicados; o plano de assinatura expõe a composição `FREE|PAID`, preço quando `PAID`, recorrência enumerada, política de admissão, meios aceitos e `granted_credit_units`, sem Voucher, Cupom ou duração/expiração temporal.
+- `POST /v1/workspaces/{workspace_id}/customer-plans` — única rota canônica de adesão: recebe `SubscriptionPlanVersion`, avalia a política de admissão e cria um CustomerPlan principal `CREDIT_STRICT`, depois de reservar `ActiveCustomerPlanSlot` para `(customer_id, subscription_id)` comercial derivado. `OnDemandPlan` não é aceito nessa rota nem pode criar CustomerPlan. `FREE` livre entra diretamente em `ACTIVATED`; `FREE` que exige `CARD` fica em `PENDING_CARD_VALIDATION` até webhook de setup válido, sem cobrança; e `PAID` fica em `PENDING_INITIAL_PAYMENT` até confirmação definitiva do pagamento inicial, inclusive após autenticação adicional. Os dois estados pendentes não efetivam entitlement, ciclo, franquia-base ou OnDemand. Se já existir CustomerPlan ativo na mesma Subscription comercial, ou se uma criação concorrente vencer a reserva, retorna `409 active_customer_plan_already_exists` sem nova cobrança, ciclo, entitlement ou crédito; Subscriptions comerciais distintas não conflitam.
+- `GET /v1/workspaces/{workspace_id}/customer-plans/{id}`. Caso uma API externa mantenha temporariamente o caminho histórico `/subscriptions`, ele é apenas alias de recurso de CustomerPlan e não muda a terminologia nem o modelo canônico;
+- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/cancel` — para recorrente confirmada, agenda `cancel_at_period_end`; em `PENDING_PAYMENT`, encerra somente a solicitação pendente. Não encerra o período confirmado nem dispara estorno/Compensation;
+- `POST /v1/admin/workspaces/{workspace_id}/customer-plans/{id}/revoke` — ação administrativa prioritária, com motivo, ator, instante e referências auditáveis. Serializa a transição para `REVOKED` e terminaliza em `CANCELED/CUSTOMER_PLAN_REVOKED` toda `CollectionRequest` pendente do vínculo; não dispara estorno/Compensation e não permite reativação;
 - `POST /v1/workspaces/{workspace_id}/billing-connections` e `GET /v1/workspaces/{workspace_id}/billing-connections/{id}` — configura adaptador e expõe endpoint de webhook;
-- `GET /v1/workspaces/{workspace_id}/billing-connections/{id}/capabilities` — expõe meios e operações efetivamente suportados pela conexão;
+- `GET /v1/workspaces/{workspace_id}/billing-connections/{id}/capabilities` — na V1 expõe somente capacidades de cartão;
 - `POST /v1/workspaces/{workspace_id}/billing-connections/{id}/payment-method-setup-sessions` — inicia tokenização, hosted fields ou checkout do provedor e devolve somente artefatos públicos necessários ao cliente;
-- `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET /v1/workspaces/{workspace_id}/payment-method-bindings` — conclui/lista vínculos entre customer, conexão e, opcionalmente, assinatura;
-- `POST /v1/workspaces/{workspace_id}/subscriptions/{id}/collection-requests` — cria/retorna solicitação idempotente; normalmente responde `202`;
-- `GET /v1/workspaces/{workspace_id}/collection-requests/{id}` — estado normalizado, tentativas, ação requerida e, quando aplicável, instruções seguras de Pix, boleto ou outro meio assíncrono;
+- `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET /v1/workspaces/{workspace_id}/payment-method-bindings` — conclui/lista vínculos entre customer, conexão e, opcionalmente, CustomerPlan;
+- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/collection-requests` — cria/retorna solicitação idempotente; normalmente responde `202`;
+- `GET /v1/workspaces/{workspace_id}/collection-requests/{id}` — estado normalizado da única tentativa comercial, ação adicional de cartão quando aplicável e resultado do processamento de eventos/webhooks;
 - `POST /v1/billing/webhooks/{connection_id}` — entrada de eventos por conexão;
-- `GET /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments?cursor=...` — fila operacional com motivo, evidências, capacidade de devolução e assinatura candidata;
+- `GET /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments?cursor=...` — fila operacional com motivo, evidências e assinatura candidata;
 - `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/reconcile` — vincula a uma `CollectionRequest` válida após revalidação completa;
-- `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/refund` — cria `RefundRequest` idempotente com valor, motivo e aprovação; rejeita quando o conector/meio não possui capacidade;
 - `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/close` — encerra sem devolução com justificativa auditável;
 - `POST /v1/vouchers/{voucher_id}/redeem` — fluxo promocional interno, com workspace beneficiado e `transaction_id`;
 - `POST /v1/coupons/redemptions` — aceita `coupon_id` ou `code`, workspace beneficiado, `transaction_id` e, no modo restrito, `unique_user_id`;
@@ -852,13 +1038,13 @@ Reutilizar a mesma `Idempotency-Key` retorna `409 idempotency_key_already_used`;
 Contratos de quantidade:
 
 - concessão direta recebe `transaction_id`, `credit_units` estritamente positivo e `external_reference` opcional;
-- Plan define preço comercial, `granted_credit_units` e Products; CustomerSubscription define se há renovação, calendário e retentativas. A adesão não recebe quantidade livre de créditos;
-- confirmação do Billing não recebe quantidade autoritativa: a API usa `granted_credit_units` da versão contratada e valida pagamento/período por referências idempotentes;
+- `SubscriptionPlanVersion` define a composição comercial (modelo `FREE|PAID`, preço quando pago, recorrência, admissão, meios e `granted_credit_units` não negativo); CustomerPlan materializa essa composição e seus ciclos;
+- confirmação do Billing valida pagamento/período por referências idempotentes e efetiva entitlement mais a única concessão-base positiva daquele ciclo;
 - criação administrativa de vale recebe `credit_units` estritamente positivo persistido no vale;
 - resgate de vale/cupom não recebe quantidade: usa `credit_units` do vale selecionado;
 - Compensation recebe `signed_credit_units` diferente de zero, tipo, descrição obrigatória, referências e ator; aprovação é exigida apenas pela política aplicada. Somente o endpoint de execução recebe `transaction_id` e movimenta a Wallet.
 
-Contratos de Wallet, consumo, vale, cupom e Compensation não aceitam moeda nem preço comercial. Apenas o catálogo `SubscriptionPlanVersion` armazena o preço monetário do plano, separado da Wallet. Caso uma compra direta externa origine créditos, o serviço comercial decide a quantidade antes de chamar esta API; no caso recorrente, a quantidade vem obrigatoriamente da versão do plano associada ao período confirmado.
+Contratos de Wallet, consumo, vale, cupom e Compensation não aceitam moeda nem preço comercial. Apenas o catálogo `SubscriptionPlanVersion` armazena preço monetário, recorrência e `granted_credit_units`, separados da Wallet. A franquia-base vem exclusivamente do ciclo materializado e da versão de plano; compras diretas, Voucher/Cupom e Compensation continuam fontes independentes com suas próprias regras.
 
 Enviar simultaneamente `coupon_id` e `code` é `422`. Código inexistente, desabilitado ou fora da validade não revela estoque além do necessário. Cupom sem vales retorna `409 coupon_exhausted`. Segundo usuário externo igual no mesmo cupom retorna `409 coupon_already_redeemed_by_user`. Reutilização de `Idempotency-Key` ou `transaction_id` retorna o conflito correspondente antes de qualquer novo resgate.
 
@@ -876,11 +1062,13 @@ Mapeamento mínimo:
 - `409 price_version_changed`: versão esperada divergente;
 - `409 coupon_exhausted` ou segundo resgate por usuário;
 - `409 feature_disabled`: crédito direto ou recorrência desabilitado;
+- `409 customer_plan_activation_pending`: condições obrigatórias da ativação inicial ainda não foram confirmadas; OnDemand não cria `CollectionRequest` nem crédito;
+- `409 customer_plan_revoked`: CustomerPlan foi revogado administrativamente; nenhuma transição comercial, `CollectionRequest` nova ou efetivação tardia é permitida;
 - `422`: quantidade, `credit_units`, faixas, período ou transição de estado inválidos;
 - `503 wallet_not_provisioned`: hierarquia materializada ausente/incompleta; nenhuma wallet ou entrada é criada pelo endpoint que detectou a falha;
-- `402`: somente recibo de débito persistido cujo `balance_after_credit_units` ficou negativo.
+- `409 insufficient_credit`: o débito necessário excederia o saldo disponível; não há `UsageEvent`, pendente, bloco, lançamento ou alteração de saldo.
 
-Nunca usar `402` para cupom esgotado, assinatura desabilitada ou falha técnica.
+`402` não é emitido na V1; ele permanece reservado à futura capacidade `CREDIT_FLEXIBLE`.
 
 `POST /usage-events` é permitido apenas para Product `CREDIT_METERED`. Product `ENTITLEMENT_ONLY` usa somente a consulta de elegibilidade; tentativa de registrar consumo retorna `409 product_not_metered` sem criar evento ou Wallet.
 
@@ -892,7 +1080,7 @@ Nunca usar `402` para cupom esgotado, assinatura desabilitada ou falha técnica.
 2. Validar forma básica sem consultar saldo.
 3. Abrir transação de banco e tentar inserir `IdempotencyRecord(customer_id, idempotency_key)` e reservar `(customer_id, transaction_id)`. Restrições únicas fazem uma chamada concorrente aguardar o commit ou rollback da dona das chaves.
 4. Se qualquer chave já existir após a espera, devolver o `409` específico sem executar o domínio nem reproduzir a resposta original.
-5. Validar produto/item, aplicabilidade ao cluster/escopo, entitlement do Product em uma `CustomerSubscription` ativa e estado `ACTIVE` da `customer_wallet` e `item_wallet` já materializadas. Product fora do plano retorna `403 product_not_entitled` sem registrar uso; Wallet ausente retorna `503 wallet_not_provisioned`. Este fluxo nunca cria Wallet.
+5. Validar produto/item, aplicabilidade ao cluster/escopo, entitlement do Product em um `CustomerPlan` utilizável (`ACTIVE`, `ACTIVE_PAID` ou `PAST_DUE`) e estado `ACTIVE` da `customer_wallet` e `item_wallet` já materializadas. `PAST_DUE`/`RENEWAL_INACTIVE` não bloqueia consumo de saldo existente. Product fora do plano retorna `403 product_not_entitled` sem registrar uso; Wallet ausente retorna `503 wallet_not_provisioned`. Este fluxo nunca cria Wallet.
 6. Bloquear a `ItemWallet` de `(customer_id, item_id)` e ler seu estado mais recente. Nesse instante, obter `accepted_at` do relógio do banco; essa ordem serial define versão ativa e fronteira de ciclo.
 7. Resolver a versão de preço ativa em `accepted_at` e conferir `expected_price_version_id`, quando enviado.
 8. Atribuir ao evento o intervalo cumulativo de item units e somar `item_units` uma única vez.
@@ -900,9 +1088,9 @@ Nunca usar `402` para cupom esgotado, assinatura desabilitada ou falha técnica.
 10. Para cada bloco completo, resolver `cycle_key` pela regra declarativa da respectiva versão em `accepted_at`. Bloquear os `PricingAccumulator` tocados em ordem lexicográfica de `(price_version_id, cycle_key)`, aplicar a faixa do intervalo acumulado e inserir um `BillingBlock` imutável.
 11. Inserir `UsageEvent` e exatamente uma `ItemWalletEntry`, atualizar contadores/pending da `ItemWallet` e associar os `BillingBlock` formados.
 12. Se nenhum bloco foi completado, persistir o resultado e as chaves de deduplicação com `customer_wallet_entry_id = null`; não bloquear nem criar entrada na `CustomerWallet`.
-13. Se houve blocos, bloquear a `CustomerWallet` pai já existente, somar `credit_units` dos blocos, inserir um único `Debit` e `CustomerWalletEntry`, atualizar `balance_credit_units` e ligar ambos os extratos aos mesmos blocos.
+13. Se houve blocos, bloquear a `CustomerWallet` pai e os `CreditLot` elegíveis, calcular o débito e alocar primeiro os lotes de assinatura que expiram no ciclo atual, depois os lotes persistentes. Se a soma residual disponível não cobrir o débito, abortar a transação inteira com `409 insufficient_credit`; caso contrário, inserir um único `Debit` e `CustomerWalletEntry`, `CreditLotAllocation` imutável por lote, atualizar residuais e `balance_credit_units` e ligar ambos os extratos aos mesmos blocos.
 14. Persistir `PricingAccumulator`, vínculos e resultado da operação no mesmo commit.
-15. Responder `201` quando não houve débito ou quando `balance_after_credit_units >= 0`; responder `402` somente quando houve débito e `balance_after_credit_units < 0`.
+15. Responder `201` para toda chamada aceita. A V1 não emite `402` para consumo.
 
 Não existe commit intermediário entre sensibilizar a `item_wallet` e, quando houver bloco, debitar a `customer_wallet`. Uma falha reverte evento, entrada do item, pendente, bloco, entrada de créditos e saldo. A consulta prévia de elegibilidade e as leituras dos extratos não participam desta transação.
 
@@ -912,30 +1100,32 @@ Crédito direto segue a ordem: idempotência, validação da flag, bloqueio da `
 
 Compensation possui duas fases. Criar/submeter/aprovar persiste somente o recurso e sua auditoria, sem bloquear ou movimentar a Wallet. Executar uma Compensation aprovada valida idempotência e estado, bloqueia a `CustomerWallet`, cria a única `CustomerWalletEntry`, atualiza o saldo, grava referências/recibo e marca `EXECUTED` no mesmo commit. Nenhuma dessas fontes toca `ItemWallet`.
 
-### 6.3 Crédito recorrente após pagamento confirmado
+### 6.3 Ativação e renovação após pagamento confirmado
 
-1. O motor de Subscription encontra período devido e cria uma única `CollectionRequest` por assinatura + período, usando o snapshot do plano.
-2. Um trabalhador cria `BillingPayment` e chama o adaptador com chave idempotente. A resposta pode ser pendente, exigir ação, confirmar ou falhar.
-3. A resposta síncrona é transformada no mesmo evento normalizado usado por webhook; o request HTTP não concede crédito por um caminho especial.
+1. A primeira adesão aceita exclusivamente uma `SubscriptionPlanVersion`: o CustomerPlan é criado comercialmente `ACTIVE` depois de aprovada a admissão, de confirmar que a versão está ativa e não revogada e de reservar atômica e exclusivamente `ActiveCustomerPlanSlot(customer_id, subscription_id)` derivado por `plan_version_id → SubscriptionPlanVersion → Subscription`; ele materializa seu ciclo inicial somente ao completar ativação. `OnDemandPlan` não é plano de adesão e não percorre esse fluxo. Se a reserva já estiver ocupada por outro CustomerPlan ativo da mesma Subscription comercial, a contratação falha com `409 active_customer_plan_already_exists`, sem `CollectionRequest`, ciclo, entitlement ou crédito. `FREE` de adesão livre entra diretamente em `ACTIVATED`, efetiva o ciclo/entitlement e, se positiva, `granted_credit_units` uma única vez. `FREE` que exige cartão fica `PENDING_CARD_VALIDATION` sem ciclo, entitlement, crédito ou OnDemand até o webhook assinado de setup; então efetiva uma vez. `PAID` fica `PENDING_INITIAL_PAYMENT`, cria uma única `CollectionRequest` com `payment_expires_at` imutável e só efetiva ciclo, entitlement e franquia-base após confirmação definitiva. Em cada renovação `PAID`, somente se a versão ainda não foi revogada, cria exatamente uma `CollectionRequest` na data de renovação, usando o snapshot do plano, o cartão tokenizado salvo e a mesma política de janela. `NONE` nunca cria cobrança futura. Uma compra `OnDemandPlan` só cria sua `CollectionRequest` quando o CustomerPlan está `ACTIVE` e `ACTIVATED`, sua versão não está revogada e o OnDemandPlan pertence à mesma Subscription comercial; ela volta a validar todas essas condições antes de confirmar crédito, cria somente lote persistente de crédito e nunca modifica/cria ciclo, renovação, entitlement ou CustomerPlan.
+2. Um trabalhador cria uma única `CollectionAttempt`/`BillingPayment` e chama o adaptador com chave idempotente estável. A resposta pode exigir autenticação adicional, confirmar, falhar ou ser incerta.
+3. A resposta síncrona é transformada no mesmo evento normalizado usado por webhook; nenhum caminho especial emite Voucher/Cupom ou cria concessão duplicada.
 4. O webhook entra em `WebhookInbox`, é deduplicado pelo ID do provedor e tenta avançar o mesmo `BillingPayment`; eventos antigos não regressam estado terminal.
-5. Em Subscription `RECURRING`, falha reprograma nova tentativa segundo sua política persistida. Exaustão bloqueia `CREDIT_STRICT`/`ENTITLEMENT_ONLY`; em `CREDIT_FLEXIBLE`, mantém entitlement e deixa cada Product aplicar sua regra de saldo. Subscription `NON_RENEWING` não agenda renovação.
-6. Na primeira transição válida para `CONFIRMED`, validar assinatura, versão do Plan, valor, moeda e período/compra; ler `granted_credit_units` persistido no Plan, inclusive zero.
-7. Inserir `PaymentCreditGrant`, bloquear a `CustomerWallet` e criar `CustomerWalletEntry` `SUBSCRIPTION_PAYMENT`. Com delta positivo, atualizar o saldo mesmo que estivesse negativo; com delta zero, persistir `balance_before_credit_units = balance_after_credit_units` sem alterar a projeção numérica.
-8. Ativar/renovar entitlement e, em `ENTITLEMENT_ONLY + NON_RENEWING`, persistir ausência de próximo vencimento. Confirmar pagamento, grant, lançamento, saldo/projeção e recibo idempotente de forma atômica ou por saga com outbox e consumidor idempotente, sem janela capaz de lançar duas vezes.
+5. Em resposta incerta, timeout ou ausência de webhook, Billing preserva a mesma tentativa e o estado conhecido; ele nunca cria segunda cobrança, cancela o CustomerPlan ou consulta automaticamente o provedor. Em renovação, falha definitiva recebida do provedor não reprograma tentativa, não inicia próximo ciclo e muda imediatamente a condição para `RENEWAL_INACTIVE`, sem revogar saldo já disponível.
+6. Antes de `payment_expires_at`, a solicitação pode permanecer `PENDING_PAYMENT`, sem novo entitlement, ciclo ou crédito. Esse prazo é comercial e não watchdog técnico de webhook. Depois do prazo sem confirmação definitiva, a transição terminal para `EXPIRED` é atômica com o processamento de webhook e não produz efeito comercial ou na Wallet; quando for renovação, também deixa o CustomerPlan em `PAST_DUE`/`RENEWAL_INACTIVE`, sem cancelá-lo nem bloquear saldo existente. Cliques repetidos antes do vencimento reutilizam a mesma solicitação; uma nova intenção depois da expiração cria outra, sem reabrir a anterior.
+7. Na primeira transição válida para `CONFIRMED`, bloquear/revalidar CustomerPlan e validar que ele não está `REVOKED`, além de versão do Plan ainda não revogada, valor, moeda, período/compra e que a solicitação ainda não tenha expirado. Solicitação terminalizada por revogação de plano ou `CUSTOMER_PLAN_REVOKED` não regressa e webhook tardio não produz efetivação.
+8. Em `PAID`, confirmação definitiva muda `PENDING_INITIAL_PAYMENT` para `ACTIVATED`, concede entitlement/renova o período e cria, se positiva, a única `CustomerWalletEntry` `SUBSCRIPTION_CREDIT` e seu `CreditLot` do ciclo. Em `FREE` que exige cartão, o webhook de setup muda `PENDING_CARD_VALIDATION` para `ACTIVATED` e efetiva o direito e a mesma concessão-base/lote do ciclo, sem pagamento; `FREE` livre já o faz na criação. Em `ON_DEMAND`, somente creditar a compra confirmada em lote persistente se o CustomerPlan ainda estiver `ACTIVE` e `ACTIVATED`, sua versão não estiver revogada e o OnDemandPlan pertencer à mesma Subscription comercial; ativação pendente, `PAST_DUE`/`RENEWAL_INACTIVE`, estado terminal, versão revogada ou catálogo comercial diferente impedem efetivação inclusive em webhook tardio. OnDemand não altera ciclo, recorrência ou entitlement. A franquia residual de assinatura é baixada no fim do ciclo por `CREDIT_EXPIRY_FORFEITURE`; não acumula na renovação. Persistir ciclo, estado comercial, referências tipadas, lotes e Wallet de forma atômica ou por saga com outbox e consumidor idempotente, sem janela capaz de renovar ou creditar duas vezes.
+9. Cancelamento normal de CustomerPlan recorrente confirmado só desabilita a renovação seguinte: até `current_period_end`, o CustomerPlan segue `ACTIVE` e o ciclo confirmado não é alterado. No fim, uma transição idempotente para `CANCELED` impede novo ciclo e nova `CollectionRequest`. Cancelar `PENDING_PAYMENT` fecha somente a solicitação pendente, sem entitlement/crédito. Revogação administrativa é fluxo separado e prioritário: marca `REVOKED` e, atomica/serializadamente, terminaliza cada solicitação pendente em `CANCELED/CUSTOMER_PLAN_REVOKED`; operação concorrente posterior ou webhook tardio revalida, perde e não efetiva nada.
+10. Revogar uma versão de plano encerra idempotentemente em `CANCELED`/`PLAN_REVOKED` suas `CollectionRequest` pendentes de adesão, renovação, regularização, transição ou OnDemand, sem efetivação. Os CustomerPlans já confirmados não são revogados individualmente: concluem apenas o ciclo em andamento e, no fim, ficam `EXPIRED`/`PLAN_REVOKED`, sem cobrança, ciclo ou franquia novos.
+11. Em transição de plano, downgrade reclassifica imediatamente o residual de assinatura para crédito `ON_DEMAND` persistente e reinicia âncora/ciclo sem nova concessão; upgrade só efetiva após webhook confirmado da `CollectionRequest` `PLAN_UPGRADE`, quando reclassifica o residual, inicia novo ciclo e concede a nova franquia integral. A reclassificação é idempotente, não muda saldo nem envolve preço/câmbio/proporcionalidade; falha ou expiração de upgrade não altera versão, ciclo, entitlement, Wallet ou âncora.
+12. Em `PAST_DUE`/`RENEWAL_INACTIVE`, regularização manual cria uma nova `CollectionRequest` `RENEWAL_REGULARIZATION`, distinta da tentativa terminal anterior e sujeita à mesma `payment_completion_window`. Antes de webhook confirmado, não há ciclo, franquia ou cobrança automática nova; após validação idempotente, retorna a `ACTIVE_PAID`/`CURRENT`, ancora novo ciclo na efetivação e concede uma única franquia integral do plano vigente, sem retroagir o período inativo.
 
-O vencimento apenas cria intenção de cobrança. Respostas, webhooks e retries podem chegar pelo menos uma vez, mas as chaves naturais garantem uma única confirmação e exatamente um lançamento de assinatura observável, positivo ou zero conforme o plano.
+O vencimento de plano `PAID` recorrente não revogado cria a única intenção de cobrança exatamente na data de renovação; `FREE` e `NONE` não geram cobrança automática. A virada de ciclo `FREE` materializa a concessão-base sem Stripe enquanto a versão não estiver revogada. Webhooks podem chegar pelo menos uma vez e atrasados; as chaves naturais garantem uma única tentativa comercial, uma única confirmação/renovação e no máximo uma concessão-base por ciclo. A V1 não faz polling, watchdog ou consulta automática para suprir ausência de webhook.
 
-#### Pagamento inesperado, conciliação e devolução
+#### Pagamento inesperado, conciliação e estorno externo
 
 1. Toda confirmação deve corresponder a uma `CollectionRequest` criada pelo nosso sistema, com assinatura, período/compra, Plan, valor, moeda e provedor compatíveis.
 2. Evento duplicado é reconhecido sem novo efeito. Evento atrasado de uma solicitação legítima é conciliado pelo ID, não pela hora de chegada.
-3. Sem correspondência inequívoca, criar/atualizar `UnmatchedPaymentCase`; não renovar, não ativar entitlement e não lançar crédito na Wallet.
-4. Tentar conciliação determinística antes de qualquer devolução. Nunca inferir renovação apenas por proximidade de data ou assinatura candidata.
-5. Com política `MANUAL_REVIEW`, aguardar ação manual de reconciliar, devolver ou encerrar com justificativa.
-6. Com `AUTO_REFUND`, somente após classificar definitivamente como indevido e confirmar capacidade do conector/meio, criar `RefundRequest` idempotente. Usar `VOID` se ainda autorizado e não capturado; usar `REFUND` se capturado.
-7. Se o meio não suportar devolução automática, manter o caso aberto para procedimento manual; não simular sucesso.
-8. Resultado de devolução é assíncrono, passa pela mesma normalização/deduplicação de eventos e preserva IDs externos.
-9. Se um pagamento aplicado for posteriormente considerado indevido, estornar no provedor e criar lançamento compensatório na Wallet; nunca editar ou apagar o lançamento original.
+3. Sem correspondência inequívoca, criar/atualizar `UnmatchedPaymentCase`; não renovar, não ativar entitlement e não conceder franquia-base na Wallet.
+4. Tentar conciliação determinística antes de encerrar o caso. Nunca inferir renovação apenas por proximidade de data ou assinatura candidata.
+5. Na V1, `MANUAL_REVIEW` aguarda ação manual de reconciliar ou encerrar com justificativa; não existe política automática, endpoint nem chamada local de devolução.
+6. Se o operador decidir excepcionalmente estornar, ele o faz diretamente no provedor. O resultado assíncrono é recebido/conciliado como fato externo, deduplicado e preserva IDs externos; Billing não dispara ou repete a ação.
+7. Caso o estorno externo tenha consequência de créditos, o operador cria uma Compensation manual e auditável; ela nunca edita/apaga lançamento original nem é criada automaticamente pelo evento de refund.
 
 ### 6.4 Resgate de vale
 
@@ -998,7 +1188,7 @@ O nível de isolamento pode ser `READ COMMITTED` com bloqueios explícitos e res
 
 Métricas mínimas:
 
-- débitos aceitos por status `201` e `402`;
+- débitos aceitos por status `201` e rejeições `409 insufficient_credit` sem efeito;
 - item units recebidas, convertidas e pendentes por Item em agregações sem labels de customer;
 - customers em `PROVISIONING`/`ERROR`, diferença entre item wallets esperadas e materializadas e tempo de convergência por escopo;
 - blocos formados por `pricing_model` e transições de faixa/ciclo;
@@ -1018,6 +1208,7 @@ Rotina de reconciliação:
 - verificar uma `ItemWalletEntry` por `UsageEvent` aceito e, quando houver blocos, exatamente uma `CustomerWalletEntry` correlata;
 - verificar que intervalos de `BillingBlock` particionam exatamente o prefixo convertido sem lacunas ou sobreposição;
 - por versão + ciclo, comparar `PricingAccumulator` com a soma dos blocos e confirmar faixa/`credit_units` de cada ordinal;
+- comparar a soma de `CreditLot` disponíveis com `balance_credit_units`, cada `CreditLotAllocation` com seu débito, cada `CREDIT_EXPIRY_FORFEITURE` com o residual de lote ainda classificado como assinatura e cada `CreditLotReclassification` com a quantidade residual preservada e a transição correspondente;
 - emitir alerta e bloquear apenas operações administrativas de reparo, não apagar histórico;
 - reparar somente por procedimento auditado ou reconstrução comprovada da projeção.
 
@@ -1074,8 +1265,8 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 - bloco iniciado antes e completado depois da fronteira usa o Price preso ao pendente e o ciclo determinado pelo `accepted_at` da conclusão;
 - com bloco 1 e custo de 3 créditos, saldo `5` após uma unidade: entrada criada, saldo `2`, HTTP `201`;
 - com bloco 1 e custo de 5 créditos, saldo `5` após uma unidade: entrada criada, saldo `0`, HTTP `201`, elegível por créditos;
-- com bloco 1 e custo de 7 créditos, saldo `5` após uma unidade: entrada criada, saldo `-2`, HTTP `402`, não elegível por crédito;
-- com bloco 1 e custo de 7 créditos, saldo `-2` após uma unidade: nova entrada criada, saldo `-9`, HTTP `402`;
+- com bloco 1 e custo de 7 créditos, saldo `5` após uma unidade: retorna `409 insufficient_credit`, sem entrada, saldo continua `5` e não há pendente;
+- com saldo negativo não há caso alcançável por consumo na V1; a futura capacidade `CREDIT_FLEXIBLE` deve especificar separadamente seu comportamento;
 - produto/item inválido ou item wallet desabilitada não cria evento, pendente ou entrada;
 - para `CREDIT_METERED`, a parcela financeira da elegibilidade depende somente de `CustomerWallet.balance_credit_units`; item units pendentes não são tratadas como saldo ou crédito;
 - consulta de elegibilidade concorrente pode ficar obsoleta, mas nunca corrompe nem condiciona o débito.
@@ -1092,36 +1283,65 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 ### Créditos e recorrência
 
 - cada flag bloqueia somente sua própria fonte de crédito;
-- criar ou ativar assinatura não movimenta a Wallet;
+- criar/ativar CustomerPlan materializa o ciclo inicial e, em `FREE` ou após confirmação `PAID`, pode conceder uma única franquia-base positiva do plano;
+- todo ciclo recorrente materializado persiste âncora calendária UTC e período `[current_period_start, current_period_end)`, sem sobreposição; a renovação normal conserva a âncora da série, enquanto upgrade, downgrade e regularização confirmada a redefinem no instante efetivo;
+- `WEEKLY` preserva dia da semana/horário UTC a cada 7 dias; para âncora mensal em `2026-01-31T10:00:00Z`, os fins seguintes são `2026-02-28T10:00:00Z`, `2026-03-31T10:00:00Z`, `2026-04-30T10:00:00Z` e `2026-05-31T10:00:00Z`, sem escorregar para o dia 28;
+- `QUARTERLY` aplica o mesmo último-dia-apenas-no-mês-curto ao destino de três meses e volta ao dia original quando possível; `ANNUALLY` transforma `2024-02-29T10:00:00Z` em `2025-02-28T10:00:00Z`, `2026-02-28T10:00:00Z`, `2027-02-28T10:00:00Z` e `2028-02-29T10:00:00Z`;
+- `NONE` não cria agenda de ciclo/cobrança futura nem término automático do CustomerPlan;
+- existe no máximo um CustomerPlan principal em condição `ACTIVE` por `(customer_id, subscription_id)` comercial inferido; a condição inclui `ACTIVE_PAID` e exclui `PAST_DUE`/`RENEWAL_INACTIVE` e estados terminais. `ActiveCustomerPlanSlot` único/bloqueio transacional equivalente impede criação/ativação concorrente sem armazenar `subscription_id` no CustomerPlan; a perdedora retorna `409 active_customer_plan_already_exists` sem cobrança, ciclo, entitlement ou crédito. Subscriptions comerciais distintas permanecem independentes;
+- troca de plano opera o único CustomerPlan da Subscription comercial e não cria outro vínculo; a nova `SubscriptionPlanVersion` pertence à mesma Subscription comercial. `OnDemandPlan` é crédito extra vinculado ao CustomerPlan e não participa da chave nem cria CustomerPlan;
 - Product fora do plano ativo retorna `403 product_not_entitled` sem registrar consumo, mesmo que haja saldo;
-- elegibilidade expõe separadamente `usage_model`, `commercial_status`, `subscription_entitled`, `credit_sufficient` quando aplicável, `access_allowed` e motivo;
-- `CREDIT_STRICT` aceita somente `CREDIT_METERED`, exige Subscription `RECURRING` com Plan de créditos e bloqueia após falha definitiva mesmo com saldo;
-- `CREDIT_FLEXIBLE` aceita mistura de `CREDIT_METERED` e `ENTITLEMENT_ONLY`, exige Subscription `RECURRING` com Plan de créditos e, após falha, mantém Products sem medição enquanto os medidos exigem `balance_credit_units > 0`;
-- `ENTITLEMENT_ONLY` aceita somente Products do mesmo `usage_model` e Plan com `granted_credit_units = 0`; pagamento confirmado cria `SUBSCRIPTION_PAYMENT` de delta zero, sem mudar saldo;
-- `ENTITLEMENT_ONLY + RECURRING` mantém acesso por renovação confirmada e bloqueia após falha definitiva;
-- `ENTITLEMENT_ONLY + NON_RENEWING` ativa somente após o pagamento único, deixa `next_renewal_at`/`entitlement_ends_at` nulos e não cria cobrança futura;
-- publicação rejeita oferta sem plano base compatível, Product incompatível com o perfil ou política de crédito divergente; mistura dos dois `usage_model` é válida somente em `CREDIT_FLEXIBLE`;
-- apenas confirmação interna correlacionada de pagamento cria `PaymentCreditGrant` e `SUBSCRIPTION_PAYMENT`; plano sem créditos cria exatamente um lançamento zero correlacionado;
-- `signed_credit_units = 0` é aceito somente nesse `SUBSCRIPTION_PAYMENT`; crédito direto, Vale, consumo e Compensation com zero são rejeitados sem lançamento;
-- saldo `-10` mais concessão recorrente de `20 credit_units` resulta `10`;
-- concessão direta usa a quantidade solicitada, Vale usa a quantidade persistida e Cupom apenas seleciona o Vale; recorrência usa exclusivamente `granted_credit_units` da versão do plano confirmada;
-- dez entregas concorrentes da mesma confirmação/período geram uma concessão e uma entrada;
-- mesmo `billing_payment_id` ou mesmo período não pode conceder créditos duas vezes;
-- resposta síncrona confirmada e webhook duplicado convergem para o mesmo `BillingPayment` e uma única concessão;
+- elegibilidade expõe separadamente `usage_model`, `commercial_status`, `customer_plan_entitled`, `credit_sufficient` quando aplicável, `access_allowed` e motivo;
+- decisão de uso avalia CustomerPlan utilizável, entitlement, condição de renovação e crédito; retorna `customer_plan_not_active`, `entitlement_not_granted`, `insufficient_credit` ou `eligible`. `renewal_inactive` é reason secundário e não bloqueia uso de saldo; crédito insuficiente não altera o CustomerPlan;
+- `CREDIT_STRICT` aceita somente `CREDIT_METERED`; o Plan define preço, recorrência e franquia-base por ciclo. Falha definitiva ou expiração de renovação deixa `PAST_DUE`/`RENEWAL_INACTIVE`, bloqueia apenas novo ciclo, franquia e cobrança automática, mas permite consumir créditos disponíveis se o débito couber no saldo;
+- versão publicada de `SubscriptionPlanVersion` é imutável: não se altera preço, créditos, recorrência, admissão, meios ou Products; ela não expira pela passagem do tempo e só fica indisponível por revogação administrativa; uma nova oferta exige nova versão/plano;
+- revogação administrativa de versão de plano bloqueia imediatamente novas adesões, transições e renovações; não migra/substitui automaticamente, não cria cobrança, Voucher/Cupom, estorno, Compensation ou e-mail/notificação na V1;
+- CustomerPlan já confirmado em plano revogado conserva somente o ciclo em curso e encerra idempotentemente em `EXPIRED`/`PLAN_REVOKED` no seu fim, sem cobrança, novo ciclo ou franquia; créditos existentes na Wallet não são removidos nem compensados automaticamente;
+- revogação de plano é diferente de revogação administrativa do vínculo: apenas esta última muda imediatamente o CustomerPlan individual para `REVOKED`; ambas são distintas de cancelamento do customer e de `PAST_DUE` por pagamento;
+- revogação administrativa individual é terminal, prioritária e auditada com motivo, ator, instante e referências: na mesma serialização marca `REVOKED` e terminaliza todas as `CollectionRequest` pendentes do CustomerPlan em `CANCELED/CUSTOMER_PLAN_REVOKED`, sem estorno, remoção/edição de Wallet ou Compensation automática;
+- depois de `REVOKED`, regularização, upgrade, downgrade, cancelamento normal, OnDemand, renovação e demais comandos não administrativos retornam `409 customer_plan_revoked`; webhooks tardios ou operações concorrentes perdedoras só convergem/auditam e não podem efetivar plano, ciclo, entitlement, crédito ou nova cobrança;
+- `CollectionRequest` pendente de adesão, renovação, regularização, transição ou OnDemand para plano revogado é terminalizada idempotentemente sem entitlement, ciclo ou crédito; webhook tardio é validado contra a versão revogada e não pode efetivar esses efeitos;
+- `FREE + NONE` é gratuito, não cobra, não renova e permanece `ACTIVE` e `ACTIVATED` por tempo indeterminado depois de consumir sua concessão inicial; crédito zero e passagem do tempo não encerram o CustomerPlan. `PAID + NONE`, depois da única confirmação, também não renova nem expira automaticamente;
+- cancelamento normal de CustomerPlan recorrente confirmado apenas desabilita renovação futura; até `current_period_end` ele permanece `ACTIVE`, mantém entitlement, pode consumir em `CREDIT_STRICT` e, somente se `activation_status = ACTIVATED`, comprar qualquer `OnDemandPlan` publicado/não revogado da mesma Subscription comercial;
+- no fim de `current_period_end`, cancelamento normal transita idempotentemente para `CANCELED`, sem novo ciclo, `CollectionRequest` ou créditos-base; ele não gera estorno, remoção de crédito ou Compensation;
+- cancelamento de `PENDING_PAYMENT` encerra somente a solicitação/contratação pendente, sem entitlement ou crédito; revogação administrativa é ação separada, auditada e imediata para `REVOKED`, sem efeitos financeiros automáticos;
+- V1 publica exclusivamente `CREDIT_STRICT`, com Products `CREDIT_METERED`; `CREDIT_FLEXIBLE` e `ENTITLEMENT_ONLY` continuam apenas como modelos futuros não ativáveis;
+- confirmação interna correlacionada de pagamento cria no máximo uma entrada `SUBSCRIPTION_CREDIT` para o ciclo, quando `granted_credit_units > 0`, e nunca cria Voucher ou Cupom;
+- toda concessão positiva materializa `CreditLot` com origem, residual e validade quando aplicável; cada débito registra `CreditLotAllocation` e a soma de residuais disponíveis concilia com a Wallet;
+- franquia-base de assinatura residual expira integralmente no fim do ciclo por `CREDIT_EXPIRY_FORFEITURE` idempotente, sem editar entrada original, somente enquanto ainda classificada como assinatura; renovação normal concede somente a franquia do novo ciclo;
+- crédito de `OnDemandPlan`, inclusive residual de assinatura reclassificado em troca, é lote persistente: acumula através de renovação/troca e não expira por esses eventos na V1;
+- em `CREDIT_STRICT`, consumo aloca primeiro créditos de assinatura que expiram no ciclo atual e depois lotes persistentes; se a soma não cobre o débito, retorna `409 insufficient_credit` sem efeito;
+- `signed_credit_units = 0` é rejeitado; crédito direto, Vale, consumo e Compensation com zero são rejeitados sem lançamento;
+- concessão direta usa a quantidade solicitada, Vale usa a quantidade persistida e Cupom apenas seleciona o Vale; Voucher/Cupom e Compensation são bônus/correção independentes da franquia-base do plano;
+- `OnDemandPlan` só pode ser iniciado e efetivado por CustomerPlan principal em condição comercial `ACTIVE`, com `activation_status = ACTIVATED`, versão não revogada e pertencente à mesma Subscription comercial; ele não é `SubscriptionPlanVersion`, não participa de adesão, não cria CustomerPlan, ciclo, renovação ou entitlement próprio e não altera recorrência ou plano principal. `PENDING_INITIAL_PAYMENT` e `PENDING_CARD_VALIDATION` retornam `409 customer_plan_activation_pending`, sem `CollectionRequest` nem crédito. Saldo zero não encerra CustomerPlan nem impede essa compra após ativação. `PAST_DUE`/`RENEWAL_INACTIVE`, `EXPIRED`, `CANCELED` e `REVOKED` não podem iniciar nem efetivar nova compra, mesmo com crédito disponível; essa vedação não bloqueia o consumo `CREDIT_STRICT` de saldo já existente. Sua `CollectionRequest` recebe `payment_expires_at` imutável e, após confirmação dentro da janela e revalidação de estado e ativação, cria somente crédito extra persistente na Wallet. CustomerPlan ativo e ativado pode acessar qualquer OnDemandPlan publicado/não revogado da mesma Subscription comercial; não há allowlist por plano de assinatura nem acesso entre Subscriptions comerciais;
+- troca de plano é transição auditável e idempotente: upgrade cria uma única `CollectionRequest` `PLAN_UPGRADE` e, somente após confirmação do valor integral, reclassifica residual de assinatura para `ON_DEMAND` persistente e muda versão/ciclo/âncora; falha ou expiração não altera nada;
+- downgrade reclassifica imediatamente residual de assinatura para `ON_DEMAND` persistente e muda a versão sem cobrança, estorno, Compensation, desconto, Voucher/Cupom ou proporcionalidade; ambos os sentidos reiniciam a âncora e a primeira cobrança posterior ocorre no fim do novo ciclo;
+- reclassificação preserva a mesma quantidade de `credit_units`, é auditável/idempotente e não edita lançamentos, não muda saldo, não cria crédito e não envolve preço monetário, câmbio ou desconto; o residual convertido passa à segunda prioridade de consumo e não expira no fim do novo ciclo;
+- entregas concorrentes da mesma confirmação/período convergem para uma única renovação e, se positiva, uma única concessão-base;
+- resposta síncrona confirmada e webhook duplicado convergem para o mesmo `BillingPayment`, uma única efetivação de entitlement e no máximo uma concessão-base;
 - adicionar um novo provedor exige somente um `BillingConnector` compatível; não altera contratos, estados ou invariantes de Subscription e Wallet;
 - o núcleo rejeita uma operação antes da chamada externa quando o conector não declara a capacidade ou o meio solicitado;
-- uma `CollectionRequest` usa o mesmo contrato normalizado para cartão, Pix, boleto ou outro meio, variando apenas capacidades e instruções retornadas pelo conector;
+- na V1, toda `CollectionRequest` usa exclusivamente cartão tokenizado no provedor;
 - `PaymentMethodBinding` pertence ao mesmo workspace, customer e `BillingConnection` da cobrança; vínculo opcional com assinatura não permite uso cruzado;
-- confirmação síncrona, consulta posterior e webhook convergem para o mesmo estado terminal e não duplicam cobrança, renovação ou lançamento;
+- webhook assinado, incluindo entrega tardia válida, converge idempotentemente para o mesmo estado sem duplicar cobrança, renovação ou lançamento; ausência de webhook preserva o estado conhecido;
 - webhook inválido não altera cobrança; webhook antigo não regride estado terminal; evento válido pode ser reprocessado pela `WebhookInbox`;
-- retries obedecem à política copiada para a assinatura, e Billing não altera calendário ou quantidade de tentativas;
-- pagamento confirmado sem `CollectionRequest` compatível cria `UnmatchedPaymentCase` e não renova, não ativa e não lança créditos;
+- na V1, não há retentativa automática, polling, watchdog, cron de consulta ao provedor, fila automática de divergências ou cancelamento por ausência/atraso de webhook;
+- toda `CollectionRequest` de contratação inicial `PAID`, renovação, regularização manual, `OnDemandPlan` ou transição paga persiste `payment_expires_at` a partir da `payment_completion_window` da Subscription; Billing não altera esse prazo;
+- antes do prazo, `PENDING_PAYMENT` não efetiva entitlement, ciclo nem crédito; após o prazo, `EXPIRED` é terminal, idempotente e atômico contra webhook concorrente, sem efetivar qualquer desses efeitos;
+- cliques repetidos antes da expiração reutilizam a mesma solicitação; uma nova intenção após `EXPIRED` cria nova `CollectionRequest`, sem reabrir a anterior;
+- expirar `OnDemandPlan` não cancela nem muda a Subscription já `ACTIVE`; expirar renovação não a cancela, mas a leva imediatamente a `PAST_DUE`/`RENEWAL_INACTIVE`. `payment_completion_window` é prazo comercial e não watchdog de webhook;
+- após falha definitiva ou expiração de renovação, não há nova `CollectionRequest`, ciclo ou `SUBSCRIPTION_CREDIT` automático; o vínculo passa a `PAST_DUE`/`RENEWAL_INACTIVE`, sem revogar créditos já disponíveis por qualquer origem/lote compatível;
+- customer pode regularizar cartão/cobrança por fluxo manual na UI segura do provedor; isso cria nova `CollectionRequest` `RENEWAL_REGULARIZATION`, idempotente e distinta da tentativa terminal, sem retentativa automática, carência automática ou pós-pago;
+- antes da confirmação da regularização, `PAST_DUE`/`RENEWAL_INACTIVE` não cria ciclo/franquia/cobrança automática e preserva o uso de saldo existente; webhook assinado confirmado retorna a `ACTIVE_PAID`/`CURRENT`, inicia ciclo na efetivação e cria no máximo uma franquia integral vigente, sem crédito retroativo;
+- repetição do comando de regularização com a mesma idempotência retorna a mesma solicitação pendente; webhooks duplicados dessa solicitação convergem para uma única reativação, ciclo e franquia;
+- pagamento confirmado sem `CollectionRequest` compatível cria `UnmatchedPaymentCase` e não renova, não ativa nem concede franquia-base;
 - webhook atrasado de cobrança legítima é conciliado por IDs mesmo fora da janela cronológica esperada;
-- `AUTO_REFUND` só cria devolução após conciliação negativa definitiva e quando `BillingConnection` declara `supports_void`/`supports_refund` para o meio;
-- meio sem devolução automática mantém caso para revisão; a API não retorna devolução concluída fictícia;
-- dois cliques, retries ou webhooks para a mesma devolução resultam em uma única `RefundRequest` efetiva e nunca excedem o valor capturado;
-- devolver pagamento já aplicado cria compensação na Wallet sem editar o lançamento original;
-- pausa, retomada, troca de plano e cancelamento preservam histórico e entitlement por vigência;
+- a V1 não expõe endpoint, tela, botão, solicitação de customer, regra de elegibilidade nem refund automático; cancelar Subscription não gera estorno;
+- estorno excepcional é executado diretamente pelo operador no provedor e Billing somente concilia o resultado externo, sem disparar, repetir ou simular devolução;
+- consequência interna de estorno externo exige Compensation manual, com tipo versionado, motivo, referências tipadas à cobrança/`CollectionRequest` e ID externo quando houver; não há Compensation automática;
+- Voucher é campanha/promocional, Cupom altera condição de cobrança e Compensation é ajuste excepcional administrativo; nenhum deles edita/apaga lançamento original;
+- débito de Compensation em `CREDIT_STRICT` respeita invariantes de saldo/estado ou permanece caso operacional auditado, sem saldo negativo ou pós-pago implícito;
+- troca de plano, cancelamento e revogação preservam histórico e entitlement por vigência; cancelamento normal só é efetivo no fim do ciclo confirmado, revogação possui razão/ator auditáveis e pausa/retomada não existem na V1;
 - falha antes do commit permite retry; falha depois do commit encontra a concessão concluída.
 
 ### Vale e cupom
@@ -1173,9 +1393,9 @@ Este documento não autoriza nem executa código. Quando a implementação for a
 3. **Hierarquia materializada:** tabela `Wallet`, especializações `CustomerWallet`/`ItemWallet`, chaves parciais, vínculo pai/item, `WalletProvisioning` e reconciliação de escopo.
 4. **Customer wallet e idempotência:** `CustomerWalletEntry`, saldo global, transação comum e testes concorrentes; esta é a fundação das concessões e débitos.
 5. **Catálogo e Price versionado:** Product `CREDIT_METERED`/`ENTITLEMENT_ONLY`, Items/subitens, conversões `unit`/`tiered`, regra declarativa de ciclo, validação de faixas e publicação imutável.
-6. **Item wallet e consumo:** `ItemWalletEntry`, `PricingAccumulator`, `BillingBlock`, extratos correlatos, contrato `201/402`, pendentes e testes concorrentes.
+6. **Item wallet e consumo:** `ItemWalletEntry`, `PricingAccumulator`, `BillingBlock`, extratos correlatos, bloqueio atômico por saldo insuficiente (`409` sem efeito), pendentes e testes concorrentes.
 7. **Crédito direto e configuração:** flags por workspace e fronteira com confirmação externa.
-8. **Subscription e Billing:** ofertas, Plans com preço/créditos, Subscription `RECURRING`/`NON_RENEWING`, entitlement, cobrança/retries locais, conexões/adaptadores, tokenização referenciada, `CollectionRequest`, `BillingPayment`, `WebhookInbox` e `PaymentCreditGrant` idempotente.
+8. **Subscription e Billing:** ofertas, Plans com preço/recorrência, política de admissão, entitlement, cobrança local, conexões/adaptadores, tokenização referenciada, `CollectionRequest`, `BillingPayment` e `WebhookInbox` idempotente.
 9. **Vales:** ciclo de vida, resgate direto e auditoria promocional.
 10. **Cupons:** lote, seleção concorrente, modo livre e limite por identificador externo.
 11. **Compensações administrativas:** lifecycle de intenção/aprovação/execução, auditoria de atores e lançamento idempotente.
@@ -1188,10 +1408,12 @@ Cada etapa deve terminar com migrações reversíveis, contrato OpenAPI atualiza
 O plano adota defaults definidos para não bloquear o desenho, mas há decisões e detalhamentos que devem ser fechados antes de codificar seus módulos:
 
 1. **Eventos de domínio e entrega:** catalogar eventos correlacionados para toda ação e transição de estado relevante de Product, Price, Wallet, Subscription, Billing, Vale, Cupom e Compensation; definir pares antes/depois quando houver efeito externo, schemas/versionamento, ordem por agregado, outbox, retry, deduplicação, dead-letter, retenção e transporte por broker, webhook de saída, polling ou combinação. Também definir cadastro de destinos, filtros, replay operacional e observabilidade de entrega.
-2. **Pausa, retomada, troca e cancelamento:** definir instante efetivo, efeito no período já pago, entitlement, cobrança pendente, saldo remanescente, Products habilitados, Price/Plan versionados, prorrata ou ausência dela e eventos emitidos para cada transição.
+2. **Pausa e retomada futuras:** se forem introduzidas depois da V1, definir instante efetivo, efeitos no período já pago, entitlement, saldo, créditos, cobrança, congelamento ou não de ciclo, Products habilitados e eventos. Na V1 não há pausa/retomada; cancelamento no fim do período, revogação administrativa e falha/regularização de renovação são os únicos caminhos relevantes além de troca de plano.
 3. **Consultas, relatórios e métricas:** separar consultas operacionais de recursos individuais, relatórios agregados exportáveis e métricas técnicas. Definir filtros, paginação, consistência temporal, exportação e retenção para extratos, consumo, saldo, concessões, assinaturas, cobranças, falhas, Vales/Cupons e Compensations. Métricas são séries agregadas para operação; relatórios são dados de negócio consultáveis/exportáveis e não substituem o razão.
-4. **Rotinas de reconciliação:** detalhar jobs, frequência, cursores, tolerâncias, alertas e reparos para comparar saldo com extrato, item units com blocos/pendente, PaymentCreditGrant com pagamentos, assinatura com cobrança, estoque de Vales com resgates e Compensations com lançamentos. Divergência nunca permite edição destrutiva; reparo usa reprocessamento idempotente ou lançamento compensatório.
-5. **Tarefa de desenho de meios de pagamento do Billing:** especificar separadamente o fluxo completo de cada meio inicialmente suportado, como cartão, Pix, boleto e wallet de provedor. Para cada meio, definir criação/captura, tokenização ou instrução de pagamento, vínculo com customer e assinatura, mandato para cobrança recorrente/off-session, estados síncronos e assíncronos, expiração, consulta, webhook, conciliação, retentativa, cancelamento, devolução, capacidades exigidas do conector, eventos antes/depois e respostas HTTP. Também deve ser decidido o contrato definitivo entre `BillingConnection`, rotas aceitas pela oferta, instrumento tokenizado do customer e vínculo escolhido pela assinatura. A proposta discutida nesta revisão é referência de trabalho, não contrato fechado.
+4. **Rotinas de reconciliação:** detalhar jobs, frequência, cursores, tolerâncias, alertas e reparos para comparar saldo com extrato, item units com blocos/pendente, assinatura com cobrança, estoque de Vales com resgates e Compensations com lançamentos. Divergência nunca permite edição destrutiva; reparo usa reprocessamento idempotente ou lançamento compensatório.
+5. **Evolução de meios de pagamento:** a V1 já fecha cartão tokenizado via provedor externo, primeira confirmação após autenticação adicional quando exigida, uma tentativa comercial na renovação e reconciliação sem segunda cobrança. Pix, boleto, wallets de provedor e qualquer outro meio exigem desenho e aprovação próprios antes de ativação futura.
+6. **Produto de estorno futuro:** antes de expor solicitação, tela, endpoint ou automação de refund, definir elegibilidade comercial, cálculo proporcional de créditos já usados, reserva, disputas/chargebacks, aprovações, reconciliação e efeitos no entitlement/Wallet. Nenhum desses comportamentos está ativo na V1.
+7. **Conciliação operacional futura:** definir prazo técnico/watchdog de webhook, consulta do mesmo PaymentIntent, reconciliação periódica, fila estruturada de revisão manual, alertas e regras de escalonamento. Nada disso está ativo na V1 webhook-first.
 
 Decisão ratificada nesta revisão: todos os Vales vinculados ao mesmo Cupom devem possuir exatamente a mesma quantidade de `credit_units`. A publicação/vinculação rejeita lote heterogêneo, e alterações posteriores não podem quebrar essa homogeneidade.
 
