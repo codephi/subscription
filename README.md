@@ -115,6 +115,14 @@ Guidelines:
 - keep payload contracts and transformation structs inside `dto/`
 - let `AppState` carry concrete repositories instead of exposing raw driver clients when possible
 
+## Implementation planning
+
+- [Technical plan](docs/plano-tecnico-api-assinaturas-rust.md): normative domain,
+  API, transaction, and billing decisions for the subscriptions service.
+- [Implementation phases](docs/fases-implementacao.md): incremental delivery
+  order, including the operational integration with the external Accounts and
+  workspaces system.
+
 ## Project Layout
 
 ```
