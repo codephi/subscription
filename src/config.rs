@@ -69,6 +69,14 @@ pub struct AppConfig {
     pub body_limit_bytes: usize,
     pub otel_enabled: bool,
     pub mcp: McpConfig,
+    pub accounts_webhook_secret: Option<String>,
+    pub outbound_event_webhook: Option<OutboundWebhookConfig>,
+}
+
+#[derive(Clone, Debug)]
+pub struct OutboundWebhookConfig {
+    pub url: String,
+    pub secret: String,
 }
 
 impl AppConfig {
@@ -94,6 +102,8 @@ impl AppConfig {
             .unwrap_or(DEFAULT_BODY_LIMIT_BYTES);
         let otel_enabled = otel_enabled_from_env();
         let mcp = McpConfig::from_env();
+        let accounts_webhook_secret = std::env::var("ACCOUNTS_WEBHOOK_SECRET").ok();
+        let outbound_event_webhook = outbound_webhook_from_env()?;
 
         Ok(Self {
             database_url,
@@ -103,6 +113,8 @@ impl AppConfig {
             body_limit_bytes,
             otel_enabled,
             mcp,
+            accounts_webhook_secret,
+            outbound_event_webhook,
         })
     }
 
@@ -122,6 +134,20 @@ impl AppConfig {
         {
             None
         }
+    }
+}
+
+fn outbound_webhook_from_env() -> Result<Option<OutboundWebhookConfig>> {
+    let url = std::env::var("OUTBOUND_EVENT_WEBHOOK_URL").ok();
+    let secret = std::env::var("OUTBOUND_EVENT_WEBHOOK_SECRET").ok();
+    match (url, secret) {
+        (None, None) => Ok(None),
+        (Some(url), Some(secret)) if !url.is_empty() && !secret.is_empty() => {
+            Ok(Some(OutboundWebhookConfig { url, secret }))
+        }
+        _ => Err(anyhow!(
+            "OUTBOUND_EVENT_WEBHOOK_URL and OUTBOUND_EVENT_WEBHOOK_SECRET must both be set"
+        )),
     }
 }
 

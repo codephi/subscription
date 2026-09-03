@@ -5,6 +5,7 @@ use subscription::{
     libs::telemetry,
     repositories::database::DatabaseRepository,
     routes::create_router,
+    services::outbox::{self, WebhookDestination},
     state::AppState,
 };
 use tokio::net::TcpListener;
@@ -21,7 +22,20 @@ async fn main() -> Result<()> {
         return Err(error);
     }
 
-    let state = AppState::new(DatabaseRepository::new(pool));
+    let repository = DatabaseRepository::new(pool);
+    let state = AppState::new(repository.clone())
+        .with_accounts_webhook_secret(config.accounts_webhook_secret.clone());
+
+    if let Some(webhook) = &config.outbound_event_webhook {
+        tokio::spawn(outbox::run_dispatcher(
+            repository,
+            WebhookDestination {
+                url: webhook.url.clone(),
+                secret: webhook.secret.clone(),
+            },
+            std::time::Duration::from_secs(1),
+        ));
+    }
 
     let router = create_router(state, &config);
 

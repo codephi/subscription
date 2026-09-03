@@ -5,6 +5,7 @@ Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It e
 - `/health` as a liveness endpoint that returns `200 OK` with a JSON status payload.
 - `/echo` to reflect the incoming request across all HTTP verbs with tracing spans per method when OTEL is enabled.
 - `/mcp` as an optional MCP Streamable HTTP endpoint for `health_check` and `echo_request` tools when the `mcp` Cargo feature is enabled.
+- `/v1/internal/accounts/workspace-events` for signed, ordered workspace lifecycle events.
 
 ## Template Bootstrap
 
@@ -41,11 +42,18 @@ If you want to override the detected name, pass it explicitly:
    - `MCP_ENABLED=true` to expose the MCP endpoint when compiled with `--features mcp`.
    - `MCP_PATH=/mcp` to change the MCP path.
    - `MCP_ALLOWED_ORIGINS=*` to keep the MCP endpoint fully open, or provide a comma-separated allowlist if you want to restrict it.
+   - `ACCOUNTS_WEBHOOK_SECRET` to verify Accounts event signatures.
+   - `OUTBOUND_EVENT_WEBHOOK_URL` and `OUTBOUND_EVENT_WEBHOOK_SECRET` together to enable durable signed event delivery.
 4. Run:
    - `cargo run`
 
 Migrations are managed by SQLx and executed on startup from `migrations/`.
 Swagger UI is available at `/docs` with the generated OpenAPI contract.
+
+Business and administrative routes intentionally have no general authentication
+middleware in the current delivery. Accounts and outgoing integration events
+still require HMAC signatures. Do not expose these routes outside a trusted
+network until service authentication is implemented.
 
 ### MCP HTTP
 
@@ -122,6 +130,8 @@ Guidelines:
 - [Implementation phases](docs/fases-implementacao.md): incremental delivery
   order, including the operational integration with the external Accounts and
   workspaces system.
+- [Test matrix](docs/test-matrix.md): mandatory traceability and quality gate for
+  every implementation phase.
 
 ## Project Layout
 

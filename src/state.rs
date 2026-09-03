@@ -7,13 +7,18 @@ pub struct AppState {
     inner: Arc<SharedState>,
 }
 
+#[derive(Clone)]
 struct SharedState {
     pub database: DatabaseRepository,
+    pub accounts_webhook_secret: Option<String>,
 }
 
 impl AppState {
     pub fn new(database: DatabaseRepository) -> Self {
-        let inner = SharedState { database };
+        let inner = SharedState {
+            database,
+            accounts_webhook_secret: None,
+        };
         Self {
             inner: Arc::new(inner),
         }
@@ -21,6 +26,15 @@ impl AppState {
 
     pub fn database(&self) -> DatabaseRepository {
         self.inner.database.clone()
+    }
+
+    pub fn with_accounts_webhook_secret(mut self, secret: Option<String>) -> Self {
+        Arc::make_mut(&mut self.inner).accounts_webhook_secret = secret;
+        self
+    }
+
+    pub fn accounts_webhook_secret(&self) -> Option<String> {
+        self.inner.accounts_webhook_secret.clone()
     }
 }
 

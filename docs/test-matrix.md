@@ -10,7 +10,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | ID | Origem | Cenário | Teste | Tipo | Fase | Estado |
 |---|---|---|---|---|---:|---|
 | PH-00 | fases §0 | Contratos identificam workspace, ator, estados bloqueadores e fronteira com Accounts | `contract_documents_cover_phase_zero_decisions` | contrato | 0 | passing |
-| PH-01 | fases §1 | Assinatura inválida não altera estado; inbox/outbox convergem sob duplicação e falha | `workspace_event_foundation_is_atomic_and_idempotent` | integração | 1 | not_implemented |
+| PH-01 | fases §1 | Assinatura inválida não altera estado; inbox/outbox convergem sob duplicação e falha | `workspace_event_foundation_is_atomic_and_idempotent`, `outbox_retries_dead_letters_and_replays` | integração | 1 | passing |
 | PH-02 | fases §2 | Versão publicada determina preços, itens faturáveis e escopo de wallets de forma imutável | `published_catalog_scope_is_reproducible` | integração | 2 | not_implemented |
 | PH-03 | fases §3 | Provisionamento duplicado/concorrente converge e estados externos bloqueiam mutações | `wallet_provisioning_converges_for_workspace_lifecycle` | concorrência | 3 | not_implemented |
 | PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | not_implemented |
