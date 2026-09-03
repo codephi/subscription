@@ -10,6 +10,8 @@ use axum::{
     Router,
 };
 use http_body_util::BodyExt;
+use serde_json::Value;
+use sqlx::PgPool;
 use subscription::{
     config::{
         otel_enabled_from_env, AppConfig, CorsConfig, McpConfig, DEFAULT_BODY_LIMIT_BYTES,
@@ -21,8 +23,6 @@ use subscription::{
     routes::create_router,
     state::AppState,
 };
-use serde_json::Value;
-use sqlx::PgPool;
 use testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,

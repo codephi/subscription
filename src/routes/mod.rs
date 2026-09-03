@@ -31,7 +31,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
 
     let api_router = if config.otel_enabled {
         api_router
-            .layer(OtelInResponseLayer::default())
+            .layer(OtelInResponseLayer)
             .layer(OtelAxumLayer::default().filter(|path| path != "/health"))
     } else {
         api_router

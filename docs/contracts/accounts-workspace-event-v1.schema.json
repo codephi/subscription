@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runvibe.dev/contracts/accounts-workspace-event-v1.schema.json",
+  "title": "Accounts workspace event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "aggregate_id",
+    "sequence",
+    "occurred_at",
+    "workspace_id",
+    "correlation_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": {
+      "enum": [
+        "workspace.created",
+        "workspace.activated",
+        "workspace.blocked",
+        "workspace.terminated"
+      ]
+    },
+    "schema_version": { "const": 1 },
+    "aggregate_id": { "type": "string", "format": "uuid" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "workspace_id": { "type": "string", "format": "uuid" },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "causation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspace_id"],
+      "properties": {
+        "workspace_id": { "type": "string", "format": "uuid" }
+      }
+    }
+  }
+}
