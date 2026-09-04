@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     dto::credits::{
-        CreditLedgerReconciliationResponse, CustomerWalletEntryResponse,
-        CustomerWalletStatementResponse, DirectCreditRequest, DirectCreditResponse, StatementQuery,
-        UpdateWorkspaceBillingConfigRequest, WorkspaceBillingConfigResponse,
+        CreditLedgerReconciliationResponse, CustomerWalletStatementResponse, DirectCreditRequest,
+        DirectCreditResponse, StatementQuery, UpdateWorkspaceBillingConfigRequest,
+        WorkspaceBillingConfigResponse, WorkspaceTransactionResponse,
     },
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
@@ -29,7 +29,7 @@ pub async fn find_transaction(
     repository: &DatabaseRepository,
     workspace_id: Uuid,
     transaction_id: &str,
-) -> ApiResult<CustomerWalletEntryResponse> {
+) -> ApiResult<WorkspaceTransactionResponse> {
     validate_identifier("transaction_id", transaction_id)?;
     repository
         .find_customer_wallet_transaction(workspace_id, transaction_id)

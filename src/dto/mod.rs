@@ -5,4 +5,5 @@ pub mod events;
 pub mod health;
 pub mod plans;
 pub mod units;
+pub mod usage;
 pub mod wallets;

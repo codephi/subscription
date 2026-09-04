@@ -1,6 +1,6 @@
 # subscription
 
-Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It exposes:
+Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
 - `/health` as a liveness endpoint that returns `200 OK` with a JSON status payload.
 - `/echo` to reflect the incoming request across all HTTP verbs with tracing spans per method when OTEL is enabled.
@@ -28,6 +28,12 @@ Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It e
   immediate, audited administrative revocation without deleting wallet history.
 - `/v1/admin/subscription-cycles/run` for deterministic, concurrency-safe free
   plan cycle advancement.
+- `/v1/workspaces/{workspace_id}/usage-events` for atomic metered usage,
+  versioned unit/tier pricing, pending blocks, and strict credit debits.
+- `/v1/workspaces/{workspace_id}/products/{product_id}/eligibility` and nested
+  item-wallet meter, statement, and pricing-accumulator routes for usage reads.
+- `/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile` for
+  non-destructive item ledger reconciliation.
 
 ## Template Bootstrap
 
@@ -68,7 +74,12 @@ If you want to override the detected name, pass it explicitly:
    - `ACCOUNTS_WEBHOOK_SECRET` to verify Accounts event signatures.
    - `OUTBOUND_EVENT_WEBHOOK_URL` and `OUTBOUND_EVENT_WEBHOOK_SECRET` together to enable durable signed event delivery.
 4. Run:
-   - `cargo run`
+   - `cargo run --all-features`
+
+The default application address is `http://127.0.0.1:8080`. Open
+`http://127.0.0.1:8080/docs` for Swagger UI, use `/openapi.json` for the raw
+contract, and `/health` for the liveness check. Values copied from
+`.env.example` override the host and port (that example uses `0.0.0.0:3000`).
 
 Migrations are managed by SQLx and executed on startup from `migrations/`.
 Swagger UI is available at `/docs` with the generated OpenAPI contract. Every

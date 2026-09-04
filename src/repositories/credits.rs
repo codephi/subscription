@@ -4,11 +4,12 @@ use uuid::Uuid;
 use crate::{
     dto::{
         credits::{
-            CreditLedgerReconciliationResponse, CustomerWalletEntryResponse,
-            CustomerWalletStatementResponse, DirectCreditRequest, DirectCreditResponse,
+            CreditLedgerReconciliationResponse, CustomerWalletStatementResponse,
+            DirectCreditRequest, DirectCreditResponse, PendingUsageTransactionResponse,
             UpdateWorkspaceBillingConfigRequest, WorkspaceBillingConfigResponse,
+            WorkspaceTransactionResponse,
         },
-        units::CreditUnits,
+        units::{CreditUnits, ItemUnitBoundary, ItemUnits},
     },
     error::{ApiError, ApiResult},
     repositories::{
@@ -109,18 +110,58 @@ impl DatabaseRepository {
         &self,
         workspace_id: Uuid,
         transaction_id: &str,
-    ) -> ApiResult<CustomerWalletEntryResponse> {
+    ) -> ApiResult<WorkspaceTransactionResponse> {
         let row = sqlx::query(
             "SELECT * FROM customer_wallet_entries WHERE customer_id=$1 AND transaction_id=$2",
         )
         .bind(workspace_id)
         .bind(transaction_id)
         .fetch_optional(&self.pool())
+        .await?;
+        if let Some(row) = row {
+            let entry_id = row.get("customer_wallet_entry_id");
+            let references = load_references(&self.pool(), entry_id).await?;
+            return Ok(WorkspaceTransactionResponse::CustomerWalletEntry(
+                entry_from_row(&row, references),
+            ));
+        }
+        self.find_pending_usage_transaction(workspace_id, transaction_id)
+            .await
+    }
+
+    async fn find_pending_usage_transaction(
+        &self,
+        workspace_id: Uuid,
+        transaction_id: &str,
+    ) -> ApiResult<WorkspaceTransactionResponse> {
+        let row = sqlx::query(
+            "SELECT u.transaction_id,u.usage_event_id,u.item_wallet_id,u.product_id,u.item_id, \
+             u.item_units,u.pending_item_units_after,u.metadata,u.accepted_at,e.item_wallet_entry_id \
+             FROM usage_events u JOIN item_wallet_entries e ON e.usage_event_id=u.usage_event_id \
+             WHERE u.customer_id=$1 AND u.transaction_id=$2 AND NOT EXISTS \
+             (SELECT 1 FROM debits d WHERE d.usage_event_id=u.usage_event_id)",
+        )
+        .bind(workspace_id)
+        .bind(transaction_id)
+        .fetch_optional(&self.pool())
         .await?
         .ok_or_else(|| entry_not_found(workspace_id, transaction_id))?;
-        let entry_id = row.get("customer_wallet_entry_id");
-        let references = load_references(&self.pool(), entry_id).await?;
-        Ok(entry_from_row(&row, references))
+        Ok(WorkspaceTransactionResponse::PendingUsage(
+            PendingUsageTransactionResponse {
+                transaction_id: row.get("transaction_id"),
+                usage_event_id: row.get("usage_event_id"),
+                item_wallet_entry_id: row.get("item_wallet_entry_id"),
+                item_wallet_id: row.get("item_wallet_id"),
+                product_id: row.get("product_id"),
+                item_id: row.get("item_id"),
+                received_item_units: ItemUnits::positive(row.get("item_units"))?,
+                pending_item_units_after: ItemUnitBoundary::non_negative(
+                    row.get("pending_item_units_after"),
+                )?,
+                metadata: row.get("metadata"),
+                accepted_at: row.get("accepted_at"),
+            },
+        ))
     }
 
     pub async fn list_customer_wallet_entries(

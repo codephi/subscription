@@ -36,6 +36,113 @@ pub fn cycle_end(
         .ok_or_else(|| calendar_overflow(anchor, recurrence, cycle_ordinal))
 }
 
+pub fn pricing_cycle_bounds(
+    anchor: DateTime<Utc>,
+    recurrence_rule: &str,
+    accepted_at: DateTime<Utc>,
+) -> ApiResult<(DateTime<Utc>, DateTime<Utc>)> {
+    if accepted_at < anchor {
+        return Err(ApiError::unprocessable(
+            "invalid_pricing_cycle_time",
+            format!("accepted_at {accepted_at} must be at or after cycle anchor {anchor}"),
+        ));
+    }
+    let (frequency, interval) = parse_pricing_recurrence(recurrence_rule)?;
+    let mut ordinal = estimated_cycle_ordinal(anchor, accepted_at, frequency, interval);
+    while pricing_boundary(anchor, frequency, interval, ordinal + 1)? <= accepted_at {
+        ordinal += 1;
+    }
+    while ordinal > 0 && pricing_boundary(anchor, frequency, interval, ordinal)? > accepted_at {
+        ordinal -= 1;
+    }
+    Ok((
+        pricing_boundary(anchor, frequency, interval, ordinal)?,
+        pricing_boundary(anchor, frequency, interval, ordinal + 1)?,
+    ))
+}
+
+#[derive(Clone, Copy)]
+enum PricingFrequency {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+fn parse_pricing_recurrence(rule: &str) -> ApiResult<(PricingFrequency, i64)> {
+    let mut parts = rule.split(';');
+    let frequency = match parts.next() {
+        Some("FREQ=DAILY") => PricingFrequency::Daily,
+        Some("FREQ=WEEKLY") => PricingFrequency::Weekly,
+        Some("FREQ=MONTHLY") => PricingFrequency::Monthly,
+        Some("FREQ=YEARLY") => PricingFrequency::Yearly,
+        _ => return Err(invalid_pricing_recurrence(rule)),
+    };
+    let interval = parts
+        .next()
+        .and_then(|part| part.strip_prefix("INTERVAL="))
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| invalid_pricing_recurrence(rule))?;
+    if parts.next().is_some() {
+        return Err(invalid_pricing_recurrence(rule));
+    }
+    Ok((frequency, interval))
+}
+
+fn estimated_cycle_ordinal(
+    anchor: DateTime<Utc>,
+    accepted_at: DateTime<Utc>,
+    frequency: PricingFrequency,
+    interval: i64,
+) -> i64 {
+    match frequency {
+        PricingFrequency::Daily => (accepted_at - anchor).num_days() / interval,
+        PricingFrequency::Weekly => (accepted_at - anchor).num_weeks() / interval,
+        PricingFrequency::Monthly => {
+            let months = i64::from(accepted_at.year() - anchor.year()) * 12
+                + i64::from(accepted_at.month())
+                - i64::from(anchor.month());
+            months.max(0) / interval
+        }
+        PricingFrequency::Yearly => i64::from(accepted_at.year() - anchor.year()).max(0) / interval,
+    }
+}
+
+fn pricing_boundary(
+    anchor: DateTime<Utc>,
+    frequency: PricingFrequency,
+    interval: i64,
+    ordinal: i64,
+) -> ApiResult<DateTime<Utc>> {
+    let factor = interval
+        .checked_mul(ordinal)
+        .ok_or_else(|| pricing_calendar_overflow(anchor, ordinal))?;
+    let boundary = match frequency {
+        PricingFrequency::Daily => anchor.checked_add_signed(Duration::days(factor)),
+        PricingFrequency::Weekly => anchor.checked_add_signed(Duration::weeks(factor)),
+        PricingFrequency::Monthly => add_anchor_months(anchor, factor),
+        PricingFrequency::Yearly => {
+            add_anchor_months(anchor, factor.checked_mul(12).unwrap_or(i64::MAX))
+        }
+    };
+    boundary.ok_or_else(|| pricing_calendar_overflow(anchor, ordinal))
+}
+
+fn invalid_pricing_recurrence(rule: &str) -> ApiError {
+    ApiError::unprocessable(
+        "invalid_accumulation_cycle",
+        format!("recurrence_rule {rule:?} must contain supported FREQ and positive INTERVAL"),
+    )
+}
+
+fn pricing_calendar_overflow(anchor: DateTime<Utc>, ordinal: i64) -> ApiError {
+    ApiError::unprocessable(
+        "pricing_calendar_overflow",
+        format!("cycle anchor {anchor} and ordinal {ordinal} must form a UTC boundary"),
+    )
+}
+
 fn add_anchor_months(anchor: DateTime<Utc>, months: i64) -> Option<DateTime<Utc>> {
     let base_month = i64::from(anchor.year()) * 12 + i64::from(anchor.month0());
     let target_month = base_month.checked_add(months)?;
@@ -76,7 +183,7 @@ fn calendar_overflow(anchor: DateTime<Utc>, recurrence: PlanRecurrence, ordinal:
 mod tests {
     use chrono::{Datelike, TimeZone, Utc};
 
-    use super::cycle_end;
+    use super::{cycle_end, pricing_cycle_bounds};
     use crate::dto::plans::PlanRecurrence;
 
     #[test]
@@ -122,5 +229,27 @@ mod tests {
             cycle_end(anchor, PlanRecurrence::None, 1).expect("none"),
             None
         );
+    }
+
+    #[test]
+    fn pricing_cycle_uses_half_open_monthly_boundaries_from_original_anchor() {
+        let anchor = Utc.with_ymd_and_hms(2026, 1, 31, 10, 0, 0).unwrap();
+        let boundary = Utc.with_ymd_and_hms(2026, 4, 30, 10, 0, 0).unwrap();
+        let (start, end) = pricing_cycle_bounds(anchor, "FREQ=MONTHLY;INTERVAL=1", boundary)
+            .expect("pricing cycle");
+        assert_eq!(start, boundary);
+        assert_eq!(end, Utc.with_ymd_and_hms(2026, 5, 31, 10, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn pricing_cycle_rejects_time_before_anchor_and_invalid_rule() {
+        let anchor = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        assert!(pricing_cycle_bounds(
+            anchor,
+            "FREQ=DAILY;INTERVAL=1",
+            anchor - chrono::Duration::seconds(1)
+        )
+        .is_err());
+        assert!(pricing_cycle_bounds(anchor, "FREQ=HOURLY;INTERVAL=1", anchor).is_err());
     }
 }

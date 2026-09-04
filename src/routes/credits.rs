@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use crate::{
     dto::credits::{
-        CreditLedgerReconciliationResponse, CustomerWalletEntryResponse,
-        CustomerWalletStatementResponse, DirectCreditRequest, DirectCreditResponse, StatementQuery,
-        UpdateWorkspaceBillingConfigRequest, WorkspaceBillingConfigResponse,
+        CreditLedgerReconciliationResponse, CustomerWalletStatementResponse, DirectCreditRequest,
+        DirectCreditResponse, StatementQuery, UpdateWorkspaceBillingConfigRequest,
+        WorkspaceBillingConfigResponse, WorkspaceTransactionResponse,
     },
     error::{ApiError, ApiResult, ErrorResponse},
     services::credits,
@@ -77,14 +77,14 @@ async fn customer_wallet_statement(
     path = "/v1/workspaces/{workspace_id}/customer-wallet/transactions/{transaction_id}",
     params(("workspace_id" = Uuid, Path), ("transaction_id" = String, Path)),
     responses(
-        (status = 200, body = CustomerWalletEntryResponse),
+        (status = 200, body = WorkspaceTransactionResponse),
         (status = 404, body = ErrorResponse, description = "Transaction does not exist")
     )
 )]
 async fn find_customer_wallet_transaction(
     State(state): State<AppState>,
     Path((workspace_id, transaction_id)): Path<(Uuid, String)>,
-) -> ApiResult<Json<CustomerWalletEntryResponse>> {
+) -> ApiResult<Json<WorkspaceTransactionResponse>> {
     Ok(Json(
         credits::find_transaction(&state.database(), workspace_id, &transaction_id).await?,
     ))

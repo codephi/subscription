@@ -43,13 +43,23 @@ pub(super) fn reference_from_row(
     let customer_plan_id: Option<Uuid> = row.get("customer_plan_id");
     let customer_plan_cycle_id: Option<Uuid> = row.get("customer_plan_cycle_id");
     let plan_version_id: Option<Uuid> = row.get("plan_version_id");
+    let usage_event_id: Option<Uuid> = row.get("usage_event_id");
+    let debit_id: Option<Uuid> = row.get("debit_id");
+    let product_id: Option<Uuid> = row.get("product_id");
+    let item_id: Option<Uuid> = row.get("item_id");
+    let item_wallet_id: Option<Uuid> = row.get("item_wallet_id");
     WalletTransactionReferenceResponse {
         reference_kind: row.get("reference_kind"),
         reference_id: direct_credit_id
             .or(credit_lot_id)
             .or(customer_plan_id)
             .or(customer_plan_cycle_id)
-            .or(plan_version_id),
+            .or(plan_version_id)
+            .or(usage_event_id)
+            .or(debit_id)
+            .or(product_id)
+            .or(item_id)
+            .or(item_wallet_id),
         external_reference: row.get("external_reference"),
     }
 }
@@ -80,7 +90,8 @@ pub(super) async fn load_references(
 ) -> ApiResult<Vec<WalletTransactionReferenceResponse>> {
     let rows = sqlx::query(
         "SELECT reference_kind,direct_credit_id,credit_lot_id,external_reference, \
-         customer_plan_id,customer_plan_cycle_id,plan_version_id \
+         customer_plan_id,customer_plan_cycle_id,plan_version_id,usage_event_id,debit_id, \
+         product_id,item_id,item_wallet_id \
          FROM wallet_transaction_references WHERE customer_wallet_entry_id=$1 \
          ORDER BY reference_kind,wallet_transaction_reference_id",
     )

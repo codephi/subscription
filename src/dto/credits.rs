@@ -4,7 +4,7 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::dto::units::CreditUnits;
+use crate::dto::units::{CreditUnits, ItemUnitBoundary, ItemUnits};
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct DirectCreditRequest {
@@ -61,6 +61,28 @@ pub struct StatementQuery {
 pub struct CustomerWalletStatementResponse {
     pub items: Vec<CustomerWalletEntryResponse>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PendingUsageTransactionResponse {
+    pub transaction_id: String,
+    pub usage_event_id: Uuid,
+    pub item_wallet_entry_id: Uuid,
+    pub item_wallet_id: Uuid,
+    pub product_id: Uuid,
+    pub item_id: Uuid,
+    pub received_item_units: ItemUnits,
+    pub pending_item_units_after: ItemUnitBoundary,
+    #[schema(value_type = Object)]
+    pub metadata: Value,
+    pub accepted_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum WorkspaceTransactionResponse {
+    CustomerWalletEntry(CustomerWalletEntryResponse),
+    PendingUsage(PendingUsageTransactionResponse),
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]

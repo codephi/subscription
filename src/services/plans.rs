@@ -123,7 +123,7 @@ pub async fn create_customer_plan(
             ),
         ));
     }
-    let anchor = Utc::now();
+    let anchor = repository.current_time().await?;
     let end = cycle_end(anchor, plan.response.recurrence, 1)?;
     let hash = request_hash(&request)?;
     repository
@@ -205,7 +205,7 @@ pub async fn transition_customer_plan(
             ),
         ));
     }
-    let effective_at = Utc::now();
+    let effective_at = repository.current_time().await?;
     let period_end = cycle_end(effective_at, target.response.recurrence, 1)?;
     let hash = request_hash(&request)?;
     repository

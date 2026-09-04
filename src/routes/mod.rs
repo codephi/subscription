@@ -14,6 +14,7 @@ pub mod internal;
 pub mod mcp;
 pub mod plans;
 pub mod system;
+pub mod usage;
 pub mod wallets;
 
 #[derive(OpenApi)]
@@ -34,6 +35,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
         .merge(catalog::router())
         .merge(credits::router())
         .merge(plans::router())
+        .merge(usage::router())
         .merge(wallets::router())
         .split_for_parts();
 
