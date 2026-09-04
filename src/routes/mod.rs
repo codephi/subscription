@@ -12,6 +12,7 @@ pub mod credits;
 pub mod internal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod plans;
 pub mod system;
 pub mod wallets;
 
@@ -32,6 +33,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
         .merge(internal::router())
         .merge(catalog::router())
         .merge(credits::router())
+        .merge(plans::router())
         .merge(wallets::router())
         .split_for_parts();
 

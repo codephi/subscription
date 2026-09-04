@@ -14,7 +14,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | PH-02 | fases §2 | Versão publicada determina preços, itens faturáveis e escopo de wallets de forma imutável | `published_catalog_scope_is_reproducible` | integração | 2 | passing |
 | PH-03 | fases §3 | Provisionamento duplicado/concorrente converge e estados externos bloqueiam mutações | `wallet_provisioning_converges_for_workspace_lifecycle` | concorrência | 3 | passing |
 | PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | passing |
-| PH-05 | fases §5 | Franquia gratuita concede e expira uma vez por ciclo | `subscription_cycle_grant_and_expiry_are_unique` | integração | 5 | not_implemented |
+| PH-05 | fases §5 | Franquia gratuita concede e expira uma vez por ciclo | `subscription_cycle_grant_and_expiry_are_unique`, `subscription_plans_migration_round_trips` | integração | 5 | passing |
 | PH-06 | fases §6 | Consumos concorrentes não perdem unidades e rejeições são totalmente atômicas | `usage_conversion_is_concurrent_and_atomic` | concorrência | 6 | not_implemented |
 | PH-07 | fases §7 | Conector falso confirma uma cobrança e concede uma vez, sem inferir timeout | `billing_connector_state_machine_is_idempotent` | integração | 7 | not_implemented |
 | PH-08 | fases §8 | Stripe duplicado, atrasado ou fora de ordem não duplica efeito | `stripe_webhooks_converge_without_duplicate_effects` | contrato | 8 | not_implemented |
@@ -36,7 +36,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | CC-09 | técnico §7 | Travessia de tier atribui faixa e ordinal únicos | `tier_boundary_assigns_unique_blocks` | concorrência | 6 | not_implemented |
 | CC-10 | técnico §7 | Dois resgates do último voucher geram um crédito | `last_voucher_is_redeemed_once` | concorrência | 9 | not_implemented |
 | CC-11 | técnico §7 | Usuário externo repetido no cupom gera um crédito | `coupon_external_user_limit_is_atomic` | concorrência | 9 | not_implemented |
-| CC-12 | técnico §7 | Duas execuções do mesmo ciclo geram uma franquia | `subscription_cycle_executes_once` | concorrência | 5 | not_implemented |
+| CC-12 | técnico §7 | Duas execuções do mesmo ciclo geram uma franquia | `subscription_cycle_executes_once` | concorrência | 5 | passing |
 | CC-13 | técnico §7 | Falha pré-commit não deixa efeitos parciais | `transaction_failure_rolls_back_all_effects` | integração | 4 | passing |
 | CC-14 | técnico §7 | Retry pós-commit retorna conflito e permite consultar o original | `post_commit_retry_finds_original_transaction` | integração | 4 | passing |
 | CC-15 | técnico §7 | Provisionamento concorrente reutiliza a mesma wallet | `concurrent_provisioning_reuses_wallets` | concorrência | 3 | passing |
@@ -54,9 +54,10 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | AC-04 | técnico §9 Consumo | Conversões 1:1/bloco/tier, pendente, saldo zero, insuficiência e item inválido | `usage_*` | 6 | not_implemented |
 | AC-05 | técnico §9 Elegibilidade | Plano utilizável, entitlement, renovação inativa e crédito suficiente | `eligibility_*` | 6 | not_implemented |
 | AC-06 | técnico §9 Idempotência | Reuso de chave/transação, payload distinto, timeout pós-commit e deduplicação interna | `idempotency_*` | 4 | passing |
-| AC-07 | técnico §9 Ciclos | Recorrências semanal/mensal/trimestral/anual e datas de fim de mês | `subscription_calendar_*` | 5 | not_implemented |
-| AC-08 | técnico §9 Planos | Exclusividade, admissão, ativação, revogação, cancelamento e transições | `customer_plan_*` | 5 | not_implemented |
-| AC-09 | técnico §9 Lotes | Concessão, expiração, prioridade, alocação, reclassificação e conciliação | `credit_lot_*` | 5 | not_implemented |
+| AC-07 | técnico §9 Ciclos | Recorrências semanal/mensal/trimestral/anual e datas de fim de mês | `subscription_calendar_*` | 5 | passing |
+| AC-08 | técnico §9 Planos | Exclusividade, admissão, ativação pendente, revogação, cancelamento e downgrade sem cobrança; ativação e upgrade pagos permanecem em AC-11 | `customer_plan_exclusivity_and_lifecycle_are_atomic`, `commercial_catalog_validation_and_swagger_are_enforced` | 5 | passing |
+| AC-09A | técnico §9 Lotes | Concessão, expiração, reclassificação em downgrade e conciliação sem alteração do saldo | `subscription_cycle_grant_and_expiry_are_unique`, `customer_plan_exclusivity_and_lifecycle_are_atomic` | 5 | passing |
+| AC-09B | técnico §9 Lotes | Prioridade estável e alocação imutável de lotes no consumo | `credit_lot_allocation_*` | 6 | not_implemented |
 | AC-10 | técnico §9 OnDemand | Elegibilidade, cobrança, confirmação, expiração e isolamento entre subscriptions | `on_demand_*` | 7 | not_implemented |
 | AC-11 | técnico §9 Billing | Capacidades, tentativa única, estados, expiração, regularização e idempotência | `billing_*` | 7 | not_implemented |
 | AC-12 | técnico §9 Stripe | SetupIntent, PaymentIntent, assinatura, duplicação, atraso e autenticação adicional | `stripe_*` | 8 | not_implemented |
@@ -82,4 +83,4 @@ cargo test --all-features
 
 | ID | Origem | Cenário | Teste | Tipo | Fase | Estado |
 |---|---|---|---|---|---:|---|
-| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas e erros | `assert_openapi_contains_catalog`, `assert_wallet_swagger`, `assert_credit_swagger` | contrato | transversal | passing |
+| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas e erros | `assert_openapi_contains_catalog`, `assert_wallet_swagger`, `assert_credit_swagger`, `assert_plan_swagger` | contrato | transversal | passing |

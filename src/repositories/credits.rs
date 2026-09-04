@@ -30,15 +30,23 @@ impl DatabaseRepository {
         request: &DirectCreditRequest,
     ) -> ApiResult<DirectCreditResponse> {
         let mut transaction = self.pool().begin().await?;
-        let wallet = lock_creditable_wallet(&mut transaction, workspace_id).await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, workspace_id).await?;
+        ensure_direct_credit_enabled(&mut transaction, workspace_id).await?;
         reserve_idempotency(
             &mut transaction,
             workspace_id,
             idempotency_key,
             request_hash,
+            "DIRECT_CREDIT",
         )
         .await?;
-        reserve_transaction(&mut transaction, workspace_id, &request.transaction_id).await?;
+        reserve_transaction(
+            &mut transaction,
+            workspace_id,
+            &request.transaction_id,
+            "DIRECT_CREDIT",
+        )
+        .await?;
         let balance_after = wallet.balance.checked_add(request.credit_units)?;
         let direct_credit_id = Uuid::new_v4();
         let entry_id = Uuid::new_v4();
@@ -225,13 +233,14 @@ impl DatabaseRepository {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct LockedWallet {
     pub(super) wallet_id: Uuid,
     pub(super) balance: CreditUnits,
     pub(super) next_sequence: i64,
 }
 
-async fn lock_creditable_wallet(
+pub(super) async fn lock_active_customer_wallet(
     transaction: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
 ) -> ApiResult<LockedWallet> {
@@ -249,18 +258,6 @@ async fn lock_creditable_wallet(
         return Err(ApiError::conflict(
             "workspace_not_operational",
             format!("workspace {workspace_id} must be ACTIVE without event gaps, found {status}"),
-        ));
-    }
-    let direct_enabled: bool = sqlx::query_scalar(
-        "SELECT direct_credit_enabled FROM workspace_billing_configs WHERE workspace_id=$1",
-    )
-    .bind(workspace_id)
-    .fetch_one(&mut **transaction)
-    .await?;
-    if !direct_enabled {
-        return Err(ApiError::conflict(
-            "direct_credit_disabled",
-            format!("workspace {workspace_id} has direct credits disabled"),
         ));
     }
     let row = sqlx::query(
@@ -294,18 +291,39 @@ async fn lock_creditable_wallet(
     })
 }
 
-async fn reserve_idempotency(
+async fn ensure_direct_credit_enabled(
+    transaction: &mut Transaction<'_, Postgres>,
+    workspace_id: Uuid,
+) -> ApiResult<()> {
+    let direct_enabled: bool = sqlx::query_scalar(
+        "SELECT direct_credit_enabled FROM workspace_billing_configs WHERE workspace_id=$1",
+    )
+    .bind(workspace_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if direct_enabled {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "direct_credit_disabled",
+        format!("workspace {workspace_id} has direct credits disabled"),
+    ))
+}
+
+pub(super) async fn reserve_idempotency(
     transaction: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
     key: &str,
     request_hash: &str,
+    operation_kind: &str,
 ) -> ApiResult<()> {
     let inserted = sqlx::query(
         "INSERT INTO idempotency_records (workspace_id,idempotency_key,operation_kind,request_hash) \
-         VALUES ($1,$2,'DIRECT_CREDIT',$3) ON CONFLICT DO NOTHING",
+         VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
     )
     .bind(workspace_id)
     .bind(key)
+    .bind(operation_kind)
     .bind(request_hash)
     .execute(&mut **transaction)
     .await?;
@@ -318,17 +336,19 @@ async fn reserve_idempotency(
     ))
 }
 
-async fn reserve_transaction(
+pub(super) async fn reserve_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
     transaction_id: &str,
+    operation_kind: &str,
 ) -> ApiResult<()> {
     let inserted = sqlx::query(
         "INSERT INTO transaction_reservations (workspace_id,transaction_id,operation_kind) \
-         VALUES ($1,$2,'DIRECT_CREDIT') ON CONFLICT DO NOTHING",
+         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
     )
     .bind(workspace_id)
     .bind(transaction_id)
+    .bind(operation_kind)
     .execute(&mut **transaction)
     .await?;
     if inserted.rows_affected() == 1 {

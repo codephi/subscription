@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -161,9 +161,47 @@ pub(super) async fn insert_credit_outbox(
     entry_id: Uuid,
     units: CreditUnits,
 ) -> ApiResult<()> {
-    let event = DomainEventEnvelope {
+    let event = credit_event(
+        workspace_id,
+        wallet_id,
+        sequence,
+        "credit.granted",
+        json!({
+            "customer_wallet_entry_id": entry_id,
+            "credit_units": units.value().to_string()
+        }),
+    );
+    persist_credit_event(transaction, event).await
+}
+
+pub(super) async fn insert_credit_expiry_outbox(
+    transaction: &mut Transaction<'_, Postgres>,
+    workspace_id: Uuid,
+    wallet_id: Uuid,
+    sequence: i64,
+    entry_id: Uuid,
+    units: i64,
+) -> ApiResult<()> {
+    let event = credit_event(
+        workspace_id,
+        wallet_id,
+        sequence,
+        "credit.expired",
+        json!({"customer_wallet_entry_id":entry_id,"credit_units":units.to_string()}),
+    );
+    persist_credit_event(transaction, event).await
+}
+
+fn credit_event(
+    workspace_id: Uuid,
+    wallet_id: Uuid,
+    sequence: i64,
+    event_type: &str,
+    payload: Value,
+) -> DomainEventEnvelope {
+    DomainEventEnvelope {
         event_id: Uuid::new_v4(),
-        event_type: "credit.granted".to_string(),
+        event_type: event_type.to_string(),
         schema_version: 1,
         aggregate_type: "customer_wallet".to_string(),
         aggregate_id: wallet_id,
@@ -172,11 +210,14 @@ pub(super) async fn insert_credit_outbox(
         workspace_id,
         correlation_id: Uuid::new_v4(),
         causation_id: None,
-        payload: json!({
-            "customer_wallet_entry_id": entry_id,
-            "credit_units": units.value().to_string()
-        }),
-    };
+        payload,
+    }
+}
+
+async fn persist_credit_event(
+    transaction: &mut Transaction<'_, Postgres>,
+    event: DomainEventEnvelope,
+) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id, \
          aggregate_sequence,workspace_id,correlation_id,causation_id,payload,occurred_at) \

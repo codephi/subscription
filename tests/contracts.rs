@@ -42,6 +42,9 @@ fn contract_documents_cover_phase_zero_decisions() {
     assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.completed"));
     assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.failed"));
     assert!(DOMAIN_EVENT_SCHEMA.contains("credit.granted"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("customer_plan.activated"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("customer_plan.plan_changed"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("credit.expired"));
 }
 
 fn assert_required_fields(schema: &Value, expected_fields: &[&str]) {

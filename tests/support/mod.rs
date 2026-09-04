@@ -55,11 +55,13 @@ pub async fn setup_router_with_options(
     (create_router(state, &config), pool)
 }
 
+#[allow(dead_code)]
 pub async fn response_json(response: Response) -> Value {
     let body = response_bytes(response).await;
     serde_json::from_slice(&body).expect("failed to parse json response")
 }
 
+#[allow(dead_code)]
 pub async fn response_bytes(response: Response) -> bytes::Bytes {
     response
         .into_body()

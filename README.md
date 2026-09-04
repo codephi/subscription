@@ -20,6 +20,14 @@ Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It e
   `/customer-wallet/transactions/{transaction_id}` for cursor-based history.
 - `/v1/workspaces/{workspace_id}/billing-config` for source-specific credit
   controls.
+- `/v1/subscriptions`, `/v1/subscription-plans/{plan_id}`, and nested plan
+  catalog routes for immutable commercial offers and on-demand credit offers.
+- `/v1/workspaces/{workspace_id}/customer-plans` for idempotent plan admission,
+  lookup, end-of-period cancellation, and audited free-plan downgrades.
+- `/v1/admin/workspaces/{workspace_id}/customer-plans/{id}/revoke` for
+  immediate, audited administrative revocation without deleting wallet history.
+- `/v1/admin/subscription-cycles/run` for deterministic, concurrency-safe free
+  plan cycle advancement.
 
 ## Template Bootstrap
 

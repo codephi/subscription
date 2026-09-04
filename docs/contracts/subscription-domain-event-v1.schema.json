@@ -21,12 +21,19 @@
     "event_type": {
       "type": "string",
       "minLength": 1,
-      "description": "Versioned domain fact. Wallet provisioning emits workspace_provisioning.started, workspace_provisioning.completed, or workspace_provisioning.failed.",
+      "description": "Versioned domain fact emitted after its corresponding transaction commits.",
       "examples": [
         "workspace_provisioning.started",
         "workspace_provisioning.completed",
         "workspace_provisioning.failed",
-        "credit.granted"
+        "credit.granted",
+        "customer_plan.activated",
+        "customer_plan.cycle_started",
+        "customer_plan.plan_changed",
+        "customer_plan.canceled",
+        "customer_plan.expired",
+        "customer_plan.revoked",
+        "credit.expired"
       ]
     },
     "schema_version": { "const": 1 },

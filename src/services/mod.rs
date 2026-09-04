@@ -1,9 +1,11 @@
+pub mod calendar;
 pub mod catalog;
 pub mod credits;
 pub mod echo;
 pub mod health;
 pub mod integrations;
 pub mod outbox;
+pub mod plans;
 pub mod signatures;
 pub mod wallets;
 pub mod workspace_events;
