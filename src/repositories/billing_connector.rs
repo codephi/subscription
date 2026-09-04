@@ -39,11 +39,13 @@ pub struct ConnectorCollectionResult {
     pub next_action_url: Option<String>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 #[error("billing connector rejected collection: {code}: {message}")]
 pub struct BillingConnectorError {
     pub code: String,
     pub message: String,
+    pub retryable: bool,
+    pub outcome_uncertain: bool,
 }
 
 pub type ConnectorFuture<'a> = Pin<

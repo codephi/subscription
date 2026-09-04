@@ -37,7 +37,9 @@ Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
 The provider-neutral Billing foundation defines connector capabilities and the
 normalized collection state machine. No production payment provider is enabled
-until its adapter and signed webhook flow are configured.
+until its adapter and signed webhook flow are configured. Collection attempts
+are persisted before external I/O, use a stable provider idempotency key, and
+preserve uncertain outcomes without an automatic retry.
 
 ## Template Bootstrap
 

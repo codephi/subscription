@@ -1,7 +1,12 @@
 use crate::{
     error::{ApiError, ApiResult},
-    repositories::billing_connector::{
-        BillingConnector, CollectionCommand, ConnectorCollectionResult,
+    repositories::{
+        billing_attempts::StartedCollectionAttempt,
+        billing_connector::{
+            BillingConnector, BillingPaymentMethod, CollectionCommand, ConnectorCollectionResult,
+            ConnectorCollectionState,
+        },
+        database::DatabaseRepository,
     },
 };
 
@@ -17,6 +22,66 @@ pub async fn start_collection(
         .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))
 }
 
+pub async fn execute_collection_attempt(
+    repository: &DatabaseRepository,
+    connector: &dyn BillingConnector,
+    collection_request_id: uuid::Uuid,
+) -> ApiResult<Option<ConnectorCollectionResult>> {
+    validate_connector_capabilities(connector, BillingPaymentMethod::Card)?;
+    let Some(attempt) = repository
+        .begin_collection_attempt(collection_request_id)
+        .await?
+    else {
+        return Ok(None);
+    };
+    execute_started_attempt(repository, connector, &attempt).await
+}
+
+async fn execute_started_attempt(
+    repository: &DatabaseRepository,
+    connector: &dyn BillingConnector,
+    attempt: &StartedCollectionAttempt,
+) -> ApiResult<Option<ConnectorCollectionResult>> {
+    match connector.start_collection(&attempt.command).await {
+        Ok(result) => {
+            repository
+                .record_collection_result(attempt, &result)
+                .await?;
+            Ok(Some(result))
+        }
+        Err(error) => {
+            record_connector_error(repository, attempt, &error).await?;
+            Err(ApiError::external(
+                "billing_connector_error",
+                error.to_string(),
+            ))
+        }
+    }
+}
+
+async fn record_connector_error(
+    repository: &DatabaseRepository,
+    attempt: &StartedCollectionAttempt,
+    error: &crate::repositories::billing_connector::BillingConnectorError,
+) -> ApiResult<()> {
+    let state = if error.outcome_uncertain {
+        ConnectorCollectionState::Uncertain
+    } else {
+        ConnectorCollectionState::Failed
+    };
+    repository
+        .record_collection_result(
+            attempt,
+            &ConnectorCollectionResult {
+                provider_payment_id: None,
+                state,
+                failure_code: Some(error.code.clone()),
+                next_action_url: None,
+            },
+        )
+        .await
+}
+
 fn validate_collection_command(
     connector: &dyn BillingConnector,
     command: &CollectionCommand,
@@ -27,10 +92,15 @@ fn validate_collection_command(
             format!("amount_minor {} must be positive", command.amount_minor),
         ));
     }
+    validate_connector_capabilities(connector, command.payment_method)
+}
+
+fn validate_connector_capabilities(
+    connector: &dyn BillingConnector,
+    payment_method: BillingPaymentMethod,
+) -> ApiResult<()> {
     let capabilities = connector.capabilities();
-    if capabilities
-        .payment_methods
-        .contains(&command.payment_method)
+    if capabilities.payment_methods.contains(&payment_method)
         && capabilities.supports_vault
         && capabilities.supports_off_session_charge
         && capabilities.supports_webhook
@@ -41,7 +111,7 @@ fn validate_collection_command(
         "billing_capability_not_supported",
         format!(
             "payment method {:?} is not supported by the selected billing connector",
-            command.payment_method
+            payment_method
         ),
     ))
 }

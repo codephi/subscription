@@ -1,5 +1,6 @@
 //! Persistence and integration-facing structs live here.
 
+pub mod billing_attempts;
 pub mod billing_connector;
 pub mod catalog;
 mod catalog_rows;

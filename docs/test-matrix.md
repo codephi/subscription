@@ -16,7 +16,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | passing |
 | PH-05 | fases §5 | Franquia gratuita concede e expira uma vez por ciclo | `subscription_cycle_grant_and_expiry_are_unique`, `subscription_plans_migration_round_trips` | integração | 5 | passing |
 | PH-06 | fases §6 | Consumos concorrentes não perdem unidades e rejeições são totalmente atômicas | `concurrent_partial_usage_forms_one_block`, `usage_overflow_and_insufficient_credit_roll_back_every_related_table`, `usage_metering_migrations_round_trip` | concorrência | 6 | passing |
-| PH-07 | fases §7 | Conector falso confirma uma cobrança e concede uma vez, sem inferir timeout | `billing_connector_state_machine_is_idempotent` | integração | 7 | not_implemented |
+| PH-07 | fases §7 | Conector falso confirma uma cobrança e concede uma vez, sem inferir timeout | `concurrent_workers_start_exactly_one_provider_attempt`, `uncertain_connector_error_preserves_attempt_without_retry`, `billing_connector_state_machine_is_idempotent` | integração | 7 | not_implemented |
 | PH-08 | fases §8 | Stripe duplicado, atrasado ou fora de ordem não duplica efeito | `stripe_webhooks_converge_without_duplicate_effects` | contrato | 8 | not_implemented |
 | PH-09 | fases §9 | Voucher, cupom e Compensation nunca duplicam crédito sob concorrência | `promotion_and_compensation_effects_are_unique` | concorrência | 9 | not_implemented |
 | PH-10 | fases §10 | Restore, replay e reconciliação convergem sem editar histórico | `reconciliation_recovers_without_history_mutation` | recuperação | 10 | not_implemented |
