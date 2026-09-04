@@ -35,6 +35,10 @@ Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 - `/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile` for
   non-destructive item ledger reconciliation.
 
+The provider-neutral Billing foundation defines connector capabilities and the
+normalized collection state machine. No production payment provider is enabled
+until its adapter and signed webhook flow are configured.
+
 ## Template Bootstrap
 
 After creating a new repository from this template, run:
