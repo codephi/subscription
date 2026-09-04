@@ -188,7 +188,8 @@ async fn assert_workspace_event_counts(pool: &sqlx::PgPool, workspace_id: uuid::
         "SELECT (SELECT count(*) FROM integration_inbox WHERE workspace_id=$1), \
          (SELECT count(*) FROM integration_inbox_quarantine q JOIN integration_inbox i \
           ON i.event_id=q.event_id WHERE i.workspace_id=$1), \
-         (SELECT count(*) FROM outbox_events WHERE workspace_id=$1)",
+         (SELECT count(*) FROM outbox_events WHERE workspace_id=$1 \
+          AND event_type='workspace.projection_updated')",
     )
     .bind(workspace_id)
     .fetch_one(pool)
@@ -209,11 +210,27 @@ async fn outbox_retries_dead_letters_and_replays() {
         .oneshot(signed_workspace_event_request(secret, created))
         .await
         .expect("request failed");
-    let event_id = sqlx::query_scalar("SELECT event_id FROM outbox_events WHERE workspace_id=$1")
-        .bind(workspace_id)
-        .fetch_one(&pool)
+    let event_id = sqlx::query_scalar(
+        "SELECT event_id FROM outbox_events WHERE workspace_id=$1 \
+         AND event_type='workspace.projection_updated'",
+    )
+    .bind(workspace_id)
+    .fetch_one(&pool)
+    .await
+    .expect("outbox event");
+    sqlx::query(
+        "UPDATE outbox_events SET delivered_at=now() WHERE workspace_id=$1 AND event_id<>$2",
+    )
+    .bind(workspace_id)
+    .bind(event_id)
+    .execute(&pool)
+    .await
+    .expect("isolate outbox event under test");
+    sqlx::query("UPDATE outbox_events SET occurred_at='1900-01-01T00:00:00Z' WHERE event_id=$1")
+        .bind(event_id)
+        .execute(&pool)
         .await
-        .expect("outbox event");
+        .expect("prioritize outbox event under test");
     fail_until_dead_lettered(&pool, event_id, delivery_secret).await;
     let replay = router
         .oneshot(
@@ -308,7 +325,8 @@ async fn concurrent_workspace_event_delivery_has_one_effect() {
     let counts: (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM workspace_projections WHERE workspace_id=$1), \
          (SELECT count(*) FROM integration_inbox WHERE workspace_id=$1), \
-         (SELECT count(*) FROM outbox_events WHERE workspace_id=$1)",
+         (SELECT count(*) FROM outbox_events WHERE workspace_id=$1 \
+          AND event_type='workspace.projection_updated')",
     )
     .bind(workspace_id)
     .fetch_one(&pool)

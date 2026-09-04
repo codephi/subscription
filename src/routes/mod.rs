@@ -12,6 +12,7 @@ pub mod internal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod system;
+pub mod wallets;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -29,6 +30,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
         .merge(system::router())
         .merge(internal::router())
         .merge(catalog::router())
+        .merge(wallets::router())
         .split_for_parts();
 
     let api_router = api_router.merge(SwaggerUi::new("/docs").url("/openapi.json", api));

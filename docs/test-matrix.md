@@ -12,7 +12,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | PH-00 | fases §0 | Contratos identificam workspace, ator, estados bloqueadores e fronteira com Accounts | `contract_documents_cover_phase_zero_decisions` | contrato | 0 | passing |
 | PH-01 | fases §1 | Assinatura inválida não altera estado; inbox/outbox convergem sob duplicação e falha | `workspace_event_foundation_is_atomic_and_idempotent`, `outbox_retries_dead_letters_and_replays` | integração | 1 | passing |
 | PH-02 | fases §2 | Versão publicada determina preços, itens faturáveis e escopo de wallets de forma imutável | `published_catalog_scope_is_reproducible` | integração | 2 | passing |
-| PH-03 | fases §3 | Provisionamento duplicado/concorrente converge e estados externos bloqueiam mutações | `wallet_provisioning_converges_for_workspace_lifecycle` | concorrência | 3 | not_implemented |
+| PH-03 | fases §3 | Provisionamento duplicado/concorrente converge e estados externos bloqueiam mutações | `wallet_provisioning_converges_for_workspace_lifecycle` | concorrência | 3 | passing |
 | PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | not_implemented |
 | PH-05 | fases §5 | Franquia gratuita concede e expira uma vez por ciclo | `subscription_cycle_grant_and_expiry_are_unique` | integração | 5 | not_implemented |
 | PH-06 | fases §6 | Consumos concorrentes não perdem unidades e rejeições são totalmente atômicas | `usage_conversion_is_concurrent_and_atomic` | concorrência | 6 | not_implemented |
@@ -39,18 +39,18 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | CC-12 | técnico §7 | Duas execuções do mesmo ciclo geram uma franquia | `subscription_cycle_executes_once` | concorrência | 5 | not_implemented |
 | CC-13 | técnico §7 | Falha pré-commit não deixa efeitos parciais | `transaction_failure_rolls_back_all_effects` | integração | 4 | not_implemented |
 | CC-14 | técnico §7 | Retry pós-commit retorna conflito e permite consultar o original | `post_commit_retry_finds_original_transaction` | integração | 4 | not_implemented |
-| CC-15 | técnico §7 | Provisionamento concorrente reutiliza a mesma wallet | `concurrent_provisioning_reuses_wallets` | concorrência | 3 | not_implemented |
+| CC-15 | técnico §7 | Provisionamento concorrente reutiliza a mesma wallet | `concurrent_provisioning_reuses_wallets` | concorrência | 3 | passing |
 | CC-16 | técnico §7 | Consumo nunca cria wallet de forma lazy | `usage_rejects_missing_wallet` | integração | 6 | not_implemented |
 | CC-17 | técnico §7 | Desativação e consumo obedecem a ordem do lock | `wallet_deactivation_serializes_with_usage` | concorrência | 6 | not_implemented |
-| CC-18 | técnico §7 | Customer wallet só ativa com todas as item wallets esperadas | `customer_wallet_waits_for_complete_scope` | integração | 3 | not_implemented |
+| CC-18 | técnico §7 | Customer wallet só ativa com todas as item wallets esperadas | `customer_wallet_waits_for_complete_scope` | integração | 3 | passing |
 
 ## Critérios normativos de aceitação
 
 | ID | Origem | Grupo de cenários coberto | Testes | Fase | Estado |
 |---|---|---|---|---:|---|
 | AC-01 | técnico §9 Créditos/Price | Tipos inteiros, JSON decimal, ausência de moeda, preços `unit` e `tiered`, validação e overflow | `credit_units_*`, `price_version_*` | 2 | passing |
-| AC-02 | técnico §9 Hierarquia | Uma customer wallet, item wallet faturável única, vínculo pai, ausência para entitlement-only | `wallet_hierarchy_*` | 3 | not_implemented |
-| AC-03 | técnico §9 Provisionamento | Escopo completo, estado efetivo append-only, reconciliação e ausência de criação lazy | `wallet_provisioning_*` | 3 | not_implemented |
+| AC-02 | técnico §9 Hierarquia | Uma customer wallet, item wallet faturável única, vínculo pai, ausência para entitlement-only | `wallet_hierarchy_*` | 3 | passing |
+| AC-03 | técnico §9 Provisionamento | Escopo completo, estado efetivo append-only, reconciliação e ausência de criação lazy | `wallet_provisioning_*` | 3 | passing |
 | AC-04 | técnico §9 Consumo | Conversões 1:1/bloco/tier, pendente, saldo zero, insuficiência e item inválido | `usage_*` | 6 | not_implemented |
 | AC-05 | técnico §9 Elegibilidade | Plano utilizável, entitlement, renovação inativa e crédito suficiente | `eligibility_*` | 6 | not_implemented |
 | AC-06 | técnico §9 Idempotência | Reuso de chave/transação, payload distinto, timeout pós-commit e deduplicação interna | `idempotency_*` | 4 | not_implemented |
@@ -77,3 +77,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo build --all-features
 cargo test --all-features
 ```
+
+## Requisitos transversais adicionais
+
+| ID | Origem | Cenário | Teste | Tipo | Fase | Estado |
+|---|---|---|---|---|---:|---|
+| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas e erros | `assert_openapi_contains_catalog`, `assert_wallet_swagger` | contrato | transversal | passing |

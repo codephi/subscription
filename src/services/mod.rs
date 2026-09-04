@@ -4,4 +4,5 @@ pub mod health;
 pub mod integrations;
 pub mod outbox;
 pub mod signatures;
+pub mod wallets;
 pub mod workspace_events;

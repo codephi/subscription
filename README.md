@@ -10,6 +10,10 @@ Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It e
   versioned billing catalog.
 - `/v1/catalog-scope/current` for the immutable item/price snapshot used by
   wallet provisioning.
+- `/v1/workspaces/{workspace_id}/wallets` and `/wallet-provisioning` for the
+  materialized wallet hierarchy and readiness state.
+- `/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile` for
+  idempotent recovery after catalog scope changes.
 
 ## Template Bootstrap
 
@@ -52,7 +56,8 @@ If you want to override the detected name, pass it explicitly:
    - `cargo run`
 
 Migrations are managed by SQLx and executed on startup from `migrations/`.
-Swagger UI is available at `/docs` with the generated OpenAPI contract.
+Swagger UI is available at `/docs` with the generated OpenAPI contract. Every
+new HTTP route is included in `/openapi.json` and covered by a contract check.
 
 Business and administrative routes intentionally have no general authentication
 middleware in the current delivery. Accounts and outgoing integration events

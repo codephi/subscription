@@ -38,6 +38,9 @@ fn contract_documents_cover_phase_zero_decisions() {
     assert!(accounts_boundary.contains("autenticação geral foi adiada"));
     assert!(event_delivery.contains("HMAC-SHA256"));
     assert!(event_delivery.contains("quarentena"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.started"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.completed"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.failed"));
 }
 
 fn assert_required_fields(schema: &Value, expected_fields: &[&str]) {

@@ -18,7 +18,16 @@
   ],
   "properties": {
     "event_id": { "type": "string", "format": "uuid" },
-    "event_type": { "type": "string", "minLength": 1 },
+    "event_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Versioned domain fact. Wallet provisioning emits workspace_provisioning.started, workspace_provisioning.completed, or workspace_provisioning.failed.",
+      "examples": [
+        "workspace_provisioning.started",
+        "workspace_provisioning.completed",
+        "workspace_provisioning.failed"
+      ]
+    },
     "schema_version": { "const": 1 },
     "aggregate_type": { "type": "string", "minLength": 1 },
     "aggregate_id": { "type": "string", "format": "uuid" },

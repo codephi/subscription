@@ -8,7 +8,7 @@ use crate::{
         WorkspaceEventType,
     },
     error::{ApiError, ApiResult},
-    repositories::database::DatabaseRepository,
+    repositories::{database::DatabaseRepository, wallets::provision_wallets_for_event},
 };
 
 struct WorkspaceProjection {
@@ -249,6 +249,7 @@ async fn finalize_applied(
     event: &WorkspaceEventEnvelope,
     status: &str,
 ) -> ApiResult<WorkspaceEventResponse> {
+    provision_wallets_for_event(transaction, event, status).await?;
     mark_inbox(transaction, event.event_id, "PROCESSED").await?;
     insert_outbox(transaction, event, status).await?;
     insert_audit(transaction, event, status).await?;

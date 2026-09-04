@@ -1,0 +1,75 @@
+use axum::{
+    extract::{Path, State},
+    Json,
+};
+use utoipa_axum::{router::OpenApiRouter, routes};
+use uuid::Uuid;
+
+use crate::{
+    dto::wallets::{WalletHierarchyResponse, WalletProvisioningResponse},
+    error::{ApiResult, ErrorResponse},
+    services::wallets,
+    state::AppState,
+};
+
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(get_wallets))
+        .routes(routes!(get_wallet_provisioning))
+        .routes(routes!(reconcile_wallet_provisioning))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/workspaces/{workspace_id}/wallets",
+    params(("workspace_id" = Uuid, Path)),
+    responses(
+        (status = 200, body = WalletHierarchyResponse),
+        (status = 503, body = ErrorResponse, description = "Wallet hierarchy is incomplete")
+    )
+)]
+async fn get_wallets(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+) -> ApiResult<Json<WalletHierarchyResponse>> {
+    Ok(Json(
+        wallets::get_wallets(&state.database(), workspace_id).await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/workspaces/{workspace_id}/wallet-provisioning",
+    params(("workspace_id" = Uuid, Path)),
+    responses(
+        (status = 200, body = WalletProvisioningResponse),
+        (status = 503, body = ErrorResponse, description = "Provisioning has not completed")
+    )
+)]
+async fn get_wallet_provisioning(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+) -> ApiResult<Json<WalletProvisioningResponse>> {
+    Ok(Json(
+        wallets::get_provisioning(&state.database(), workspace_id).await?,
+    ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile",
+    params(("workspace_id" = Uuid, Path)),
+    responses(
+        (status = 200, body = WalletProvisioningResponse),
+        (status = 404, body = ErrorResponse, description = "Workspace does not exist"),
+        (status = 503, body = ErrorResponse, description = "Current catalog scope is unavailable")
+    )
+)]
+async fn reconcile_wallet_provisioning(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+) -> ApiResult<Json<WalletProvisioningResponse>> {
+    Ok(Json(
+        wallets::reconcile(&state.database(), workspace_id).await?,
+    ))
+}
