@@ -87,7 +87,8 @@ contract, and `/health` for the liveness check. Values copied from
 
 Migrations are managed by SQLx and executed on startup from `migrations/`.
 Swagger UI is available at `/docs` with the generated OpenAPI contract. Every
-new HTTP route is included in `/openapi.json` and covered by a contract check.
+new HTTP route is included in `/openapi.json`, assigned to one domain category,
+and covered by a contract check.
 
 Business and administrative routes intentionally have no general authentication
 middleware in the current delivery. Accounts and outgoing integration events

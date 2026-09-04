@@ -10,6 +10,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[utoipa::path(
     get,
     path = "/health",
+    tag = "System",
     summary = "Health check",
     description = "Returns the current health status payload.",
     responses(

@@ -29,7 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reconcile_item_usage))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/usage-events",
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/usage-events", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateUsageEventRequest,
     responses(
@@ -57,7 +57,7 @@ async fn create_usage_event(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/products/{product_id}/eligibility",
+#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/products/{product_id}/eligibility", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("product_id" = Uuid, Path)),
     responses((status = 200, body = ProductEligibilityResponse), (status = 404, body = ErrorResponse)))]
 async fn get_product_eligibility(
@@ -69,7 +69,7 @@ async fn get_product_eligibility(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet",
+#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path)),
     responses((status = 200, body = ItemWalletMeterResponse), (status = 503, body = ErrorResponse)))]
 async fn get_item_meter(
@@ -81,7 +81,7 @@ async fn get_item_meter(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement",
+#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path), ItemStatementQuery),
     responses((status = 200, body = ItemWalletStatementResponse), (status = 422, body = ErrorResponse)))]
 async fn get_item_statement(
@@ -94,7 +94,7 @@ async fn get_item_statement(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement/{entry_id}",
+#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement/{entry_id}", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path), ("entry_id" = Uuid, Path)),
     responses((status = 200, body = ItemWalletEntryResponse), (status = 404, body = ErrorResponse)))]
 async fn get_item_statement_entry(
@@ -106,7 +106,7 @@ async fn get_item_statement_entry(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/pricing-accumulators",
+#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/pricing-accumulators", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path), PricingAccumulatorQuery),
     responses((status = 200, body = [PricingAccumulatorResponse])))]
 async fn get_pricing_accumulators(
@@ -125,7 +125,7 @@ async fn get_pricing_accumulators(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile",
+#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile", tag = "Operations",
     params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path)),
     responses((status = 200, body = UsageReconciliationResponse), (status = 503, body = ErrorResponse)))]
 async fn reconcile_item_usage(

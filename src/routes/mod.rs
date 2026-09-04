@@ -24,6 +24,17 @@ pub mod wallets;
         description = "Starter API with health and echo features.",
         version = env!("CARGO_PKG_VERSION"),
         license(name = "Apache-2.0", url = "https://www.apache.org/licenses/LICENSE-2.0.html")
+    ),
+    tags(
+        (name = "System", description = "Liveness and diagnostic endpoints"),
+        (name = "Integrations", description = "Signed inbound events from external domains"),
+        (name = "Catalog", description = "Products, items, prices, and catalog scope"),
+        (name = "Wallets", description = "Provisioned customer and item wallet lifecycle"),
+        (name = "Credits", description = "Credit grants, balances, and customer statements"),
+        (name = "Subscriptions", description = "Commercial plans, customer plans, and cycles"),
+        (name = "Usage", description = "Metered usage, eligibility, and item statements"),
+        (name = "Operations", description = "Administrative replay and reconciliation operations"),
+        (name = "Billing", description = "Provider-neutral collection and payment workflows")
     )
 )]
 struct ApiDoc;

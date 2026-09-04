@@ -23,6 +23,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[utoipa::path(
     post,
     path = "/v1/internal/accounts/workspace-events",
+    tag = "Integrations",
     request_body = WorkspaceEventEnvelope,
     responses((status = 202, body = WorkspaceEventResponse))
 )]
@@ -40,6 +41,7 @@ async fn receive_workspace_event(
 #[utoipa::path(
     post,
     path = "/v1/admin/integration-inbox/{event_id}/replay",
+    tag = "Operations",
     params(("event_id" = Uuid, Path)),
     responses((status = 200, body = WorkspaceEventResponse))
 )]
@@ -54,6 +56,7 @@ async fn replay_workspace_event(
 #[utoipa::path(
     post,
     path = "/v1/admin/outbox-events/{event_id}/replay",
+    tag = "Operations",
     params(("event_id" = Uuid, Path)),
     responses((status = 204))
 )]

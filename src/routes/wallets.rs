@@ -22,6 +22,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[utoipa::path(
     get,
     path = "/v1/workspaces/{workspace_id}/wallets",
+    tag = "Wallets",
     params(("workspace_id" = Uuid, Path)),
     responses(
         (status = 200, body = WalletHierarchyResponse),
@@ -40,6 +41,7 @@ async fn get_wallets(
 #[utoipa::path(
     get,
     path = "/v1/workspaces/{workspace_id}/wallet-provisioning",
+    tag = "Wallets",
     params(("workspace_id" = Uuid, Path)),
     responses(
         (status = 200, body = WalletProvisioningResponse),
@@ -58,6 +60,7 @@ async fn get_wallet_provisioning(
 #[utoipa::path(
     post,
     path = "/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile",
+    tag = "Operations",
     params(("workspace_id" = Uuid, Path)),
     responses(
         (status = 200, body = WalletProvisioningResponse),

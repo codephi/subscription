@@ -83,4 +83,4 @@ cargo test --all-features
 
 | ID | Origem | Cenário | Teste | Tipo | Fase | Estado |
 |---|---|---|---|---|---:|---|
-| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas e erros | `assert_openapi_contains_catalog`, `assert_wallet_swagger`, `assert_credit_swagger`, `assert_plan_swagger`, `usage_swagger_exposes_decimal_contract` | contrato | transversal | passing |
+| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas, erros e uma categoria de domínio declarada | `assert_openapi_contains_catalog`, `assert_wallet_swagger`, `assert_credit_swagger`, `assert_plan_swagger`, `usage_swagger_exposes_decimal_contract`, `swagger_operations_have_one_declared_domain_category` | contrato | transversal | passing |

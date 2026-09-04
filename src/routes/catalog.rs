@@ -29,7 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_current_catalog_scope))
 }
 
-#[utoipa::path(post, path = "/v1/products", request_body = CreateProductRequest,
+#[utoipa::path(post, path = "/v1/products", tag = "Catalog", request_body = CreateProductRequest,
     responses((status = 201, body = ProductResponse)))]
 async fn create_product(
     State(state): State<AppState>,
@@ -39,7 +39,7 @@ async fn create_product(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/products/{product_id}",
+#[utoipa::path(get, path = "/v1/products/{product_id}", tag = "Catalog",
     params(("product_id" = Uuid, Path)), responses((status = 200, body = ProductResponse)))]
 async fn get_product(
     State(state): State<AppState>,
@@ -50,7 +50,7 @@ async fn get_product(
     ))
 }
 
-#[utoipa::path(patch, path = "/v1/products/{product_id}",
+#[utoipa::path(patch, path = "/v1/products/{product_id}", tag = "Catalog",
     params(("product_id" = Uuid, Path)), request_body = UpdateProductRequest,
     responses((status = 200, body = ProductResponse)))]
 async fn update_product(
@@ -63,7 +63,7 @@ async fn update_product(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/products/{product_id}/items",
+#[utoipa::path(post, path = "/v1/products/{product_id}/items", tag = "Catalog",
     params(("product_id" = Uuid, Path)), request_body = CreateItemRequest,
     responses((status = 201, body = ItemResponse)))]
 async fn create_item(
@@ -75,7 +75,7 @@ async fn create_item(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/items/{item_id}", params(("item_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/items/{item_id}", tag = "Catalog", params(("item_id" = Uuid, Path)),
     responses((status = 200, body = ItemResponse)))]
 async fn get_item(
     State(state): State<AppState>,
@@ -84,7 +84,7 @@ async fn get_item(
     Ok(Json(catalog::get_item(&state.database(), item_id).await?))
 }
 
-#[utoipa::path(patch, path = "/v1/items/{item_id}", params(("item_id" = Uuid, Path)),
+#[utoipa::path(patch, path = "/v1/items/{item_id}", tag = "Catalog", params(("item_id" = Uuid, Path)),
     request_body = UpdateItemRequest, responses((status = 200, body = ItemResponse)))]
 async fn update_item(
     State(state): State<AppState>,
@@ -96,7 +96,7 @@ async fn update_item(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/items/{item_id}/price-versions",
+#[utoipa::path(post, path = "/v1/items/{item_id}/price-versions", tag = "Catalog",
     params(("item_id" = Uuid, Path)), request_body = CreatePriceVersionRequest,
     responses(
         (status = 201, body = PriceVersionResponse),
@@ -111,7 +111,7 @@ async fn create_price_version(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/price-versions/{price_id}",
+#[utoipa::path(get, path = "/v1/price-versions/{price_id}", tag = "Catalog",
     params(("price_id" = Uuid, Path)), responses((status = 200, body = PriceVersionResponse)))]
 async fn get_price_version(
     State(state): State<AppState>,
@@ -122,7 +122,7 @@ async fn get_price_version(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/price-versions/{price_id}/publish",
+#[utoipa::path(post, path = "/v1/price-versions/{price_id}/publish", tag = "Catalog",
     params(("price_id" = Uuid, Path)), responses(
         (status = 200, body = PriceVersionResponse),
         (status = 409, body = ErrorResponse, description = "Published or overlapping version")
@@ -136,7 +136,7 @@ async fn publish_price_version(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/catalog-scope/current",
+#[utoipa::path(get, path = "/v1/catalog-scope/current", tag = "Catalog",
     responses(
         (status = 200, body = CatalogScopeResponse),
         (status = 404, body = ErrorResponse, description = "No catalog scope has been published")

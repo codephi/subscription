@@ -35,7 +35,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(run_subscription_cycles))
 }
 
-#[utoipa::path(post, path = "/v1/subscriptions", request_body = CreateSubscriptionRequest,
+#[utoipa::path(post, path = "/v1/subscriptions", tag = "Subscriptions", request_body = CreateSubscriptionRequest,
     responses((status = 201, body = SubscriptionResponse), (status = 422, body = ErrorResponse)))]
 async fn create_subscription(
     State(state): State<AppState>,
@@ -47,7 +47,7 @@ async fn create_subscription(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/subscriptions/{subscription_id}",
+#[utoipa::path(get, path = "/v1/subscriptions/{subscription_id}", tag = "Subscriptions",
     params(("subscription_id" = Uuid, Path)), responses((status = 200, body = SubscriptionResponse)))]
 async fn get_subscription(
     State(state): State<AppState>,
@@ -58,7 +58,7 @@ async fn get_subscription(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/subscriptions/{subscription_id}/plans",
+#[utoipa::path(post, path = "/v1/subscriptions/{subscription_id}/plans", tag = "Subscriptions",
     params(("subscription_id" = Uuid, Path)), request_body = CreateSubscriptionPlanRequest,
     responses((status = 201, body = SubscriptionPlanResponse), (status = 422, body = ErrorResponse)))]
 async fn create_subscription_plan(
@@ -72,7 +72,7 @@ async fn create_subscription_plan(
     ))
 }
 
-#[utoipa::path(get, path = "/v1/subscription-plans/{plan_id}",
+#[utoipa::path(get, path = "/v1/subscription-plans/{plan_id}", tag = "Subscriptions",
     params(("plan_id" = Uuid, Path)), responses((status = 200, body = SubscriptionPlanResponse)))]
 async fn get_subscription_plan(
     State(state): State<AppState>,
@@ -81,7 +81,7 @@ async fn get_subscription_plan(
     Ok(Json(plans::get_plan(&state.database(), plan_id).await?))
 }
 
-#[utoipa::path(post, path = "/v1/subscription-plans/{plan_id}/revoke",
+#[utoipa::path(post, path = "/v1/subscription-plans/{plan_id}/revoke", tag = "Subscriptions",
     params(("plan_id" = Uuid, Path)), request_body = RevokePlanRequest,
     responses((status = 200, body = SubscriptionPlanResponse), (status = 409, body = ErrorResponse)))]
 async fn revoke_subscription_plan(
@@ -94,7 +94,7 @@ async fn revoke_subscription_plan(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/subscriptions/{subscription_id}/on-demand-plans",
+#[utoipa::path(post, path = "/v1/subscriptions/{subscription_id}/on-demand-plans", tag = "Subscriptions",
     params(("subscription_id" = Uuid, Path)), request_body = CreateOnDemandPlanRequest,
     responses((status = 201, body = OnDemandPlanResponse), (status = 422, body = ErrorResponse)))]
 async fn create_on_demand_plan(
@@ -108,7 +108,7 @@ async fn create_on_demand_plan(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans",
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans", tag = "Subscriptions",
     params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateCustomerPlanRequest,
     responses(
@@ -128,7 +128,7 @@ async fn create_customer_plan(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}",
+#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}", tag = "Subscriptions",
     params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
     responses((status = 200, body = CustomerPlanResponse)))]
 async fn get_customer_plan(
@@ -140,7 +140,7 @@ async fn get_customer_plan(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/cancel",
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/cancel", tag = "Subscriptions",
     params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
     responses((status = 200, body = CustomerPlanResponse), (status = 409, body = ErrorResponse)))]
 async fn cancel_customer_plan(
@@ -152,7 +152,7 @@ async fn cancel_customer_plan(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/plan-transitions",
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/plan-transitions", tag = "Subscriptions",
     params(
         ("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path),
         ("Idempotency-Key" = String, Header)
@@ -180,7 +180,7 @@ async fn transition_customer_plan(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/revoke",
+#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/revoke", tag = "Operations",
     params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
     request_body = RevokeCustomerPlanRequest,
     responses((status = 200, body = CustomerPlanResponse), (status = 409, body = ErrorResponse)))]
@@ -195,7 +195,7 @@ async fn revoke_customer_plan(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/admin/subscription-cycles/run",
+#[utoipa::path(post, path = "/v1/admin/subscription-cycles/run", tag = "Operations",
     request_body = RunSubscriptionCyclesRequest,
     responses(
         (status = 200, body = RunSubscriptionCyclesResponse),

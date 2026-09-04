@@ -29,6 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[utoipa::path(
     get,
     path = "/echo",
+    tag = "System",
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
 #[tracing::instrument(name = "echo.get", skip(headers, body))]
@@ -44,6 +45,7 @@ async fn get_echo(
 #[utoipa::path(
     post,
     path = "/echo",
+    tag = "System",
     request_body = String,
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
@@ -60,6 +62,7 @@ async fn post_echo(
 #[utoipa::path(
     put,
     path = "/echo",
+    tag = "System",
     request_body = String,
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
@@ -76,6 +79,7 @@ async fn put_echo(
 #[utoipa::path(
     patch,
     path = "/echo",
+    tag = "System",
     request_body = String,
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
@@ -92,6 +96,7 @@ async fn patch_echo(
 #[utoipa::path(
     delete,
     path = "/echo",
+    tag = "System",
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
 #[tracing::instrument(name = "echo.delete", skip(headers, body))]
@@ -107,6 +112,7 @@ async fn delete_echo(
 #[utoipa::path(
     head,
     path = "/echo",
+    tag = "System",
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
 #[tracing::instrument(name = "echo.head", skip(headers, body))]
@@ -122,6 +128,7 @@ async fn head_echo(
 #[utoipa::path(
     options,
     path = "/echo",
+    tag = "System",
     responses((status = 200, description = "Echo response", body = EchoResponse))
 )]
 #[tracing::instrument(name = "echo.options", skip(headers, body))]
