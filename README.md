@@ -55,8 +55,9 @@ If you want to override the detected name, pass it explicitly:
    - If you are upgrading from an older Postgres image and see a volume layout error, recreate the Postgres volume once:
    - `docker compose down -v`
    - `docker compose up -d postgres jaeger`
-2. Set `DATABASE_URL` (example for the Compose service):
-   - `export DATABASE_URL=postgres://postgres:postgres@localhost:5453/postgres`
+2. Create the local environment file (already ignored by Git):
+   - `cp .env.example .env`
+   - Its database and OTLP endpoints match the ports exposed by Docker Compose.
 3. Optionally set:
    - `APP_HOST` and `APP_PORT` (defaults: `127.0.0.1:8080`).
    - `APP_CORS_ALLOW_ORIGINS` (comma-separated or `*`) and `APP_BODY_LIMIT_BYTES`.
