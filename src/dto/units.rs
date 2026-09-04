@@ -59,6 +59,26 @@ impl ItemUnits {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, ToSchema)]
+#[schema(value_type = String, example = "0")]
+pub struct ItemUnitBoundary(i64);
+
+impl ItemUnitBoundary {
+    pub fn non_negative(value: i64) -> ApiResult<Self> {
+        if value >= 0 {
+            return Ok(Self(value));
+        }
+        Err(ApiError::unprocessable(
+            "invalid_item_unit_boundary",
+            format!("item unit boundary {value} must be non-negative"),
+        ))
+    }
+
+    pub fn value(self) -> i64 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UtcPeriod {
     pub start: DateTime<Utc>,
@@ -111,6 +131,25 @@ impl<'de> Deserialize<'de> for ItemUnits {
     {
         let value = deserialize_i64_string(deserializer, "item_units")?;
         Self::positive(value).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for ItemUnitBoundary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for ItemUnitBoundary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = deserialize_i64_string(deserializer, "item unit boundary")?;
+        Self::non_negative(value).map_err(de::Error::custom)
     }
 }
 

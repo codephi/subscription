@@ -6,6 +6,10 @@ Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It e
 - `/echo` to reflect the incoming request across all HTTP verbs with tracing spans per method when OTEL is enabled.
 - `/mcp` as an optional MCP Streamable HTTP endpoint for `health_check` and `echo_request` tools when the `mcp` Cargo feature is enabled.
 - `/v1/internal/accounts/workspace-events` for signed, ordered workspace lifecycle events.
+- `/v1/products`, `/v1/items/{id}`, and `/v1/price-versions/{id}` for the
+  versioned billing catalog.
+- `/v1/catalog-scope/current` for the immutable item/price snapshot used by
+  wallet provisioning.
 
 ## Template Bootstrap
 
@@ -97,6 +101,7 @@ The SQLx query macros use the database schema at compile time. Make sure `DATABA
 
 ### Testing
 
+- Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`
 - Integration tests: `cargo test --test integration`

@@ -1,0 +1,11 @@
+DROP TABLE catalog_scope_current;
+DROP TABLE catalog_scope_items;
+DROP TABLE catalog_scope_versions;
+DROP TRIGGER trg_protect_published_price_tier ON price_tiers;
+DROP FUNCTION protect_published_price_tier();
+DROP TRIGGER trg_protect_published_price_version ON price_versions;
+DROP FUNCTION protect_published_price_version();
+DROP TABLE price_tiers;
+DROP TABLE price_versions;
+DROP TABLE items;
+DROP TABLE products;

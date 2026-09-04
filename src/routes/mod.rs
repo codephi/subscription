@@ -6,6 +6,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{config::AppConfig, state::AppState};
 
+pub mod catalog;
 mod cors;
 pub mod internal;
 #[cfg(feature = "mcp")]
@@ -27,6 +28,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
     let (api_router, api) = utoipa_axum::router::OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(system::router())
         .merge(internal::router())
+        .merge(catalog::router())
         .split_for_parts();
 
     let api_router = api_router.merge(SwaggerUi::new("/docs").url("/openapi.json", api));

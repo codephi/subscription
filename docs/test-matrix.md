@@ -11,7 +11,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 |---|---|---|---|---|---:|---|
 | PH-00 | fases §0 | Contratos identificam workspace, ator, estados bloqueadores e fronteira com Accounts | `contract_documents_cover_phase_zero_decisions` | contrato | 0 | passing |
 | PH-01 | fases §1 | Assinatura inválida não altera estado; inbox/outbox convergem sob duplicação e falha | `workspace_event_foundation_is_atomic_and_idempotent`, `outbox_retries_dead_letters_and_replays` | integração | 1 | passing |
-| PH-02 | fases §2 | Versão publicada determina preços, itens faturáveis e escopo de wallets de forma imutável | `published_catalog_scope_is_reproducible` | integração | 2 | not_implemented |
+| PH-02 | fases §2 | Versão publicada determina preços, itens faturáveis e escopo de wallets de forma imutável | `published_catalog_scope_is_reproducible` | integração | 2 | passing |
 | PH-03 | fases §3 | Provisionamento duplicado/concorrente converge e estados externos bloqueiam mutações | `wallet_provisioning_converges_for_workspace_lifecycle` | concorrência | 3 | not_implemented |
 | PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | not_implemented |
 | PH-05 | fases §5 | Franquia gratuita concede e expira uma vez por ciclo | `subscription_cycle_grant_and_expiry_are_unique` | integração | 5 | not_implemented |
@@ -48,7 +48,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 
 | ID | Origem | Grupo de cenários coberto | Testes | Fase | Estado |
 |---|---|---|---|---:|---|
-| AC-01 | técnico §9 Créditos/Price | Tipos inteiros, JSON decimal, ausência de moeda, preços `unit` e `tiered`, validação e overflow | `credit_units_*`, `price_version_*` | 2 | not_implemented |
+| AC-01 | técnico §9 Créditos/Price | Tipos inteiros, JSON decimal, ausência de moeda, preços `unit` e `tiered`, validação e overflow | `credit_units_*`, `price_version_*` | 2 | passing |
 | AC-02 | técnico §9 Hierarquia | Uma customer wallet, item wallet faturável única, vínculo pai, ausência para entitlement-only | `wallet_hierarchy_*` | 3 | not_implemented |
 | AC-03 | técnico §9 Provisionamento | Escopo completo, estado efetivo append-only, reconciliação e ausência de criação lazy | `wallet_provisioning_*` | 3 | not_implemented |
 | AC-04 | técnico §9 Consumo | Conversões 1:1/bloco/tier, pendente, saldo zero, insuficiência e item inválido | `usage_*` | 6 | not_implemented |

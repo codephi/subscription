@@ -58,6 +58,10 @@ impl ApiError {
         Self::domain(StatusCode::CONFLICT, code, message)
     }
 
+    pub fn not_found(code: &'static str, message: impl Into<String>) -> Self {
+        Self::domain(StatusCode::NOT_FOUND, code, message)
+    }
+
     pub fn service_unavailable(code: &'static str, message: impl Into<String>) -> Self {
         Self::domain(StatusCode::SERVICE_UNAVAILABLE, code, message)
     }
