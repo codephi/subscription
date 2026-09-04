@@ -8,6 +8,7 @@ use crate::{config::AppConfig, state::AppState};
 
 pub mod catalog;
 mod cors;
+pub mod credits;
 pub mod internal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
@@ -30,6 +31,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
         .merge(system::router())
         .merge(internal::router())
         .merge(catalog::router())
+        .merge(credits::router())
         .merge(wallets::router())
         .split_for_parts();
 

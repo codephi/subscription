@@ -13,7 +13,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | PH-01 | fases §1 | Assinatura inválida não altera estado; inbox/outbox convergem sob duplicação e falha | `workspace_event_foundation_is_atomic_and_idempotent`, `outbox_retries_dead_letters_and_replays` | integração | 1 | passing |
 | PH-02 | fases §2 | Versão publicada determina preços, itens faturáveis e escopo de wallets de forma imutável | `published_catalog_scope_is_reproducible` | integração | 2 | passing |
 | PH-03 | fases §3 | Provisionamento duplicado/concorrente converge e estados externos bloqueiam mutações | `wallet_provisioning_converges_for_workspace_lifecycle` | concorrência | 3 | passing |
-| PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | not_implemented |
+| PH-04 | fases §4 | Cada alteração de saldo tem um lançamento e créditos repetidos não duplicam efeito | `customer_wallet_ledger_is_atomic_and_idempotent` | concorrência | 4 | passing |
 | PH-05 | fases §5 | Franquia gratuita concede e expira uma vez por ciclo | `subscription_cycle_grant_and_expiry_are_unique` | integração | 5 | not_implemented |
 | PH-06 | fases §6 | Consumos concorrentes não perdem unidades e rejeições são totalmente atômicas | `usage_conversion_is_concurrent_and_atomic` | concorrência | 6 | not_implemented |
 | PH-07 | fases §7 | Conector falso confirma uma cobrança e concede uma vez, sem inferir timeout | `billing_connector_state_machine_is_idempotent` | integração | 7 | not_implemented |
@@ -27,8 +27,8 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 |---|---|---|---|---|---:|---|
 | CC-01 | técnico §7 | Chamadas do mesmo item são serializadas pelo `ItemWallet` | `same_item_usage_is_serialized` | concorrência | 6 | not_implemented |
 | CC-02 | técnico §7 | Itens diferentes acumulam em paralelo e convergem na customer wallet | `different_items_share_customer_balance_safely` | concorrência | 6 | not_implemented |
-| CC-03 | técnico §7 | `transaction_id` repetido cria um efeito e retorna conflito | `duplicate_transaction_id_has_one_effect` | concorrência | 4 | not_implemented |
-| CC-04 | técnico §7 | `Idempotency-Key` repetida com payload diferente cria no máximo um efeito | `duplicate_idempotency_key_has_one_effect` | concorrência | 4 | not_implemented |
+| CC-03 | técnico §7 | `transaction_id` repetido cria um efeito e retorna conflito | `duplicate_transaction_id_has_one_effect` | concorrência | 4 | passing |
+| CC-04 | técnico §7 | `Idempotency-Key` repetida com payload diferente cria no máximo um efeito | `duplicate_idempotency_key_has_one_effect` | concorrência | 4 | passing |
 | CC-05 | técnico §7 | Dois consumos de 600 formam um bloco de 1.000 e deixam 200 pendentes | `concurrent_partial_usage_forms_one_block` | concorrência | 6 | not_implemented |
 | CC-06 | técnico §7 | Consumo apenas pendente não bloqueia nem lança na customer wallet | `pending_only_usage_skips_customer_ledger` | integração | 6 | not_implemented |
 | CC-07 | técnico §7 | `accepted_at` após lock ordena fronteiras do mesmo item | `accepted_at_is_captured_after_item_lock` | concorrência | 6 | not_implemented |
@@ -37,8 +37,8 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | CC-10 | técnico §7 | Dois resgates do último voucher geram um crédito | `last_voucher_is_redeemed_once` | concorrência | 9 | not_implemented |
 | CC-11 | técnico §7 | Usuário externo repetido no cupom gera um crédito | `coupon_external_user_limit_is_atomic` | concorrência | 9 | not_implemented |
 | CC-12 | técnico §7 | Duas execuções do mesmo ciclo geram uma franquia | `subscription_cycle_executes_once` | concorrência | 5 | not_implemented |
-| CC-13 | técnico §7 | Falha pré-commit não deixa efeitos parciais | `transaction_failure_rolls_back_all_effects` | integração | 4 | not_implemented |
-| CC-14 | técnico §7 | Retry pós-commit retorna conflito e permite consultar o original | `post_commit_retry_finds_original_transaction` | integração | 4 | not_implemented |
+| CC-13 | técnico §7 | Falha pré-commit não deixa efeitos parciais | `transaction_failure_rolls_back_all_effects` | integração | 4 | passing |
+| CC-14 | técnico §7 | Retry pós-commit retorna conflito e permite consultar o original | `post_commit_retry_finds_original_transaction` | integração | 4 | passing |
 | CC-15 | técnico §7 | Provisionamento concorrente reutiliza a mesma wallet | `concurrent_provisioning_reuses_wallets` | concorrência | 3 | passing |
 | CC-16 | técnico §7 | Consumo nunca cria wallet de forma lazy | `usage_rejects_missing_wallet` | integração | 6 | not_implemented |
 | CC-17 | técnico §7 | Desativação e consumo obedecem a ordem do lock | `wallet_deactivation_serializes_with_usage` | concorrência | 6 | not_implemented |
@@ -53,7 +53,7 @@ suíte acumulada. Nenhuma fase posterior começa enquanto houver item
 | AC-03 | técnico §9 Provisionamento | Escopo completo, estado efetivo append-only, reconciliação e ausência de criação lazy | `wallet_provisioning_*` | 3 | passing |
 | AC-04 | técnico §9 Consumo | Conversões 1:1/bloco/tier, pendente, saldo zero, insuficiência e item inválido | `usage_*` | 6 | not_implemented |
 | AC-05 | técnico §9 Elegibilidade | Plano utilizável, entitlement, renovação inativa e crédito suficiente | `eligibility_*` | 6 | not_implemented |
-| AC-06 | técnico §9 Idempotência | Reuso de chave/transação, payload distinto, timeout pós-commit e deduplicação interna | `idempotency_*` | 4 | not_implemented |
+| AC-06 | técnico §9 Idempotência | Reuso de chave/transação, payload distinto, timeout pós-commit e deduplicação interna | `idempotency_*` | 4 | passing |
 | AC-07 | técnico §9 Ciclos | Recorrências semanal/mensal/trimestral/anual e datas de fim de mês | `subscription_calendar_*` | 5 | not_implemented |
 | AC-08 | técnico §9 Planos | Exclusividade, admissão, ativação, revogação, cancelamento e transições | `customer_plan_*` | 5 | not_implemented |
 | AC-09 | técnico §9 Lotes | Concessão, expiração, prioridade, alocação, reclassificação e conciliação | `credit_lot_*` | 5 | not_implemented |
@@ -82,4 +82,4 @@ cargo test --all-features
 
 | ID | Origem | Cenário | Teste | Tipo | Fase | Estado |
 |---|---|---|---|---|---:|---|
-| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas e erros | `assert_openapi_contains_catalog`, `assert_wallet_swagger` | contrato | transversal | passing |
+| SW-01 | solicitação do produto | Swagger UI permanece disponível e toda rota implementada consta no OpenAPI com seus schemas e erros | `assert_openapi_contains_catalog`, `assert_wallet_swagger`, `assert_credit_swagger` | contrato | transversal | passing |

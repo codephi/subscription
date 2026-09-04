@@ -25,7 +25,8 @@
       "examples": [
         "workspace_provisioning.started",
         "workspace_provisioning.completed",
-        "workspace_provisioning.failed"
+        "workspace_provisioning.failed",
+        "credit.granted"
       ]
     },
     "schema_version": { "const": 1 },

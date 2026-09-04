@@ -1,0 +1,9 @@
+DROP TRIGGER trg_wallet_transaction_references_append_only ON wallet_transaction_references;
+DROP TRIGGER trg_customer_wallet_entries_append_only ON customer_wallet_entries;
+DROP TRIGGER trg_direct_credits_append_only ON direct_credits;
+DROP FUNCTION reject_credit_history_mutation();
+DROP TABLE wallet_transaction_references;
+DROP TABLE credit_lots;
+DROP TABLE customer_wallet_entries;
+DROP TABLE direct_credits;
+DROP TABLE workspace_billing_configs;

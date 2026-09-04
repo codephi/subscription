@@ -147,6 +147,7 @@ async fn synchronize_wallets(
     start_provisioning(transaction, workspace_id, scope_version, item_ids.len()).await?;
     let (customer_wallet_id, mut changed) =
         ensure_customer_wallet(transaction, workspace_id, scope_version).await?;
+    ensure_billing_config(transaction, workspace_id).await?;
     for item_id in &item_ids {
         changed |= ensure_item_wallet(
             transaction,
@@ -270,6 +271,19 @@ async fn ensure_customer_wallet(
     .execute(&mut **transaction)
     .await?;
     Ok((actual_id, inserted))
+}
+
+async fn ensure_billing_config(
+    transaction: &mut Transaction<'_, Postgres>,
+    workspace_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO workspace_billing_configs (workspace_id) VALUES ($1) ON CONFLICT DO NOTHING",
+    )
+    .bind(workspace_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn ensure_item_wallet(

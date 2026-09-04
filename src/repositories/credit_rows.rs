@@ -1,0 +1,83 @@
+use sqlx::Row;
+use uuid::Uuid;
+
+use crate::{
+    dto::{
+        credits::{
+            CustomerWalletEntryResponse, WalletTransactionReferenceResponse,
+            WorkspaceBillingConfigResponse,
+        },
+        units::CreditUnits,
+    },
+    error::ApiResult,
+};
+
+pub(super) fn entry_from_row(
+    row: &sqlx::postgres::PgRow,
+    references: Vec<WalletTransactionReferenceResponse>,
+) -> CustomerWalletEntryResponse {
+    CustomerWalletEntryResponse {
+        customer_wallet_entry_id: row.get("customer_wallet_entry_id"),
+        customer_wallet_id: row.get("customer_wallet_id"),
+        customer_id: row.get("customer_id"),
+        sequence: row.get("entry_sequence"),
+        entry_type: row.get("entry_type"),
+        source_channel: row.get("source_channel"),
+        signed_credit_units: CreditUnits::new(row.get("signed_credit_units")),
+        balance_before_credit_units: CreditUnits::new(row.get("balance_before_credit_units")),
+        balance_after_credit_units: CreditUnits::new(row.get("balance_after_credit_units")),
+        transaction_id: row.get("transaction_id"),
+        description: row.get("description"),
+        metadata: row.get("metadata"),
+        request_id: row.get("request_id"),
+        references,
+        created_at: row.get("created_at"),
+    }
+}
+
+pub(super) fn reference_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> WalletTransactionReferenceResponse {
+    let direct_credit_id: Option<Uuid> = row.get("direct_credit_id");
+    let credit_lot_id: Option<Uuid> = row.get("credit_lot_id");
+    WalletTransactionReferenceResponse {
+        reference_kind: row.get("reference_kind"),
+        reference_id: direct_credit_id.or(credit_lot_id),
+        external_reference: row.get("external_reference"),
+    }
+}
+
+pub(super) fn billing_config_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> WorkspaceBillingConfigResponse {
+    WorkspaceBillingConfigResponse {
+        workspace_id: row.get("workspace_id"),
+        direct_credit_enabled: row.get("direct_credit_enabled"),
+        recurring_credit_enabled: row.get("recurring_credit_enabled"),
+        version: row.get("version"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+pub(super) fn entry_not_found(workspace_id: Uuid, transaction_id: &str) -> crate::error::ApiError {
+    crate::error::ApiError::not_found(
+        "wallet_transaction_not_found",
+        format!("transaction_id {transaction_id:?} does not exist in workspace {workspace_id}"),
+    )
+}
+
+pub(super) async fn load_references(
+    pool: &sqlx::PgPool,
+    entry_id: Uuid,
+) -> ApiResult<Vec<WalletTransactionReferenceResponse>> {
+    let rows = sqlx::query(
+        "SELECT reference_kind,direct_credit_id,credit_lot_id,external_reference \
+         FROM wallet_transaction_references WHERE customer_wallet_entry_id=$1 \
+         ORDER BY reference_kind,wallet_transaction_reference_id",
+    )
+    .bind(entry_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(reference_from_row).collect())
+}

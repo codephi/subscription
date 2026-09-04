@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod credits;
 pub mod echo;
 pub mod health;
 pub mod integrations;

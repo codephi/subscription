@@ -14,6 +14,12 @@ Starter project for building APIs with Axum, PostgreSQL, and OpenTelemetry. It e
   materialized wallet hierarchy and readiness state.
 - `/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile` for
   idempotent recovery after catalog scope changes.
+- `/v1/workspaces/{workspace_id}/credits/direct` for strictly idempotent direct
+  credit grants backed by an append-only ledger and credit lot.
+- `/v1/workspaces/{workspace_id}/customer-wallet/statement` and
+  `/customer-wallet/transactions/{transaction_id}` for cursor-based history.
+- `/v1/workspaces/{workspace_id}/billing-config` for source-specific credit
+  controls.
 
 ## Template Bootstrap
 
