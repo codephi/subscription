@@ -41,6 +41,18 @@ until its adapter and signed webhook flow are configured. Collection attempts
 are persisted before external I/O, use a stable provider idempotency key, and
 preserve uncertain outcomes without an automatic retry.
 
+Scheduled collections are not dispatched before `scheduled_at`. Outbox delivery
+preserves aggregate sequence across leases, retries and dead letters: a dead-lettered
+predecessor blocks later sequences until it is replayed and successfully delivered.
+Expired credit lots never fund usage; insufficient eligible credits return
+`409 insufficient_credit` and roll back every related write.
+
+Accounts event IDs are immutable identities: redelivery of the original envelope
+is deduplicated; a changed envelope with the same ID returns
+`409 workspace_event_identity_conflict` without changing the inbox or projection.
+Foundation tests inject a deferred PostgreSQL failure at commit and verify both
+complete rollback and a single persisted effect after retry.
+
 ## Template Bootstrap
 
 After creating a new repository from this template, run:
@@ -138,6 +150,18 @@ Current limitations:
 The SQLx query macros use the database schema at compile time. Make sure `DATABASE_URL` is set when building. If you prefer offline builds, run `cargo sqlx prepare` and set `SQLX_OFFLINE=true`.
 
 ### Testing
+
+Each integration fixture owns a clean disposable PostgreSQL container. Independent
+connections still exercise real database locks; fixtures do not share catalog or
+wallet state. PostgreSQL cleanup runs outside individual test runtimes, including
+after assertion failures. Docker must be running; the application database is not used.
+
+The [test matrix](docs/test-matrix.md) preserves individual normative scenarios and
+explicit coverage gaps. A green suite does **not** imply all V1 scenarios are covered.
+Use `bash scripts/check-phase-gate.sh 6` to validate phase 6 and every previous phase;
+any open matrix row blocks the gate before the full quality checks. `--check-only`
+prints coverage blockers without running Cargo. Phases 2–6 are under coverage
+revalidation; Billing/Stripe must not advance on the former grouped approvals.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

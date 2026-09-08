@@ -18,10 +18,13 @@ impl DatabaseRepository {
         worker_id: Uuid,
     ) -> ApiResult<Option<ClaimedOutboxEvent>> {
         let row = sqlx::query(
-            "WITH candidate AS (SELECT event_id FROM outbox_events WHERE delivered_at IS NULL \
-             AND dead_lettered_at IS NULL AND available_at <= now() AND \
-             (lease_until IS NULL OR lease_until < now()) ORDER BY occurred_at LIMIT 1 \
-             FOR UPDATE SKIP LOCKED) UPDATE outbox_events o SET lease_owner=$1, \
+            "WITH candidate AS (SELECT e.event_id FROM outbox_events e WHERE e.delivered_at IS NULL \
+             AND e.dead_lettered_at IS NULL AND e.available_at <= now() AND \
+             (e.lease_until IS NULL OR e.lease_until < now()) AND NOT EXISTS ( \
+               SELECT 1 FROM outbox_events predecessor WHERE predecessor.aggregate_type=e.aggregate_type \
+               AND predecessor.aggregate_id=e.aggregate_id AND predecessor.aggregate_sequence<e.aggregate_sequence \
+               AND predecessor.delivered_at IS NULL) ORDER BY e.occurred_at,e.event_id LIMIT 1 \
+             FOR UPDATE OF e SKIP LOCKED) UPDATE outbox_events o SET lease_owner=$1, \
              lease_until=now()+interval '30 seconds' FROM candidate c WHERE o.event_id=c.event_id \
              RETURNING o.event_id,o.payload,o.delivery_attempts",
         )

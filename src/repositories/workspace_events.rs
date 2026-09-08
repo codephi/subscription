@@ -131,12 +131,35 @@ async fn duplicate_response(
     mut transaction: Transaction<'_, Postgres>,
     event: &WorkspaceEventEnvelope,
 ) -> ApiResult<WorkspaceEventResponse> {
+    validate_duplicate_identity(&mut transaction, event).await?;
     let projection = lock_projection(&mut transaction, event.workspace_id).await?;
     transaction.commit().await?;
     Ok(response_from_projection(
         event.event_id,
         WorkspaceEventOutcome::Duplicate,
         projection,
+    ))
+}
+
+async fn validate_duplicate_identity(
+    transaction: &mut Transaction<'_, Postgres>,
+    event: &WorkspaceEventEnvelope,
+) -> ApiResult<()> {
+    let identical: bool =
+        sqlx::query_scalar("SELECT payload=$2 FROM integration_inbox WHERE event_id=$1")
+            .bind(event.event_id)
+            .bind(serde_json::to_value(event).map_err(ApiError::serialization)?)
+            .fetch_one(&mut **transaction)
+            .await?;
+    if identical {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "workspace_event_identity_conflict",
+        format!(
+            "event_id {} must retain its original envelope and workspace",
+            event.event_id
+        ),
     ))
 }
 

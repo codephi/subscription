@@ -163,9 +163,10 @@ async fn allocate_credit_lots(
     if remaining == 0 {
         return Ok(());
     }
-    Err(ApiError::unexpected(format!(
-        "wallet balance covered debit {required}, but eligible credit lots are short by {remaining}"
-    )))
+    Err(ApiError::conflict(
+        "insufficient_credit",
+        format!("workspace {workspace_id} eligible credit lots are short by {remaining} for debit {required}"),
+    ))
 }
 
 async fn persist_lot_allocation(

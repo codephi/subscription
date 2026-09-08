@@ -25,7 +25,13 @@ pub fn router() -> OpenApiRouter<AppState> {
     path = "/v1/internal/accounts/workspace-events",
     tag = "Integrations",
     request_body = WorkspaceEventEnvelope,
-    responses((status = 202, body = WorkspaceEventResponse))
+    responses(
+        (status = 202, body = WorkspaceEventResponse),
+        (status = 401, body = crate::error::ErrorResponse, description = "Missing or invalid webhook signature"),
+        (status = 409, body = crate::error::ErrorResponse, description = "Event identity reused with different content"),
+        (status = 422, body = crate::error::ErrorResponse, description = "Invalid schema, sequence, or workspace context"),
+        (status = 503, body = crate::error::ErrorResponse, description = "Accounts webhook secret is not configured")
+    )
 )]
 async fn receive_workspace_event(
     State(state): State<AppState>,

@@ -201,6 +201,30 @@ async fn expired_request_is_rejected_before_attempt_or_provider_call() {
     assert_eq!(attempts, 0);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn future_collection_does_not_start_or_persist_an_attempt() {
+    let (repository, request_id) = setup_collection_request().await;
+    sqlx::query("UPDATE collection_requests SET scheduled_at=now()+interval '1 day', payment_expires_at=now()+interval '2 days' WHERE collection_request_id=$1")
+        .bind(request_id).execute(&repository.pool()).await.expect("future schedule");
+    let connector = FakeBillingConnector::new(FakeBehavior::Return(pending_result()));
+    let result = billing::execute_collection_attempt(&repository, &connector, request_id)
+        .await
+        .expect("future request is not due");
+    assert!(result.is_none());
+    assert_eq!(connector.call_count(), 0);
+    let state: (String, i32, i64, i64) = sqlx::query_as(
+        "SELECT status,attempts_started, \
+         (SELECT count(*) FROM collection_attempts WHERE collection_request_id=$1), \
+         (SELECT count(*) FROM billing_payments WHERE collection_request_id=$1) \
+         FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(request_id)
+    .fetch_one(&repository.pool())
+    .await
+    .expect("unchanged request");
+    assert_eq!(state, ("SCHEDULED".into(), 0, 0, 0));
+}
+
 async fn setup_collection_request() -> (DatabaseRepository, Uuid) {
     let (_, pool) = support::setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
@@ -221,6 +245,36 @@ async fn setup_collection_request() -> (DatabaseRepository, Uuid) {
     insert_payment_binding(&pool, workspace_id, connection_id, binding_id).await;
     insert_collection_request(&pool, workspace_id, binding_id, request_id).await;
     (repository, request_id)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_collection_ignores_late_synchronous_result() {
+    let (repository, request_id) = setup_collection_request().await;
+    let attempt = repository
+        .begin_collection_attempt(request_id)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("UPDATE collection_attempts SET status='SUCCEEDED' WHERE collection_request_id=$1")
+        .bind(request_id)
+        .execute(&repository.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE billing_payments SET state='CONFIRMED' WHERE collection_request_id=$1")
+        .bind(request_id)
+        .execute(&repository.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE collection_requests SET status='PAID' WHERE collection_request_id=$1")
+        .bind(request_id)
+        .execute(&repository.pool())
+        .await
+        .unwrap();
+    repository
+        .record_collection_result(&attempt, &pending_result())
+        .await
+        .unwrap();
+    assert_persisted_state(&repository, request_id, "PAID", "SUCCEEDED", "CONFIRMED", 1).await;
 }
 
 async fn insert_billing_connection(pool: &sqlx::PgPool, workspace_id: Uuid, connection_id: Uuid) {

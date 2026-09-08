@@ -207,6 +207,41 @@ mod tests {
     }
 
     #[test]
+    fn decimal_units_reject_fraction_exponent_wrong_json_and_overflow() {
+        for invalid in [
+            r#""1.5""#,
+            r#""1e3""#,
+            "1",
+            "1.5",
+            "null",
+            "true",
+            "{}",
+            r#""9223372036854775808""#,
+            r#""-9223372036854775809""#,
+        ] {
+            assert!(
+                serde_json::from_str::<CreditUnits>(invalid).is_err(),
+                "invalid credit_units {invalid}"
+            );
+            assert!(
+                serde_json::from_str::<ItemUnits>(invalid).is_err(),
+                "invalid item_units {invalid}"
+            );
+        }
+        for boundary in [i64::MIN, 0, i64::MAX] {
+            let encoded = serde_json::to_string(&boundary.to_string()).unwrap();
+            assert_eq!(
+                serde_json::from_str::<CreditUnits>(&encoded)
+                    .unwrap()
+                    .value(),
+                boundary
+            );
+        }
+        assert!(serde_json::from_str::<ItemUnits>(r#""-1""#).is_err());
+        assert!(serde_json::from_str::<super::ItemUnitBoundary>(r#""-1""#).is_err());
+    }
+
+    #[test]
     fn checked_arithmetic_rejects_overflow() {
         let result = CreditUnits::new(i64::MAX).checked_add(CreditUnits::new(1));
         assert_eq!(

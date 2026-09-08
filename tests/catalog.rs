@@ -11,7 +11,7 @@ use subscription::{repositories::database::DatabaseRepository, services::catalog
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use support::{response_json, setup_router};
+use support::response_json;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn published_catalog_scope_is_reproducible() {
@@ -164,9 +164,7 @@ async fn catalog_migration_round_trips() {
 }
 
 async fn setup() -> (Router, PgPool) {
-    let router = setup_router().await;
-    let (_, pool) = support::setup_router_with_options(false, None).await;
-    (router, pool)
+    support::setup_router_with_options(false, None).await
 }
 
 async fn create_product(router: &Router, usage_model: &str) -> Value {

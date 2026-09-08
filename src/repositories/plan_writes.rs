@@ -320,10 +320,11 @@ pub(super) async fn insert_plan_outbox(
     sequence: i64,
 ) -> ApiResult<()> {
     let event_id = Uuid::new_v4();
+    let correlation_id = Uuid::new_v4();
     let payload = json!({
         "event_id":event_id,"event_type":event_type,"schema_version":1,
         "aggregate_type":"customer_plan","aggregate_id":aggregate_id,"sequence":sequence,
-        "occurred_at":Utc::now(),"workspace_id":workspace_id,"correlation_id":Uuid::new_v4(),
+        "occurred_at":Utc::now(),"workspace_id":workspace_id,"correlation_id":correlation_id,
         "causation_id":null,"payload":{"related_id":related_id}
     });
     sqlx::query(
@@ -335,7 +336,7 @@ pub(super) async fn insert_plan_outbox(
     .bind(aggregate_id)
     .bind(sequence)
     .bind(workspace_id)
-    .bind(Uuid::new_v4())
+    .bind(correlation_id)
     .bind(payload)
     .execute(&mut **transaction)
     .await?;

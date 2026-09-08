@@ -1,5 +1,6 @@
 use std::{
     net::{IpAddr, Ipv4Addr},
+    sync::OnceLock,
     time::Duration,
 };
 
@@ -12,7 +13,7 @@ use subscription::{
         otel_enabled_from_env, AppConfig, CorsConfig, McpConfig, DEFAULT_BODY_LIMIT_BYTES,
         DEFAULT_MCP_PATH,
     },
-    db::{init_pool, run_migrations},
+    db::run_migrations,
     libs::telemetry,
     repositories::database::DatabaseRepository,
     routes::create_router,
@@ -21,15 +22,33 @@ use subscription::{
 use testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
-    GenericImage, ImageExt,
+    ContainerAsync, GenericImage, ImageExt,
 };
 use tokio::sync::OnceCell;
 
-static MIGRATIONS: OnceCell<()> = OnceCell::const_new();
-static TEST_DB_URL: OnceCell<String> = OnceCell::const_new();
 static TELEMETRY_GUARD: OnceCell<telemetry::TelemetryGuard> = OnceCell::const_new();
 static OTEL_ENDPOINT: OnceCell<String> = OnceCell::const_new();
 static ENV_LOADED: OnceCell<()> = OnceCell::const_new();
+static DOCKER_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+struct TestPostgres {
+    container: Option<ContainerAsync<GenericImage>>,
+}
+
+impl Drop for TestPostgres {
+    fn drop(&mut self) {
+        let container = self.container.take().expect("owned test container");
+        let (completed, wait) = std::sync::mpsc::sync_channel(1);
+        // Pool callbacks can be dropped while a test runtime is shutting down. Cleanup
+        // must run on the independent Docker runtime, not on that stopped I/O driver.
+        docker_runtime().spawn(async move {
+            let _ = completed.send(container.rm().await);
+        });
+        wait.recv_timeout(Duration::from_secs(30))
+            .expect("test container cleanup completion")
+            .expect("test container removed");
+    }
+}
 
 #[allow(dead_code)]
 pub async fn setup_router() -> Router {
@@ -45,10 +64,11 @@ pub async fn setup_router_with_options(
     mcp_enabled: bool,
     accounts_webhook_secret: Option<String>,
 ) -> (Router, PgPool) {
-    let database_url = database_url().await;
+    let (container, port) = start_postgres().await;
+    let database_url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
     init_telemetry().await;
-    let pool = init_pool_with_retry(&database_url).await;
-    run_migrations_once(pool.clone()).await;
+    let pool = init_pool_with_retry(&database_url, container).await;
+    run_migrations(&pool).await.expect("fixture migrations");
     let state = AppState::new(DatabaseRepository::new(pool.clone()))
         .with_accounts_webhook_secret(accounts_webhook_secret.clone());
     let config = test_config(database_url, mcp_enabled, accounts_webhook_secret);
@@ -100,39 +120,45 @@ fn test_config(
     }
 }
 
-async fn run_migrations_once(pool: PgPool) {
-    MIGRATIONS
-        .get_or_init(|| async move {
-            run_migrations(&pool)
+async fn start_postgres() -> (TestPostgres, u16) {
+    docker_runtime()
+        .spawn(async {
+            let image = GenericImage::new("pgvector/pgvector", "pg18")
+                .with_exposed_port(5432.tcp())
+                .with_wait_for(WaitFor::message_on_stdout(
+                    "database system is ready to accept connections",
+                ))
+                .with_env_var("POSTGRES_PASSWORD", "postgres")
+                .with_env_var("POSTGRES_USER", "postgres")
+                .with_env_var("POSTGRES_DB", "postgres");
+            let container = image
+                .start()
                 .await
-                .expect("failed to run database migrations");
+                .expect("failed to start postgres container");
+            let port = container
+                .get_host_port_ipv4(5432)
+                .await
+                .expect("postgres mapped port");
+            (
+                TestPostgres {
+                    container: Some(container),
+                },
+                port,
+            )
         })
-        .await;
+        .await
+        .expect("start disposable postgres")
 }
 
-async fn database_url() -> String {
-    TEST_DB_URL.get_or_init(start_postgres).await.clone()
-}
-
-async fn start_postgres() -> String {
-    let image = GenericImage::new("pgvector/pgvector", "pg18")
-        .with_exposed_port(5432.tcp())
-        .with_wait_for(WaitFor::message_on_stdout(
-            "database system is ready to accept connections",
-        ))
-        .with_env_var("POSTGRES_PASSWORD", "postgres")
-        .with_env_var("POSTGRES_USER", "postgres")
-        .with_env_var("POSTGRES_DB", "postgres");
-    let container = image
-        .start()
-        .await
-        .expect("failed to start postgres container");
-    let container = Box::leak(Box::new(container));
-    let port = container
-        .get_host_port_ipv4(5432)
-        .await
-        .expect("failed to resolve postgres mapped port");
-    format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres")
+fn docker_runtime() -> &'static tokio::runtime::Runtime {
+    // Docker's shared HTTP client must outlive individual #[tokio::test] runtimes.
+    DOCKER_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Docker test runtime")
+    })
 }
 
 async fn init_telemetry() {
@@ -206,9 +232,17 @@ fn set_env_if_missing(key: &str, value: &str) {
     }
 }
 
-async fn init_pool_with_retry(database_url: &str) -> PgPool {
+async fn init_pool_with_retry(database_url: &str, container: TestPostgres) -> PgPool {
+    // The pool owns the callback, keeping the disposable database alive until the last
+    // router/repository/connection releases it, including during test failure unwinding.
+    let options = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(16)
+        .after_connect(move |_, _| {
+            let _container_lifetime = &container;
+            Box::pin(async { Ok(()) })
+        });
     for attempt in 1..=10 {
-        match init_pool(database_url).await {
+        match options.clone().connect(database_url).await {
             Ok(pool) => return pool,
             Err(error) if attempt == 10 => panic!("failed to initialize pool: {error}"),
             Err(_) => tokio::time::sleep(Duration::from_millis(500)).await,

@@ -52,7 +52,10 @@ impl DatabaseRepository {
     ) -> ApiResult<()> {
         let mut transaction = self.pool().begin().await?;
         let normalized = normalized_result(result);
-        update_attempt(&mut transaction, attempt, result, &normalized).await?;
+        if !update_attempt(&mut transaction, attempt, result, &normalized).await? {
+            transaction.commit().await?;
+            return Ok(());
+        }
         update_payment(&mut transaction, attempt, result, &normalized).await?;
         update_collection_request(&mut transaction, attempt.request_id, &normalized).await?;
         insert_attempt_event(&mut transaction, attempt, normalized.event_type, 2).await?;
@@ -75,7 +78,7 @@ async fn lock_scheduled_request(
          JOIN billing_connections bc ON bc.billing_connection_id=pmb.billing_connection_id \
            AND bc.workspace_id=cr.workspace_id \
          WHERE cr.collection_request_id=$1 AND cr.status='SCHEDULED' \
-           AND cr.attempts_started=0 FOR UPDATE OF cr",
+           AND cr.attempts_started=0 AND cr.scheduled_at<=clock_timestamp() FOR UPDATE OF cr",
     )
     .bind(request_id)
     .fetch_optional(&mut **transaction)
@@ -232,8 +235,8 @@ async fn update_attempt(
     attempt: &StartedCollectionAttempt,
     result: &ConnectorCollectionResult,
     normalized: &NormalizedResult,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
+) -> Result<bool, sqlx::Error> {
+    let updated = sqlx::query(
         "UPDATE collection_attempts SET status=$2,finished_at=CASE WHEN $2 IN ('FAILED','SUCCEEDED') \
          THEN clock_timestamp() ELSE NULL END,failure_code=$3,next_action_url=$4 \
          WHERE collection_attempt_id=$1 AND status='STARTED'",
@@ -244,7 +247,7 @@ async fn update_attempt(
     .bind(&result.next_action_url)
     .execute(&mut **transaction)
     .await?;
-    Ok(())
+    Ok(updated.rows_affected() == 1)
 }
 
 async fn update_payment(

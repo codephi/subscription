@@ -211,6 +211,20 @@ mod tests {
     }
 
     #[test]
+    fn direct_credit_rejects_negative_units_before_persistence() {
+        let mut credit = request(json!({}));
+        for invalid in [i64::MIN, -1, 0] {
+            credit.credit_units = crate::dto::units::CreditUnits::new(invalid);
+            assert_eq!(
+                validate_direct_credit("negative-credit-key", &credit)
+                    .expect_err("credit must be positive")
+                    .code(),
+                "invalid_credit_units"
+            );
+        }
+    }
+
+    #[test]
     fn statement_cursor_requires_a_positive_decimal_integer() {
         assert_eq!(parse_cursor("12").expect("cursor"), 12);
         assert_eq!(
