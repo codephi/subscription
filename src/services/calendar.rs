@@ -119,8 +119,12 @@ fn pricing_boundary(
         .checked_mul(ordinal)
         .ok_or_else(|| pricing_calendar_overflow(anchor, ordinal))?;
     let boundary = match frequency {
-        PricingFrequency::Daily => anchor.checked_add_signed(Duration::days(factor)),
-        PricingFrequency::Weekly => anchor.checked_add_signed(Duration::weeks(factor)),
+        PricingFrequency::Daily => {
+            Duration::try_days(factor).and_then(|duration| anchor.checked_add_signed(duration))
+        }
+        PricingFrequency::Weekly => {
+            Duration::try_weeks(factor).and_then(|duration| anchor.checked_add_signed(duration))
+        }
         PricingFrequency::Monthly => add_anchor_months(anchor, factor),
         PricingFrequency::Yearly => {
             add_anchor_months(anchor, factor.checked_mul(12).unwrap_or(i64::MAX))

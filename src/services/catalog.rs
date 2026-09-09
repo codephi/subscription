@@ -94,6 +94,18 @@ pub async fn publish_price_version(
     repository: &DatabaseRepository,
     price_id: Uuid,
 ) -> ApiResult<PriceVersionResponse> {
+    let price = repository.find_price_version(price_id).await?;
+    if price.state == crate::dto::catalog::PriceState::Draft {
+        validate_price(&CreatePriceVersionRequest {
+            pricing_model: price.pricing_model,
+            unit_block_size: price.unit_block_size,
+            credit_units: price.credit_units,
+            effective_from: price.effective_from,
+            effective_until: price.effective_until,
+            accumulation_cycle: price.accumulation_cycle,
+            tiers: price.tiers,
+        })?;
+    }
     repository.publish_price_version(price_id).await
 }
 
@@ -235,11 +247,19 @@ fn validate_cycle(request: &CreatePriceVersionRequest) -> ApiResult<()> {
     let Some(cycle) = &request.accumulation_cycle else {
         return Ok(());
     };
-    if cycle.anchor_at > request.effective_from || !valid_recurrence(&cycle.recurrence_rule) {
+    if cycle.anchor_at > request.effective_from
+        || !valid_recurrence(&cycle.recurrence_rule)
+        || crate::services::calendar::pricing_cycle_bounds(
+            cycle.anchor_at,
+            &cycle.recurrence_rule,
+            request.effective_from,
+        )
+        .is_err()
+    {
         return Err(ApiError::unprocessable(
             "invalid_accumulation_cycle",
             format!(
-                "cycle anchor {} and rule {:?} must precede price and use FREQ/INTERVAL",
+                "cycle anchor {} and rule {:?} must precede price, use FREQ/INTERVAL and have a representable next UTC boundary",
                 cycle.anchor_at, cycle.recurrence_rule
             ),
         ));
@@ -285,6 +305,7 @@ fn validate_tier(
         blocks.checked_mul(tier.credit_units.value()).is_some()
     });
     if start == expected_start
+        && end.is_none_or(|value| value > start)
         && tier.credit_units.value() > 0
         && width_is_divisible
         && conversion_fits

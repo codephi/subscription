@@ -125,7 +125,8 @@ async fn get_price_version(
 #[utoipa::path(post, path = "/v1/price-versions/{price_id}/publish", tag = "Catalog",
     params(("price_id" = Uuid, Path)), responses(
         (status = 200, body = PriceVersionResponse),
-        (status = 409, body = ErrorResponse, description = "Published or overlapping version")
+        (status = 409, body = ErrorResponse, description = "Published or overlapping version"),
+        (status = 422, body = ErrorResponse, description = "Invalid draft conversion, tiers, or unrepresentable cycle")
     ))]
 async fn publish_price_version(
     State(state): State<AppState>,

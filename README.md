@@ -160,8 +160,15 @@ The [test matrix](docs/test-matrix.md) preserves individual normative scenarios 
 explicit coverage gaps. A green suite does **not** imply all V1 scenarios are covered.
 Use `bash scripts/check-phase-gate.sh 6` to validate phase 6 and every previous phase;
 any open matrix row blocks the gate before the full quality checks. `--check-only`
-prints coverage blockers without running Cargo. Phases 2–6 are under coverage
+prints coverage blockers without running Cargo. Phases 3–6 are under coverage
 revalidation; Billing/Stripe must not advance on the former grouped approvals.
+
+Catalog price validation rejects invalid tier boundaries and accumulation cycles
+without a representable next UTC boundary with HTTP 422. Publication revalidates
+legacy drafts, and extreme calendar intervals return errors instead of panicking.
+Regression tests cover these cases, decimal credit ratios and quarterly boundaries;
+the publication error is included in OpenAPI/Swagger. No new dependency or migration
+is required for these validation changes.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
