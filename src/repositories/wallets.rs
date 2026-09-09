@@ -13,7 +13,7 @@ use crate::{
         database::DatabaseRepository,
         wallet_rows::{
             customer_wallet_from_row, finish_provisioning, item_wallet_from_row,
-            provisioning_from_row, target_status, wallet_not_provisioned,
+            project_wallet_state, provisioning_from_row, target_status, wallet_not_provisioned,
         },
     },
 };
@@ -364,14 +364,24 @@ async fn append_lifecycle_if_changed(
     correlation_id: Uuid,
     actor_reference: Option<&str>,
 ) -> ApiResult<bool> {
+    // S9-020: the caller holds the workspace lock; disposable projections cannot
+    // determine event identity or overwrite the durable lifecycle during restore.
     let current = sqlx::query(
-        "SELECT status,lifecycle_sequence FROM wallet_effective_states WHERE wallet_id=$1 FOR UPDATE",
+        "SELECT new_status AS status,sequence AS lifecycle_sequence FROM wallet_lifecycle_events \
+         WHERE wallet_id=$1 ORDER BY sequence DESC LIMIT 1",
     )
     .bind(wallet_id)
     .fetch_optional(&mut **transaction)
     .await?;
     let previous: Option<String> = current.as_ref().map(|row| row.get("status"));
     if previous.as_deref() == Some(target.as_str()) {
+        project_wallet_state(
+            transaction,
+            wallet_id,
+            target,
+            current.as_ref().unwrap().get("lifecycle_sequence"),
+        )
+        .await?;
         return Ok(false);
     }
     let sequence = current.map_or(1, |row| row.get::<i64, _>("lifecycle_sequence") + 1);
@@ -390,16 +400,7 @@ async fn append_lifecycle_if_changed(
     .bind(correlation_id)
     .execute(&mut **transaction)
     .await?;
-    sqlx::query(
-        "INSERT INTO wallet_effective_states (wallet_id,status,lifecycle_sequence) VALUES ($1,$2,$3) \
-         ON CONFLICT (wallet_id) DO UPDATE SET status=EXCLUDED.status, \
-         lifecycle_sequence=EXCLUDED.lifecycle_sequence,updated_at=now()",
-    )
-    .bind(wallet_id)
-    .bind(target.as_str())
-    .bind(sequence)
-    .execute(&mut **transaction)
-    .await?;
+    project_wallet_state(transaction, wallet_id, target, sequence).await?;
     Ok(true)
 }
 

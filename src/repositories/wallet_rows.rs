@@ -11,6 +11,24 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 
+pub(super) async fn project_wallet_state(
+    transaction: &mut Transaction<'_, Postgres>,
+    wallet_id: Uuid,
+    status: WalletStatus,
+    sequence: i64,
+) -> ApiResult<()> {
+    sqlx::query(
+        "INSERT INTO wallet_effective_states (wallet_id,status,lifecycle_sequence) VALUES ($1,$2,$3) \
+         ON CONFLICT (wallet_id) DO UPDATE SET status=EXCLUDED.status, \
+         lifecycle_sequence=EXCLUDED.lifecycle_sequence,updated_at=now() \
+         WHERE wallet_effective_states.status IS DISTINCT FROM EXCLUDED.status \
+         OR wallet_effective_states.lifecycle_sequence IS DISTINCT FROM EXCLUDED.lifecycle_sequence",
+    )
+    .bind(wallet_id).bind(status.as_str()).bind(sequence)
+    .execute(&mut **transaction).await?;
+    Ok(())
+}
+
 pub(super) async fn finish_provisioning(
     transaction: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,

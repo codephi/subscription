@@ -176,6 +176,12 @@ creation. Removing and restoring item applicability preserves wallet identity,
 pending units and the item statement. Phase 3 remains open until its remaining
 lifecycle/error and accumulated acceptance scenarios are verified.
 
+Wallet provisioning reconciliation rebuilds missing or divergent effective-state
+projections from the immutable lifecycle history. Recovery from a recorded `ERROR`
+appends a new transition with the next sequence and the reconciliation actor;
+retries do not duplicate lifecycle events. Generating provisioning failures and
+their complete event contracts remains part of the open phase 3 gate.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

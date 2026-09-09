@@ -1,6 +1,8 @@
 mod support;
 #[path = "support/wallet_integrity.rs"]
 mod wallet_integrity;
+#[path = "support/wallet_recovery.rs"]
+mod wallet_recovery;
 
 use std::sync::OnceLock;
 
