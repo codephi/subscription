@@ -170,6 +170,12 @@ Regression tests cover these cases, decimal credit ratios and quarterly boundari
 the publication error is included in OpenAPI/Swagger. No new dependency or migration
 is required for these validation changes.
 
+Wallet regression tests also verify database hierarchy checks, rejection of updates
+to every immutable wallet/lifecycle column, and scope reconciliation without lazy
+creation. Removing and restoring item applicability preserves wallet identity,
+pending units and the item statement. Phase 3 remains open until its remaining
+lifecycle/error and accumulated acceptance scenarios are verified.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`
