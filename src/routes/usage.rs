@@ -59,7 +59,9 @@ async fn create_usage_event(
 
 #[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/products/{product_id}/eligibility", tag = "Usage",
     params(("workspace_id" = Uuid, Path), ("product_id" = Uuid, Path)),
-    responses((status = 200, body = ProductEligibilityResponse), (status = 404, body = ErrorResponse)))]
+    responses((status = 200, body = ProductEligibilityResponse), (status = 404, body = ErrorResponse),
+        (status = 409, body = ErrorResponse, description = "Workspace is inactive or has unresolved event gaps"),
+        (status = 503, body = ErrorResponse, description = "Wallet hierarchy is not provisioned for the current scope")))]
 async fn get_product_eligibility(
     State(state): State<AppState>,
     Path((workspace_id, product_id)): Path<(Uuid, Uuid)>,

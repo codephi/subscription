@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{
@@ -22,20 +22,22 @@ impl DatabaseRepository {
         workspace_id: Uuid,
         product_id: Uuid,
     ) -> ApiResult<ProductEligibilityResponse> {
+        let mut transaction = self.pool().begin().await?;
+        super::credits::lock_active_customer_wallet(&mut transaction, workspace_id).await?;
         let product = sqlx::query("SELECT usage_model,status FROM products WHERE product_id=$1")
             .bind(product_id)
-            .fetch_optional(&self.pool())
+            .fetch_optional(&mut *transaction)
             .await?
             .ok_or_else(|| missing("product", product_id))?;
         let evaluated_at: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
-            .fetch_one(&self.pool())
+            .fetch_one(&mut *transaction)
             .await?;
         let plan = sqlx::query(
             "SELECT commercial_status,activation_status FROM customer_plans WHERE customer_id=$1 \
              ORDER BY created_at DESC LIMIT 1",
         )
         .bind(workspace_id)
-        .fetch_optional(&self.pool())
+        .fetch_optional(&mut *transaction)
         .await?;
         let status = plan
             .as_ref()
@@ -46,21 +48,22 @@ impl DatabaseRepository {
                 "ACTIVE" | "ACTIVE_PAID" | "PAST_DUE"
             ) && row.get::<String, _>("activation_status") == "ACTIVATED"
         });
-        let entitled = self
-            .product_entitled(workspace_id, product_id, evaluated_at)
-            .await?;
+        let entitled =
+            Self::product_entitled(&mut transaction, workspace_id, product_id, evaluated_at)
+                .await?;
         let wallet = sqlx::query(
             "SELECT cw.balance_credit_units,cw.version FROM customer_wallets cw JOIN wallets w \
              ON w.wallet_id=cw.wallet_id WHERE w.customer_id=$1",
         )
         .bind(workspace_id)
-        .fetch_optional(&self.pool())
+        .fetch_optional(&mut *transaction)
         .await?;
         let balance = wallet
             .as_ref()
             .map(|row| row.get::<i64, _>("balance_credit_units"));
         let product_active = product.get::<String, _>("status") == "ACTIVE";
         let (eligible, reason) = eligibility_reason(product_active, usable, entitled, balance);
+        transaction.commit().await?;
         Ok(ProductEligibilityResponse {
             product_id,
             usage_model: product.get("usage_model"),
@@ -76,7 +79,7 @@ impl DatabaseRepository {
     }
 
     async fn product_entitled(
-        &self,
+        transaction: &mut Transaction<'_, Postgres>,
         workspace_id: Uuid,
         product_id: Uuid,
         evaluated_at: DateTime<Utc>,
@@ -91,7 +94,7 @@ impl DatabaseRepository {
         .bind(workspace_id)
         .bind(product_id)
         .bind(evaluated_at)
-        .fetch_one(&self.pool())
+        .fetch_one(&mut **transaction)
         .await
     }
 

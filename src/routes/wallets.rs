@@ -63,8 +63,9 @@ async fn get_wallet_provisioning(
     tag = "Operations",
     params(("workspace_id" = Uuid, Path)),
     responses(
-        (status = 200, body = WalletProvisioningResponse),
+        (status = 200, body = WalletProvisioningResponse, description = "Reconciliation result; ERROR records a rolled-back materialization failure and its retryable operational state"),
         (status = 404, body = ErrorResponse, description = "Workspace does not exist"),
+        (status = 500, body = ErrorResponse, description = "Failure outcome could not be persisted atomically"),
         (status = 503, body = ErrorResponse, description = "Current catalog scope is unavailable")
     )
 )]

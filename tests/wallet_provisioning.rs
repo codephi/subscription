@@ -1,4 +1,6 @@
 mod support;
+#[path = "support/wallet_failures.rs"]
+mod wallet_failures;
 #[path = "support/wallet_integrity.rs"]
 mod wallet_integrity;
 #[path = "support/wallet_recovery.rs"]

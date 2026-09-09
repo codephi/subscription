@@ -160,7 +160,7 @@ The [test matrix](docs/test-matrix.md) preserves individual normative scenarios 
 explicit coverage gaps. A green suite does **not** imply all V1 scenarios are covered.
 Use `bash scripts/check-phase-gate.sh 6` to validate phase 6 and every previous phase;
 any open matrix row blocks the gate before the full quality checks. `--check-only`
-prints coverage blockers without running Cargo. Phases 3–6 are under coverage
+prints coverage blockers without running Cargo. Phases 4–6 are under coverage
 revalidation; Billing/Stripe must not advance on the former grouped approvals.
 
 Catalog price validation rejects invalid tier boundaries and accumulation cycles
@@ -173,14 +173,27 @@ is required for these validation changes.
 Wallet regression tests also verify database hierarchy checks, rejection of updates
 to every immutable wallet/lifecycle column, and scope reconciliation without lazy
 creation. Removing and restoring item applicability preserves wallet identity,
-pending units and the item statement. Phase 3 remains open until its remaining
-lifecycle/error and accumulated acceptance scenarios are verified.
+pending units and the item statement. Run `bash scripts/check-phase-gate.sh 3`
+to repeat the complete accumulated phase 3 gate, including migration round trips.
 
 Wallet provisioning reconciliation rebuilds missing or divergent effective-state
 projections from the immutable lifecycle history. Recovery from a recorded `ERROR`
 appends a new transition with the next sequence and the reconciliation actor;
-retries do not duplicate lifecycle events. Generating provisioning failures and
-their complete event contracts remains part of the open phase 3 gate.
+retries do not duplicate lifecycle events.
+
+Administrative reconciliation rolls back incomplete materialization to a savepoint
+before recording `ERROR`, the sanitized error detail, and the transactional
+`workspace_provisioning.started` / `.failed` pair. Concurrent retries reuse that
+outcome; a new scope records its own failure. Recovery emits `.started` / `.completed`.
+If the failure record or its outbox cannot be persisted, the entire transaction
+rolls back. Accounts ingestion retains its all-or-nothing transaction and delivery
+retry behavior. No migration or dependency was added for this change.
+
+The reconciliation route returns HTTP 200 with the persisted operational result,
+including `status: ERROR`; failure to persist that result returns an error response.
+Eligibility now shares the operational wallet guard: inactive workspaces or event
+gaps return 409, and absent/current-scope-incomplete provisioning returns 503.
+These contracts are documented in Swagger and covered by automated tests.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

@@ -3,6 +3,9 @@ use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
+#[path = "wallet_failure.rs"]
+mod wallet_failure;
+
 use crate::{
     dto::{
         events::{DomainEventEnvelope, WorkspaceEventEnvelope},
@@ -27,12 +30,11 @@ impl DatabaseRepository {
         let mut transaction = self.pool().begin().await?;
         let workspace = lock_workspace(&mut transaction, workspace_id).await?;
         let correlation_id = Uuid::new_v4();
-        let response = synchronize_wallets(
+        let response = wallet_failure::reconcile_attempt(
             &mut transaction,
             workspace_id,
             &workspace.status,
             correlation_id,
-            None,
             actor_reference,
         )
         .await?;
@@ -169,17 +171,13 @@ async fn synchronize_wallets(
     )
     .await?;
     let materialized = count_materialized(transaction, workspace_id, &item_ids).await?;
-    let customer_target = if target != WalletStatus::Active {
-        target
-    } else if materialized == item_ids.len() as i64 {
-        WalletStatus::Active
-    } else {
-        WalletStatus::Provisioning
-    };
+    if materialized != item_ids.len() as i64 {
+        return Err(wallet_not_provisioned(workspace_id));
+    }
     changed |= append_lifecycle_if_changed(
         transaction,
         customer_wallet_id,
-        customer_target,
+        target,
         "workspace lifecycle and scope reconciliation",
         correlation_id,
         actor_reference,
@@ -410,8 +408,8 @@ async fn count_materialized(
     item_ids: &[Uuid],
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT count(*) FROM wallets WHERE customer_id=$1 AND wallet_type='ITEM' \
-         AND item_id=ANY($2)",
+        "SELECT count(*) FROM wallets w JOIN item_wallets i USING(wallet_id) \
+         WHERE w.customer_id=$1 AND w.wallet_type='ITEM' AND w.item_id=ANY($2)",
     )
     .bind(workspace_id)
     .bind(item_ids)
@@ -427,7 +425,11 @@ async fn emit_provisioning_events(
 ) -> ApiResult<()> {
     for event_type in [
         "workspace_provisioning.started",
-        "workspace_provisioning.completed",
+        if response.status == WalletStatus::Error {
+            "workspace_provisioning.failed"
+        } else {
+            "workspace_provisioning.completed"
+        },
     ] {
         let sequence: i64 = sqlx::query_scalar(
             "SELECT COALESCE(max(aggregate_sequence),0)+1 FROM outbox_events \
@@ -451,7 +453,8 @@ async fn emit_provisioning_events(
                 "scope_version": response.scope_version,
                 "expected_item_wallets": response.expected_item_wallets,
                 "materialized_item_wallets": response.materialized_item_wallets,
-                "status": response.status.as_str()
+                "status": response.status.as_str(),
+                "error_detail": response.error_detail
             }),
         };
         insert_outbox_event(transaction, &event).await?;

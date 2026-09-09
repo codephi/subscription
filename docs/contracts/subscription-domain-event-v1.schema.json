@@ -16,6 +16,30 @@
     "correlation_id",
     "payload"
   ],
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "enum": ["workspace_provisioning.started", "workspace_provisioning.completed", "workspace_provisioning.failed"] } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["scope_version", "expected_item_wallets", "materialized_item_wallets", "status"],
+            "properties": {
+              "scope_version": { "type": "string", "format": "uuid" },
+              "expected_item_wallets": { "type": "integer", "minimum": 0 },
+              "materialized_item_wallets": { "type": "integer", "minimum": 0 },
+              "status": { "enum": ["PROVISIONING", "ACTIVE", "DISABLED", "ERROR"] },
+              "error_detail": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "workspace_provisioning.failed" } } },
+      "then": { "properties": { "payload": { "required": ["error_detail"], "properties": { "status": { "const": "ERROR" }, "error_detail": { "type": "string", "minLength": 1 } } } } }
+    }
+  ],
   "properties": {
     "event_id": { "type": "string", "format": "uuid" },
     "event_type": {
