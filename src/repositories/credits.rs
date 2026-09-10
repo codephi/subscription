@@ -317,6 +317,8 @@ pub(super) async fn lock_active_customer_wallet(
         "wallet_not_provisioned",
         format!("workspace {workspace_id} wallet hierarchy is not active for the current scope"),
     ))?;
+    super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut **transaction, workspace_id)
+        .await?;
     let wallet_id = row.get("wallet_id");
     let next_sequence = sqlx::query_scalar(
         "SELECT COALESCE(max(entry_sequence),0)+1 FROM customer_wallet_entries \

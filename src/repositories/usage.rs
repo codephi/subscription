@@ -30,6 +30,8 @@ impl DatabaseRepository {
         lock_catalog(&mut transaction, request.product_id, request.item_id).await?;
         ensure_workspace_active(&mut transaction, workspace_id).await?;
         let meter = lock_item_meter(&mut transaction, workspace_id, request.item_id).await?;
+        super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut *transaction, workspace_id)
+            .await?;
         let accepted_at = database_clock(&mut transaction).await?;
         ensure_entitlement(
             &mut transaction,

@@ -195,6 +195,20 @@ Eligibility now shares the operational wallet guard: inactive workspaces or even
 gaps return 409, and absent/current-scope-incomplete provisioning returns 503.
 These contracts are documented in Swagger and covered by automated tests.
 
+Catalog scope calculation and selection are serialized before reading applicable
+items, so concurrent changes to different items cannot publish a stale snapshot.
+Returning to a previous scope rechecks every expected wallet, specialization and
+effective state. Historical provisioning counters alone never release credit,
+eligibility or usage, including usage of another item that stayed active. Reads
+report `ready: false` and `PROVISIONING` without `completed_at` until explicit
+reconciliation restores the hierarchy. Reconciliation preserves wallet identities,
+balances and history; rejected calls leave no reservations or financial effects.
+These fixes require no migration or dependency change.
+
+The phase 3 acceptance scope retains the explicit authentication deferral in
+ADR 0003: Accounts events are signed, while common and administrative routes
+remain open within a trusted network. Phases 4–6 still require their own gates.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

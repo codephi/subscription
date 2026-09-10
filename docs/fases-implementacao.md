@@ -9,6 +9,17 @@ Este roteiro operacionaliza o
 [plano técnico](plano-tecnico-api-assinaturas-rust.md); suas decisões normativas
 de domínio prevalecem e qualquer mudança nelas exige atualizar os dois arquivos.
 
+## Escopo de aceite vigente
+
+Conforme o [ADR 0003](adr/0003-accounts-boundary.md), a autenticação geral e a
+autorização por escopo foram adiadas por decisão do produto. Nas fases 0–3,
+os critérios de credencial/contexto são verificados na entrada assinada de
+Accounts. Rotas comuns e administrativas, incluindo reconciliação e replay,
+permanecem abertas nesta entrega; a restrição administrativa descrita no roteiro
+é um requisito futuro, não uma proteção já implementada. Referências de ator
+nessas rotas não representam identidade verificada. O aceite desta etapa não
+autoriza exposição fora de uma rede confiável.
+
 ## Fronteiras de responsabilidade
 
 - O sistema de Accounts é a fonte de verdade para usuários, autenticação,
@@ -116,6 +127,10 @@ Entregas:
   `item_wallets`;
 - validações de overflow, faixas, compatibilidade e mudança de versão.
 
+O cálculo e a seleção do escopo são serializados antes da leitura dos itens
+aplicáveis; mudanças concorrentes em itens distintos devem preservar todos os
+commits no escopo final.
+
 **Critério de saída:** uma versão publicada determina de modo imutável e
 reprodutível preços, itens faturáveis e wallets esperadas para provisionamento.
 
@@ -136,6 +151,12 @@ Entregas:
   administrativo restrito de reconciliação;
 - eventos de saída `workspace_provisioning.started`, `.completed` e `.failed`,
   com nomes/schema definitivos estabelecidos no contrato da Fase 0.
+
+Ao retornar a um escopo anterior, contadores históricos não comprovam
+prontidão. Consultas e novas operações verificam a customer wallet e todas as
+especializações e estados ativos das item wallets esperadas. Uma hierarquia
+incompleta exige reconciliação explícita, inclusive quando a operação usa outro
+item que permaneceu ativo.
 
 **Critério de saída:** criação/ativação duplicada ou concorrente produz uma única
 hierarquia; o workspace só fica pronto com todas as wallets esperadas ativas;

@@ -25,7 +25,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     tag = "Wallets",
     params(("workspace_id" = Uuid, Path)),
     responses(
-        (status = 200, body = WalletHierarchyResponse),
+        (status = 200, body = WalletHierarchyResponse, description = "Materialized hierarchy; ready requires all expected wallets to be active, including when returning to a previous scope"),
         (status = 503, body = ErrorResponse, description = "Wallet hierarchy is incomplete")
     )
 )]
@@ -44,7 +44,7 @@ async fn get_wallets(
     tag = "Wallets",
     params(("workspace_id" = Uuid, Path)),
     responses(
-        (status = 200, body = WalletProvisioningResponse),
+        (status = 200, body = WalletProvisioningResponse, description = "Current readiness; a historical ACTIVE record with an incomplete hierarchy is reported as PROVISIONING without completed_at"),
         (status = 503, body = ErrorResponse, description = "Provisioning has not completed")
     )
 )]

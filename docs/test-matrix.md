@@ -24,6 +24,17 @@ As decisões posteriores do produto prevalecem: autenticação geral foi adiada;
 Accounts continua assinado; publicação de ENTITLEMENT_ONLY/CREDIT_FLEXIBLE está
 fora da V1 (S9-026/027 são rastreados pela proibição de publicação).
 
+## Revalidação da fase 3 (2026-09-09)
+
+RG-14 cobre o escopo final após desativações e reativações concorrentes de itens
+distintos. RG-15 cobre retorno a um escopo antigo com wallet ainda desativada,
+especialização ou projeção ausente, rejeição atômica de crédito/elegibilidade/uso
+em outro item ativo e recuperação idempotente com as mesmas identidades. Esses
+cenários complementam PH-02/03 e EX-02/03; contadores históricos e uma suíte
+anterior verde não substituem a verificação da hierarquia efetiva.
+O aceite das fases 0–3 mantém o adiamento de autenticação geral do ADR 0003,
+agora explícito também nos dois planos. Os gates das fases 4–6 continuam abertos.
+
 ## Critérios de saída por fase
 
 | ID | Origem | Cenário | Teste | Tipo | Fase | Estado |
@@ -294,3 +305,5 @@ Um cenário com várias condições só passa quando todas têm asserções auto
 | FD-02 | fases §1 | Falha injetada no commit desfaz todos os efeitos; reentrega pós-commit preserva snapshot | `workspace_precommit_failure_rolls_back_and_postcommit_retry_has_one_effect` | integração | 1 | passing |
 | FD-03 | fases §1 | Reuso de event_id com outro conteúdo ou workspace não é duplicata válida | `workspace_event_identity_cannot_be_reused_with_different_content` | integração | 1 | passing |
 | FD-04 | fases §1 | OpenAPI documenta erros observáveis de entrada dos eventos assinados | `accounts_openapi_declares_signed_event_rejections` | contrato | 1 | passing |
+| RG-14 | fases §2; revisão 2026-09-09 | Alterações concorrentes em itens distintos preservam todos os commits no escopo vigente, inclusive ao reutilizar fingerprint | `concurrent_catalog_scope_changes_preserve_every_committed_item` | concorrência | 2 | passing |
+| RG-15 | fases §3; revisão 2026-09-09 | Escopo histórico não libera hierarquia incompleta; crédito, elegibilidade e uso de outro item rejeitam sem efeitos até reconciliação idempotente | `returning_scope_requires_active_hierarchy_before_any_new_effect`, `historical_provisioning_counts_do_not_hide_missing_wallet_components` | integração | 3 | passing |

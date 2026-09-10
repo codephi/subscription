@@ -5,6 +5,8 @@ use uuid::Uuid;
 
 #[path = "wallet_failure.rs"]
 mod wallet_failure;
+#[path = "wallet_readiness.rs"]
+pub(super) mod wallet_readiness;
 
 use crate::{
     dto::{
@@ -91,7 +93,14 @@ impl DatabaseRepository {
         .fetch_optional(&self.pool())
         .await?
         .ok_or_else(|| wallet_not_provisioned(workspace_id))?;
-        provisioning_from_row(&row)
+        let mut response = provisioning_from_row(&row)?;
+        if response.status == WalletStatus::Active
+            && !wallet_readiness::hierarchy_is_ready(&self.pool(), workspace_id).await?
+        {
+            response.status = WalletStatus::Provisioning;
+            response.completed_at = None;
+        }
+        Ok(response)
     }
 }
 

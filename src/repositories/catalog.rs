@@ -359,6 +359,11 @@ where
 }
 
 async fn refresh_scope(transaction: &mut Transaction<'_, Postgres>) -> ApiResult<Uuid> {
+    // PH-02: serialize before reading; locking only the final pointer loses
+    // concurrent changes to different catalog rows under READ COMMITTED.
+    sqlx::query("SELECT scope_version FROM catalog_scope_current WHERE singleton FOR UPDATE")
+        .fetch_one(&mut **transaction)
+        .await?;
     let rows = sqlx::query(
         "SELECT DISTINCT ON (i.item_id) i.item_id,pv.price_version_id \
          FROM items i JOIN products p ON p.product_id=i.product_id \

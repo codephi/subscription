@@ -345,6 +345,16 @@ Invariantes:
 
 `WalletProvisioning` registra `customer_id`, `scope_version`, `status`, `expected_item_wallets`, `materialized_item_wallets`, timestamps e erro final. Ele é a fonte operacional de prontidão; não altera saldo nem aparece no extrato.
 
+O cálculo e a seleção do escopo vigente são serializados antes de consultar os
+itens aplicáveis, para incorporar alterações concorrentes em itens distintos.
+Reutilizar uma `scope_version` por fingerprint não reutiliza automaticamente sua
+prontidão histórica: a customer wallet e todas as item wallets esperadas precisam
+ter especializações materializadas e estado efetivo `ACTIVE`. Consultas retornam
+`ready: false` e status operacional `PROVISIONING`, sem `completed_at`, quando um
+registro histórico `ACTIVE` não corresponde à hierarquia atual. Essa avaliação
+não grava nem reconstrói projeções; novas operações rejeitam a hierarquia
+incompleta e a recuperação ocorre pela reconciliação explícita.
+
 O provisionamento mantém o conjunto real de wallets igual ao conjunto esperado pelo cluster/escopo:
 
 1. Ao criar um customer, resolver a versão estável do escopo e seus Items aplicáveis.
@@ -766,6 +776,13 @@ Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita
 ## 5. Contratos HTTP principais
 
 Prefixo sugerido: `/v1`. O `workspace_id` vem no caminho ou no contrato da operação, e a aplicação valida sua existência e a consistência do escopo.
+
+Exceção vigente de entrega, conforme o [ADR 0003](adr/0003-accounts-boundary.md):
+autenticação geral e autorização administrativa foram adiadas por decisão do
+produto. Accounts permanece protegido por HMAC; rotas comuns e administrativas
+ficam abertas em rede confiável e seus atores não são identidades verificadas.
+Menções a endpoints restritos neste plano descrevem a proteção futura, não uma
+condição já implementada para o aceite das fases 0–3.
 
 Toda operação externa que possa gerar `CustomerWalletEntry` exige `transaction_id`, cabeçalho `Idempotency-Key`, `description` opcional e `metadata` opcional. O servidor copia os campos de domínio para o lançamento e registra separadamente a chave de deduplicação. `metadata` é contexto opaco da aplicação cliente, não substitui referências tipadas como assinatura, plano, Product, Item, Vale, Cupom ou Billing. Campos reservados pelo servidor não podem ser sobrescritos pelo cliente.
 
