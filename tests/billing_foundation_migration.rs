@@ -1,7 +1,7 @@
 mod support;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn billing_foundation_migration_round_trips() {
+async fn billing_foundation_migrations_round_trip() {
     let (_, pool) = support::setup_router_with_options(false, None).await;
     let mut connection = pool.acquire().await.expect("test connection");
     sqlx::query("DROP SCHEMA IF EXISTS billing_migration_round_trip CASCADE")
@@ -33,6 +33,22 @@ async fn billing_foundation_migration_round_trips() {
     .await
     .expect("billing tables");
     assert_eq!(tables, 6);
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609040009_billing_credit_references.up.sql"),
+    )
+    .await;
+    let reference_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('billing_credit_grant_references') IS NOT NULL")
+            .fetch_one(&mut *connection)
+            .await
+            .expect("billing credit reference table exists");
+    assert!(reference_exists);
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609040009_billing_credit_references.down.sql"),
+    )
+    .await;
     apply_migration(
         &mut connection,
         include_str!("../migrations/202609040008_billing_foundation.down.sql"),

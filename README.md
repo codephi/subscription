@@ -284,6 +284,13 @@ transactional locks. A Product outside the effective plan returns
 `403 product_not_entitled` without usage or financial effects. Run
 `bash scripts/check-phase-gate.sh 6` for the accumulated validation.
 
+Phase 7 now has an idempotent provider-neutral confirmation path for initial
+paid plans. A fake connector proves one provider attempt, webhook/response race
+convergence and one atomic activation, cycle, entitlement and allowance grant.
+The persisted Billing payment and CollectionRequest are linked to the resulting
+credit entry through immutable typed references. Remaining phase 7 flows are
+tracked in `docs/test-matrix.md`.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

@@ -114,7 +114,7 @@ pub(super) async fn reserve_active_slot(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn activate_free_plan(
+pub(super) async fn activate_customer_plan(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
     workspace_id: Uuid,

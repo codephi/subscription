@@ -2,6 +2,7 @@
 pub mod admission;
 
 pub mod billing_attempts;
+pub mod billing_confirmation;
 pub mod billing_connector;
 pub mod catalog;
 mod catalog_rows;

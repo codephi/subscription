@@ -17,7 +17,7 @@ use crate::{
             subscription_from_row, PlanRecord,
         },
         plan_writes::{
-            activate_free_plan, ensure_recurring_credit_enabled, insert_customer_plan_row,
+            activate_customer_plan, ensure_recurring_credit_enabled, insert_customer_plan_row,
             lock_valid_plan, reserve_active_slot,
         },
     },
@@ -229,7 +229,7 @@ impl DatabaseRepository {
         .await?;
         let cycle = if activates_now {
             Some(
-                activate_free_plan(
+                activate_customer_plan(
                     &mut transaction,
                     &wallet,
                     workspace_id,

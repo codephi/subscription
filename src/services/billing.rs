@@ -2,6 +2,7 @@ use crate::{
     error::{ApiError, ApiResult},
     repositories::{
         billing_attempts::StartedCollectionAttempt,
+        billing_confirmation::{ConfirmationOutcome, ConfirmedBillingWebhook},
         billing_connector::{
             BillingConnector, BillingPaymentMethod, CollectionCommand, ConnectorCollectionResult,
             ConnectorCollectionState,
@@ -9,6 +10,8 @@ use crate::{
         database::DatabaseRepository,
     },
 };
+
+use crate::services::calendar::cycle_end;
 
 /// Validates connector capability and starts one logical collection attempt.
 pub async fn start_collection(
@@ -35,6 +38,19 @@ pub async fn execute_collection_attempt(
         return Ok(None);
     };
     execute_started_attempt(repository, connector, &attempt).await
+}
+
+pub async fn apply_confirmed_webhook(
+    repository: &DatabaseRepository,
+    webhook: &ConfirmedBillingWebhook,
+) -> ApiResult<ConfirmationOutcome> {
+    let recurrence = repository
+        .confirmation_recurrence(webhook.collection_request_id)
+        .await?;
+    let period_end = cycle_end(webhook.occurred_at, recurrence, 1)?;
+    repository
+        .apply_initial_payment_confirmation(webhook, period_end)
+        .await
 }
 
 async fn execute_started_attempt(

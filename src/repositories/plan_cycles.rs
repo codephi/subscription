@@ -216,7 +216,7 @@ async fn lock_due_cycle(
     }))
 }
 
-async fn load_locked_plan(
+pub(super) async fn load_locked_plan(
     transaction: &mut Transaction<'_, Postgres>,
     plan_id: Uuid,
 ) -> ApiResult<PlanRecord> {
