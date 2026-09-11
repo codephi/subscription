@@ -211,8 +211,7 @@ contrato; consumidores deduplicam eventos pela identidade estável.
 Progresso em 2026-09-11: corrigida a contagem do calendário após downgrade,
 com migração reversível que preserva ordinais históricos. Regressões verificam
 três renovações sem saltos, créditos reclassificados preservados e revogação
-concorrente impedindo novo ciclo. O gate da fase 5 permanece aberto até concluir
-os cenários de aceitação pendentes na matriz.
+concorrente impedindo novo ciclo.
 
 Continuação: elegibilidade considera o entitlement do produto mesmo com outra
 Subscription pendente/revogada; downgrade reaplica admissão e não ignora exigência
@@ -233,6 +232,11 @@ opaca. Adesão e downgrade serializam a avaliação com atualizações da evidê
 registram a evidência exata da decisão. Retirada, expiração, outro workspace,
 duplicata alterada e falha de commit não autorizam nem deixam efeitos parciais.
 Validação antifraude de cartão continua no fluxo de Billing.
+
+Fase concluída em 2026-09-11: o slot exclusivo acompanha os estados comercial e
+de renovação, e a composição de Products do plano publicado rejeita inclusão,
+alteração ou remoção tardia. Todos os critérios atribuídos à fase 5 estão cobertos
+por testes executáveis na matriz e pelo gate acumulado `check-phase-gate.sh 5`.
 
 ## Fase 6 — Medição de consumo
 

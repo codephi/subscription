@@ -272,6 +272,11 @@ evidence used by the decision in the same transaction. Expired, withdrawn,
 out-of-sequence, cross-workspace, unsigned, or altered events cannot authorize a
 contract. CARD evidence remains owned by the Billing setup flow.
 
+Migration `202609110004_active_plan_slot_lifecycle` keeps the exclusive plan slot
+aligned with commercial and renewal status. Published plan Products reject late
+inserts as well as updates and deletes. Phase 5 is complete; run
+`bash scripts/check-phase-gate.sh 5` for its accumulated validation.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

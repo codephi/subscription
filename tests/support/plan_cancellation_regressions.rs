@@ -81,7 +81,7 @@ async fn scheduled_cancellation_is_idempotent_and_keeps_current_entitlement() {
             .unwrap()
             .eligible
     );
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 20).await;
+    assert_plan_state(&pool, workspace_id, 0, 1, 1, 20).await;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox_events WHERE aggregate_id=$1 AND event_type='customer_plan.cancellation_scheduled'")
         .bind(current.customer_plan_id).fetch_one(&pool).await.unwrap();
     assert_eq!(count, 1);

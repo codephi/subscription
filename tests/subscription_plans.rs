@@ -486,3 +486,5 @@ async fn join_plan(
 mod admission_policy_contract;
 #[path = "support/admission_policy_recovery.rs"]
 mod admission_policy_recovery;
+#[path = "support/plan_phase5_acceptance.rs"]
+mod plan_phase5_acceptance;
