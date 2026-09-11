@@ -235,7 +235,7 @@ async fn ensure_entitlement(
         return Ok(());
     }
     Err(ApiError::forbidden(
-        "entitlement_not_granted",
+        "product_not_entitled",
         format!("workspace {workspace_id} has no effective entitlement for product {product_id}"),
     ))
 }

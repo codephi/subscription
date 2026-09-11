@@ -217,7 +217,7 @@ async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
     )
     .await
     .expect_err("missing entitlement");
-    assert_eq!(error.code(), "entitlement_not_granted");
+    assert_eq!(error.code(), "product_not_entitled");
     assert_usage_counts(&unentitled.pool, unentitled.workspace_id, 0, 0).await;
 
     let absent = setup_usage(1, 1, 10).await;

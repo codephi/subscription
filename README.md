@@ -160,8 +160,8 @@ The [test matrix](docs/test-matrix.md) preserves individual normative scenarios 
 explicit coverage gaps. A green suite does **not** imply all V1 scenarios are covered.
 Use `bash scripts/check-phase-gate.sh 6` to validate phase 6 and every previous phase;
 any open matrix row blocks the gate before the full quality checks. `--check-only`
-prints coverage blockers without running Cargo. Phases 5–6 are under coverage
-revalidation; Billing/Stripe must not advance on the former grouped approvals.
+prints coverage blockers without running Cargo. Phases 5 and 6 have passed their
+coverage gates; Billing remains the next implementation boundary.
 
 Catalog price validation rejects invalid tier boundaries and accumulation cycles
 without a representable next UTC boundary with HTTP 422. Publication revalidates
@@ -207,7 +207,7 @@ These fixes require no migration or dependency change.
 
 The phase 3 acceptance scope retains the explicit authentication deferral in
 ADR 0003: Accounts events are signed, while common and administrative routes
-remain open within a trusted network. Phases 5–6 still require their own gates.
+remain open within a trusted network. Later phase gates preserve this decision.
 
 Phase 4 closes the credit ledger gate with explicit commit-failure, backend-loss,
 and lost-response tests. Duplicate keys/transactions return HTTP 409 with an
@@ -229,15 +229,13 @@ tests also prove one version increment and one ledger/lot/event per distinct
 concurrent credit, rollback without leftover reservations, and outbox visibility
 only after commit with no private request context. No new dependency is required.
 
-Phase 5 is in progress. Migration `202609110001_plan_calendar_anchor` persists
+Phase 5 uses migration `202609110001_plan_calendar_anchor` to persist
 which historical cycle started the current calendar anchor and backfills existing
 plans. Downgrade renewals now follow the new anchor without skipping periods;
 reclassified on-demand credits survive subsequent allowance expirations.
 Renewal checks offer revocation after acquiring the plan lock, so a concurrent
 committed revocation cannot create another cycle. Calendar overflow returns a
-validation error instead of panicking. Run `cargo test --test subscription_plans`
-for lifecycle regressions; remaining phase 5 acceptance scenarios are tracked in
-`docs/test-matrix.md` and the phase 5 exit gate remains open.
+validation error instead of panicking.
 
 Product eligibility selects an effective entitlement for the requested product;
 a newer pending or revoked subscription cannot hide another valid contract.
@@ -276,6 +274,15 @@ Migration `202609110004_active_plan_slot_lifecycle` keeps the exclusive plan slo
 aligned with commercial and renewal status. Published plan Products reject late
 inserts as well as updates and deletes. Phase 5 is complete; run
 `bash scripts/check-phase-gate.sh 5` for its accumulated validation.
+
+Phase 6 completes deterministic usage metering for unit and tiered prices,
+pending blocks, cycle accumulators, consolidated debits and immutable lot
+allocations. Eligibility exposes `customer_plan_entitled`, `credit_sufficient`
+and `access_allowed` separately and remains a nonbinding snapshot; every usage
+command revalidates the plan, Product, materialized wallets and balance under
+transactional locks. A Product outside the effective plan returns
+`403 product_not_entitled` without usage or financial effects. Run
+`bash scripts/check-phase-gate.sh 6` for the accumulated validation.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

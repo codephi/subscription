@@ -43,8 +43,8 @@ async fn pending_or_revoked_subscription_does_not_hide_another_entitlement() {
         let eligibility = usage::eligibility(&repository, workspace_id, product_id)
             .await
             .unwrap();
-        assert!(eligibility.eligible);
-        assert!(eligibility.entitled);
+        assert!(eligibility.access_allowed);
+        assert!(eligibility.customer_plan_entitled);
         assert_eq!(eligibility.commercial_status.as_deref(), Some("ACTIVE"));
         assert_eq!(
             eligibility.renewal_status.as_deref(),
@@ -57,7 +57,7 @@ async fn pending_or_revoked_subscription_does_not_hide_another_entitlement() {
         !usage::eligibility(&repository, workspace_id, product_id)
             .await
             .unwrap()
-            .eligible
+            .access_allowed
     );
 }
 

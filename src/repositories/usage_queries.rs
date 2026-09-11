@@ -58,16 +58,18 @@ impl DatabaseRepository {
             .as_ref()
             .map(|row| row.get::<i64, _>("balance_credit_units"));
         let product_active = product.get::<String, _>("status") == "ACTIVE";
-        let (eligible, reason) = eligibility_reason(product_active, usable, entitled, balance);
+        let (access_allowed, reason) =
+            eligibility_reason(product_active, usable, entitled, balance);
         transaction.commit().await?;
         Ok(ProductEligibilityResponse {
             product_id,
             usage_model: product.get("usage_model"),
-            eligible,
+            access_allowed,
             reason: reason.to_string(),
             renewal_status: plan.as_ref().map(|row| row.get("renewal_status")),
             commercial_status: status,
-            entitled,
+            customer_plan_entitled: entitled,
+            credit_sufficient: balance.is_some_and(|value| value >= 0),
             balance_credit_units: balance.map(CreditUnits::new),
             wallet_version: wallet.as_ref().map(|row| row.get("version")),
             evaluated_at,

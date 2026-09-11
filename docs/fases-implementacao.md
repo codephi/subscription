@@ -258,6 +258,13 @@ Entregas:
 duplicação; saldo insuficiente, falta de entitlement ou workspace não
 operacional rejeita integralmente a chamada.
 
+Fase concluída em 2026-09-11: conversões unitárias e por faixa preservam cada
+intervalo recebido em bloco ou pendência, consolidam o débito por chamada e
+serializam ItemWallet, acumulador e CustomerWallet. A elegibilidade expõe seus
+fatos separadamente sem autorizar o comando posterior; Product fora do plano,
+saldo insuficiente, wallet desabilitada e workspace bloqueado não deixam efeitos.
+Todos os critérios da fase 6 estão cobertos pelo gate `check-phase-gate.sh 6`.
+
 ## Fase 7 — Fronteira de Billing agnóstica ao provedor
 
 **Objetivo:** definir pagamentos sem acoplar Subscription ao Stripe.

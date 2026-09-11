@@ -295,7 +295,9 @@ async fn renewal_inactive_plan_can_spend_existing_credits() {
     )
     .await
     .expect("eligibility");
-    assert!(eligibility.eligible);
+    assert!(eligibility.access_allowed);
+    assert!(eligibility.customer_plan_entitled);
+    assert!(eligibility.credit_sufficient);
     assert_eq!(eligibility.reason, "eligible");
     assert_eq!(
         eligibility.renewal_status.as_deref(),
@@ -425,3 +427,6 @@ async fn get_json(router: &axum::Router, uri: &str) -> serde_json::Value {
     assert!(response.status().is_success());
     response_json(response).await
 }
+
+#[path = "support/usage_phase6_acceptance.rs"]
+mod usage_phase6_acceptance;

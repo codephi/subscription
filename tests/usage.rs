@@ -318,6 +318,15 @@ async fn tier_boundary_assigns_unique_blocks_without_repricing() {
     assert_eq!(second.converted_item_units.value(), 5);
     assert_eq!(second.allocations[0].tier_position, Some(2));
     assert_eq!(second.debited_credit_units.value(), 2);
+    let cycle_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT cycle_key FROM pricing_accumulators WHERE customer_id=$1 AND item_id=$2",
+    )
+    .bind(fixture.workspace_id)
+    .bind(fixture.item_id)
+    .fetch_all(&fixture.pool)
+    .await
+    .expect("lifetime accumulator");
+    assert_eq!(cycle_keys, vec!["lifetime"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

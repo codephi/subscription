@@ -857,25 +857,19 @@ Resposta de elegibilidade:
 {
   "product_id": "prod_...",
   "usage_model": "CREDIT_METERED",
-  "eligible": true,
+  "access_allowed": true,
   "reason": "eligible",
-  "customer_plan": {
-    "commercial_status": "PAST_DUE",
-    "renewal_status": "RENEWAL_INACTIVE",
-    "renewal_reason": "renewal_inactive",
-    "subscription_model": "CREDIT_STRICT",
-    "entitled": true
-  },
-  "wallet": {
-    "wallet_type": "customer_wallet",
-    "balance_credit_units": "250",
-    "version": "42"
-  },
+  "commercial_status": "PAST_DUE",
+  "renewal_status": "RENEWAL_INACTIVE",
+  "customer_plan_entitled": true,
+  "credit_sufficient": true,
+  "balance_credit_units": "250",
+  "wallet_version": 42,
   "evaluated_at": "2026-08-25T20:00:00Z"
 }
 ```
 
-Razões normativas principais: `customer_plan_not_active`, `entitlement_not_granted`, `insufficient_credit` ou `eligible`. `renewal_inactive` é razão secundária de renovação, presente com `PAST_DUE`, e pode coexistir com `eligible`; ela informa que não haverá ciclo/franquia/cobrança automática nova, não que o saldo existente foi bloqueado. Em `CREDIT_STRICT`, saldo zero só é elegível quando o débito calculado para o consumo também for zero; um consumo positivo que não caiba retorna `insufficient_credit`. Em `ENTITLEMENT_ONLY`, futuro/fora da V1, `wallet` e `credit_sufficient` são nulos/omitidos. A resposta é informativa e pode mudar antes do consumo.
+Razões normativas principais: `customer_plan_not_active`, `entitlement_not_granted`, `insufficient_credit` ou `eligible`. `renewal_inactive` é razão secundária de renovação, presente com `PAST_DUE`, e pode coexistir com `eligible`; ela informa que não haverá ciclo/franquia/cobrança automática nova, não que o saldo existente foi bloqueado. Na consulta informativa de `CREDIT_STRICT`, saldo zero ainda é não negativo; qualquer comando com débito positivo revalida o valor e retorna `insufficient_credit`. Em `ENTITLEMENT_ONLY`, futuro/fora da V1, wallet e `credit_sufficient` serão nulos ou omitidos. A resposta pode mudar antes do consumo.
 
 Cada item do extrato da `customer_wallet` expõe, no mínimo: sequência estável, `customer_wallet_entry_id`, instante, tipo, canal de origem, `signed_credit_units`, `balance_before_credit_units`, `balance_after_credit_units`, `transaction_id` e referências à `item_wallet` quando a origem for consumo. Não há campos de item balance, moeda ou dinheiro.
 
