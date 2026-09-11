@@ -89,7 +89,9 @@ pub enum WorkspaceTransactionResponse {
 pub struct CreditLedgerReconciliationResponse {
     pub workspace_id: Uuid,
     pub wallet_balance_credit_units: CreditUnits,
+    /// Sum of every signed ledger entry, independent of the wallet projection.
     pub ledger_balance_credit_units: CreditUnits,
+    /// Remaining credits in lots whose expiration is absent or still in the future.
     pub available_lot_credit_units: CreditUnits,
     pub consistent: bool,
 }

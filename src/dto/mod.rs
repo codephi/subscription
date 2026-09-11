@@ -3,6 +3,7 @@ pub mod credits;
 pub mod echo;
 pub mod events;
 pub mod health;
+pub mod idempotency;
 pub mod plans;
 pub mod units;
 pub mod usage;

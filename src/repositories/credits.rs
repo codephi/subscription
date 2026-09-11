@@ -1,6 +1,9 @@
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
+#[path = "credit_conflicts.rs"]
+mod credit_conflicts;
+
 use crate::{
     dto::{
         credits::{
@@ -200,22 +203,16 @@ impl DatabaseRepository {
         &self,
         workspace_id: Uuid,
     ) -> ApiResult<CreditLedgerReconciliationResponse> {
-        let row = sqlx::query(
-            "SELECT cw.balance_credit_units, \
-             COALESCE((SELECT e.balance_after_credit_units FROM customer_wallet_entries e \
-               WHERE e.customer_wallet_id=cw.wallet_id ORDER BY e.entry_sequence DESC LIMIT 1),0) ledger_balance, \
-             COALESCE((SELECT sum(l.remaining_credit_units)::bigint FROM credit_lots l \
-               WHERE l.customer_id=w.customer_id),0) lot_balance \
-             FROM wallets w JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id \
-             WHERE w.customer_id=$1 AND w.wallet_type='CUSTOMER'",
-        )
-        .bind(workspace_id)
-        .fetch_optional(&self.pool())
-        .await?
-        .ok_or_else(|| ApiError::service_unavailable(
-            "wallet_not_provisioned",
-            format!("workspace {workspace_id} has no customer wallet"),
-        ))?;
+        let row = sqlx::query(include_str!("credit_reconciliation.sql"))
+            .bind(workspace_id)
+            .fetch_optional(&self.pool())
+            .await?
+            .ok_or_else(|| {
+                ApiError::service_unavailable(
+                    "wallet_not_provisioned",
+                    format!("workspace {workspace_id} has no customer wallet"),
+                )
+            })?;
         let wallet_balance: i64 = row.get("balance_credit_units");
         let ledger_balance: i64 = row.get("ledger_balance");
         let lot_balance: i64 = row.get("lot_balance");
@@ -224,7 +221,9 @@ impl DatabaseRepository {
             wallet_balance_credit_units: CreditUnits::new(wallet_balance),
             ledger_balance_credit_units: CreditUnits::new(ledger_balance),
             available_lot_credit_units: CreditUnits::new(lot_balance),
-            consistent: wallet_balance == ledger_balance && wallet_balance == lot_balance,
+            consistent: wallet_balance == ledger_balance
+                && wallet_balance == lot_balance
+                && row.get::<bool, _>("ledger_chain_valid"),
         })
     }
 
@@ -373,10 +372,18 @@ pub(super) async fn reserve_idempotency(
     if inserted.rows_affected() == 1 {
         return Ok(());
     }
-    Err(ApiError::conflict(
+    let conflict = ApiError::conflict(
         "idempotency_key_already_used",
         format!("Idempotency-Key {key:?} was already used in workspace {workspace_id}"),
-    ))
+    );
+    Err(credit_conflicts::attach_committed_operation(
+        transaction,
+        workspace_id,
+        key,
+        true,
+        conflict,
+    )
+    .await?)
 }
 
 pub(super) async fn reserve_transaction(
@@ -397,8 +404,16 @@ pub(super) async fn reserve_transaction(
     if inserted.rows_affected() == 1 {
         return Ok(());
     }
-    Err(ApiError::conflict(
+    let conflict = ApiError::conflict(
         "transaction_already_exists",
         format!("transaction_id {transaction_id:?} already exists in workspace {workspace_id}"),
-    ))
+    );
+    Err(credit_conflicts::attach_committed_operation(
+        transaction,
+        workspace_id,
+        transaction_id,
+        false,
+        conflict,
+    )
+    .await?)
 }

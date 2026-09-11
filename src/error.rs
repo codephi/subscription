@@ -1,3 +1,4 @@
+use crate::dto::idempotency::ExistingOperationReference;
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 use sqlx::Error as SqlxError;
@@ -17,6 +18,7 @@ pub enum ApiError {
         status: StatusCode,
         code: &'static str,
         message: String,
+        existing_operation: Option<Box<ExistingOperationReference>>,
     },
     #[error(transparent)]
     Database(#[from] SqlxError),
@@ -33,9 +35,22 @@ pub struct ErrorResponse {
 pub struct ErrorBody {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_operation: Option<Box<ExistingOperationReference>>,
 }
 
 impl ApiError {
+    /// Attach a committed reference to a conflict; e.g. a retry after a lost response.
+    pub fn with_existing_operation(mut self, reference: ExistingOperationReference) -> Self {
+        if let Self::Domain {
+            existing_operation, ..
+        } = &mut self
+        {
+            *existing_operation = Some(Box::new(reference));
+        }
+        self
+    }
+
     pub fn code(&self) -> &str {
         match self {
             Self::BadRequest(_) => "bad_request",
@@ -95,6 +110,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            existing_operation: None,
         }
     }
 }
@@ -110,6 +126,7 @@ impl IntoResponse for ApiError {
                 status,
                 code,
                 message,
+                ..
             } => (*status, *code, message.clone()),
             Database(error) => match error {
                 SqlxError::RowNotFound => (
@@ -166,6 +183,12 @@ impl IntoResponse for ApiError {
             error: ErrorBody {
                 code: code.to_string(),
                 message,
+                existing_operation: match &self {
+                    Domain {
+                        existing_operation, ..
+                    } => existing_operation.clone(),
+                    _ => None,
+                },
             },
         });
         (status, payload).into_response()

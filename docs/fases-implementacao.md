@@ -176,6 +176,15 @@ Entregas:
 - eventos versionados de crédito após commit, sem incluir membros ou dados
   sensíveis do sistema de Accounts.
 
+O aceite inclui falha injetada no commit, encerramento da conexão PostgreSQL
+antes da confirmação e perda da resposta após commit. Reuso de chave ou
+transação devolve referência consultável à operação original, quando concluída,
+sem expor seu payload. Créditos distintos concorrentes preservam sequência,
+versão e saldo; a reconciliação compara a soma integral do razão, seu encadeamento
+e os lotes não expirados, sem alterar histórico. A origem do lote é imutável;
+saldo residual, classificação efetiva e validade continuam como projeções dos
+fluxos de consumo, reclassificação e expiração das fases seguintes.
+
 **Critério de saída:** toda mudança de saldo tem exatamente um lançamento;
 créditos concorrentes ou repetidos não duplicam efeitos; workspace não
 operacional rejeita integralmente a chamada.

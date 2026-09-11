@@ -195,6 +195,14 @@ Invariantes:
 
 Cada entrada positiva que disponibiliza créditos materializa um `CreditLot` imutável na origem e com estado materializado auditável: `credit_lot_id`, entrada concessora, `source_kind`, quantidade original, saldo residual, `expires_at` opcional, `customer_plan_cycle_id` quando a origem é a franquia-base e histórico append-only de consumo, reclassificação e expiração. O saldo único da `customer_wallet` continua sendo a projeção da soma dos lotes disponíveis, conciliada com o razão; o lote não substitui nem altera a `CustomerWalletEntry` original.
 
+A proteção de origem impede excluir o lote ou alterar seu identificador,
+customer, entrada concessora, quantidade original e timestamp de criação.
+Classificação efetiva, residual e validade permanecem projeções mutáveis pelos
+fluxos auditados previstos abaixo. A reconciliação soma todos os lançamentos,
+verifica sequência contínua e encadeamento dos saldos, e exclui lotes expirados
+do total disponível. Divergência retorna `consistent: false` sem reparar linhas;
+residual expirado ainda não baixado é uma divergência operacional detectável.
+
 `SUBSCRIPTION_CREDIT` cria lote de assinatura vinculado ao ciclo materializado. Seu residual expira integralmente em `current_period_end`: não acumula na renovação, que cria somente a nova franquia do ciclo seguinte. `DIRECT_CREDIT` originado por `OnDemandPlan` cria lote de compra extra persistente: permanece disponível através de renovações e trocas de plano, sem política geral de expiração própria na V1. Outras origens declaram sua própria validade quando aplicável; ausência de validade não permite inferir expiração automática.
 
 Em toda troca de plano, antes do reset do ciclo, `CreditLotReclassification` converte idempotente e auditavelmente o residual disponível de cada lote `SUBSCRIPTION_CREDIT` para `ON_DEMAND` persistente. O evento guarda lote, quantidade preservada, classificação/validade anterior e nova, `customer_plan_cycle_id`, `plan_transition_id`, ator e instante; é único por lote + transição. Ele preserva a mesma quantidade de `credit_units`, zera sua expiração de assinatura e conserva a proveniência do crédito original. Não cria nem edita `CustomerWalletEntry`, não altera `balance_credit_units` e não é preço, câmbio, desconto, conversão monetária ou prorrata. Depois disso, o residual convertido participa da segunda prioridade de consumo, junto com os créditos sob demanda persistentes.
@@ -776,6 +784,13 @@ Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita
 ## 5. Contratos HTTP principais
 
 Prefixo sugerido: `/v1`. O `workspace_id` vem no caminho ou no contrato da operação, e a aplicação valida sua existência e a consistência do escopo.
+
+Conflitos de chave ou transação incluem `error.existing_operation` quando há
+reserva concluída: `workspace_id`, `operation_kind`, `resource_id` e
+`transaction_id` originais. A consulta é restrita ao workspace informado; nenhum
+payload/metadata original é copiado para o erro. Para créditos, o cliente usa o
+`transaction_id` dessa referência na consulta de transação da wallet, inclusive
+quando perdeu a resposta após o commit. Erros sem reserva concluída omitem o campo.
 
 Exceção vigente de entrega, conforme o [ADR 0003](adr/0003-accounts-boundary.md):
 autenticação geral e autorização administrativa foram adiadas por decisão do

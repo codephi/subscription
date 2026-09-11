@@ -160,7 +160,7 @@ The [test matrix](docs/test-matrix.md) preserves individual normative scenarios 
 explicit coverage gaps. A green suite does **not** imply all V1 scenarios are covered.
 Use `bash scripts/check-phase-gate.sh 6` to validate phase 6 and every previous phase;
 any open matrix row blocks the gate before the full quality checks. `--check-only`
-prints coverage blockers without running Cargo. Phases 4–6 are under coverage
+prints coverage blockers without running Cargo. Phases 5–6 are under coverage
 revalidation; Billing/Stripe must not advance on the former grouped approvals.
 
 Catalog price validation rejects invalid tier boundaries and accumulation cycles
@@ -207,7 +207,27 @@ These fixes require no migration or dependency change.
 
 The phase 3 acceptance scope retains the explicit authentication deferral in
 ADR 0003: Accounts events are signed, while common and administrative routes
-remain open within a trusted network. Phases 4–6 still require their own gates.
+remain open within a trusted network. Phases 5–6 still require their own gates.
+
+Phase 4 closes the credit ledger gate with explicit commit-failure, backend-loss,
+and lost-response tests. Duplicate keys/transactions return HTTP 409 with an
+optional `error.existing_operation` containing the original workspace, operation
+kind, resource ID and transaction ID. Clients can query that transaction after a
+lost response; the conflict never returns original metadata or another workspace's
+reference. A reservation without a completed resource omits this field.
+
+Credit reconciliation now checks the sum of every signed entry, continuous
+sequence and balance chain, and remaining unexpired lots. Expired residuals awaiting
+forfeiture produce `consistent: false`. Reconciliation never repairs history.
+Migration `202609100001_credit_lot_origin` protects lot identity, owner, granting
+entry, original quantity and creation time against changes/deletion; effective
+classification, expiry and remaining balance remain projections for later lifecycle
+flows. The migration is reversible and preserves existing rows.
+
+Run `bash scripts/check-phase-gate.sh 4` to validate phases 0–4 together. Regression
+tests also prove one version increment and one ledger/lot/event per distinct
+concurrent credit, rollback without leftover reservations, and outbox visibility
+only after commit with no private request context. No new dependency is required.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

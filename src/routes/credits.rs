@@ -37,7 +37,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     request_body = DirectCreditRequest,
     responses(
         (status = 201, body = DirectCreditResponse),
-        (status = 409, body = ErrorResponse, description = "Duplicate key, transaction, or inactive workspace"),
+        (status = 409, body = ErrorResponse, description = "Duplicate key or transaction includes existing_operation when its committed reference is available; inactive workspaces and disabled grants also conflict"),
         (status = 422, body = ErrorResponse, description = "Invalid units or context"),
         (status = 503, body = ErrorResponse, description = "Wallet hierarchy is incomplete")
     )
@@ -99,7 +99,7 @@ async fn find_customer_wallet_transaction(
     tag = "Operations",
     params(("workspace_id" = Uuid, Path)),
     responses(
-        (status = 200, body = CreditLedgerReconciliationResponse),
+        (status = 200, body = CreditLedgerReconciliationResponse, description = "Read-only comparison of wallet balance, summed ledger with continuous sequence/balance chain, and unexpired remaining lots; divergence never repairs history"),
         (status = 503, body = ErrorResponse, description = "Customer wallet is absent")
     )
 )]
