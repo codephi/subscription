@@ -109,6 +109,7 @@ pub struct SubscriptionResponse {
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreateSubscriptionPlanRequest {
+    pub admission_policy_version_id: Option<Uuid>,
     pub name: String,
     pub commercial_model: CommercialModel,
     pub price_amount_minor: Option<i64>,
@@ -123,6 +124,7 @@ pub struct CreateSubscriptionPlanRequest {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct SubscriptionPlanResponse {
+    pub admission_policy_version_id: Option<Uuid>,
     pub plan_version_id: Uuid,
     pub subscription_id: Uuid,
     pub name: String,

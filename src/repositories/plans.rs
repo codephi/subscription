@@ -61,7 +61,7 @@ impl DatabaseRepository {
         let row = sqlx::query(
             "INSERT INTO subscription_plan_versions (plan_version_id,subscription_id,name, \
              commercial_model,price_amount_minor,currency,recurrence,admission_policy, \
-             accepted_payment_methods,granted_credit_units) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) \
+             accepted_payment_methods,granted_credit_units,admission_policy_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) \
              RETURNING *",
         )
         .bind(plan_id)
@@ -74,6 +74,7 @@ impl DatabaseRepository {
         .bind(request.admission_policy.as_str())
         .bind(&request.accepted_payment_methods)
         .bind(request.granted_credit_units.value())
+        .bind(request.admission_policy_version_id)
         .fetch_one(&mut *transaction)
         .await?;
         for product_id in &request.product_ids {
@@ -192,6 +193,12 @@ impl DatabaseRepository {
         )
         .await?;
         lock_valid_plan(&mut transaction, plan.response.plan_version_id).await?;
+        let evidence_id = super::admission::ensure_admission_evidence(
+            &mut transaction,
+            workspace_id,
+            plan.response.plan_version_id,
+        )
+        .await?;
         let customer_plan_id = Uuid::new_v4();
         let activates_now = plan.response.commercial_model == CommercialModel::Free
             && plan.response.accepted_payment_methods.is_empty();
@@ -203,6 +210,14 @@ impl DatabaseRepository {
             anchor_at,
             plan.response.commercial_model,
             activates_now,
+        )
+        .await?;
+        super::admission::record_admission_decision(
+            &mut transaction,
+            customer_plan_id,
+            None,
+            plan.response.plan_version_id,
+            evidence_id,
         )
         .await?;
         reserve_active_slot(

@@ -218,8 +218,7 @@ Continuação: elegibilidade considera o entitlement do produto mesmo com outra
 Subscription pendente/revogada; downgrade reaplica admissão e não ignora exigência
 de cartão. Cancelamento pendente libera o slot imediatamente, cancelamento
 recorrente preserva o ciclo em curso e chamadas repetidas não duplicam eventos
-nem sobrescrevem estados terminais. Política de admissão versionada com evidências
-segue pendente; este bloco não encerra a fase.
+nem sobrescrevem estados terminais.
 
 Scheduler de ciclos gratuitos: fila persistida por ciclo, criada e encerrada
 na transação do calendário, com backfill de ciclos existentes. Workers concorrentes
@@ -227,6 +226,13 @@ usam lease de 60 segundos e retomam reservas expiradas; falhas reagendam o traba
 em 30 segundos sem bloquear outros workspaces. Testes cobrem reinício, concorrência,
 rollback no commit, bloqueio operacional e execução automática. Não executa
 cobranças nem consultas a provedores.
+
+Política de admissão: versões imutáveis declaram fatos de e-mail e identidade;
+atestados assinados de Accounts são sequenciados, possuem validade e referência
+opaca. Adesão e downgrade serializam a avaliação com atualizações da evidência e
+registram a evidência exata da decisão. Retirada, expiração, outro workspace,
+duplicata alterada e falha de commit não autorizam nem deixam efeitos parciais.
+Validação antifraude de cartão continua no fluxo de Billing.
 
 ## Fase 6 — Medição de consumo
 

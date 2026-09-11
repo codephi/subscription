@@ -34,6 +34,7 @@ pub(super) fn plan_from_row(
     product_ids: Vec<Uuid>,
 ) -> ApiResult<SubscriptionPlanResponse> {
     Ok(SubscriptionPlanResponse {
+        admission_policy_version_id: row.get("admission_policy_version_id"),
         plan_version_id: row.get("plan_version_id"),
         subscription_id: row.get("subscription_id"),
         name: row.get("name"),

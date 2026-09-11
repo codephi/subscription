@@ -21,8 +21,29 @@ pub fn subscription_request() -> CreateSubscriptionRequest {
     }
 }
 
+pub fn plan_request(
+    product_id: Uuid,
+    commercial_model: CommercialModel,
+    recurrence: PlanRecurrence,
+    credits: i64,
+) -> CreateSubscriptionPlanRequest {
+    CreateSubscriptionPlanRequest {
+        admission_policy_version_id: None,
+        name: format!("Plan {}", Uuid::new_v4()),
+        commercial_model,
+        price_amount_minor: None,
+        currency: None,
+        recurrence,
+        admission_policy: AdmissionPolicy::Open,
+        accepted_payment_methods: Vec::new(),
+        granted_credit_units: CreditUnits::new(credits),
+        product_ids: vec![product_id],
+    }
+}
+
 pub fn paid_plan_request(product_id: Uuid) -> CreateSubscriptionPlanRequest {
     CreateSubscriptionPlanRequest {
+        admission_policy_version_id: None,
         name: format!("Paid plan {}", Uuid::new_v4()),
         commercial_model: CommercialModel::Paid,
         price_amount_minor: Some(1_000),

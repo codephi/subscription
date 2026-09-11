@@ -242,8 +242,8 @@ for lifecycle regressions; remaining phase 5 acceptance scenarios are tracked in
 Product eligibility selects an effective entitlement for the requested product;
 a newer pending or revoked subscription cannot hide another valid contract.
 The response reports the selected contract's persisted renewal status.
-Downgrades recheck admission and reject targets requiring approval or CARD
-validation; CARD transitions await the Billing evidence flow.
+Downgrades recheck admission against current evidence; CARD transitions await
+the Billing evidence flow.
 
 Cancellation immediately closes unactivated contracts (including recurring
 plans) and releases their active slot. Activated recurring contracts retain the
@@ -263,6 +263,14 @@ allowing other workspaces to proceed. Idle workers check again after one second.
 Only internal calendar work is executed; paid collection and provider calls remain
 in the Billing flow. The administrative cycle runner continues to close queue jobs
 atomically when used for explicit catch-up.
+
+Admission requirements can be published as immutable policy versions and linked
+to `APPROVAL_REQUIRED` plans. Accounts submits signed, sequenced attestations for
+verified email or identity with an opaque reference and expiry. Admission and
+downgrade lock the workspace, evaluate the latest evidence, and persist the exact
+evidence used by the decision in the same transaction. Expired, withdrawn,
+out-of-sequence, cross-workspace, unsigned, or altered events cannot authorize a
+contract. CARD evidence remains owned by the Billing setup flow.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

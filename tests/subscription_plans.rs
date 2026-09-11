@@ -26,8 +26,8 @@ use subscription::{
             PricingModel, UpdateItemRequest, UpdateProductRequest, UsageModel,
         },
         plans::{
-            AdmissionPolicy, CommercialModel, CreateOnDemandPlanRequest,
-            CreateSubscriptionPlanRequest, PlanRecurrence, RevokeCustomerPlanRequest,
+            AdmissionPolicy, CommercialModel, CreateOnDemandPlanRequest, PlanRecurrence,
+            RevokeCustomerPlanRequest,
         },
         units::{CreditUnits, ItemUnits},
     },
@@ -39,8 +39,8 @@ use uuid::Uuid;
 
 use subscription_plan_contract::{assert_plan_swagger, get_json};
 use subscription_plan_requests::{
-    apply_workspace_event, customer_plan_request, paid_plan_request, revoke_plan_request,
-    subscription_request,
+    apply_workspace_event, customer_plan_request, paid_plan_request, plan_request,
+    revoke_plan_request, subscription_request,
 };
 use subscription_plan_transition::{
     assert_audit, assert_blocked_join, assert_downgrade, assert_plan_state, revoke_for_cleanup,
@@ -467,25 +467,6 @@ async fn create_free_plan(
     .expect("plan")
 }
 
-fn plan_request(
-    product_id: Uuid,
-    commercial_model: CommercialModel,
-    recurrence: PlanRecurrence,
-    credits: i64,
-) -> CreateSubscriptionPlanRequest {
-    CreateSubscriptionPlanRequest {
-        name: format!("Plan {}", Uuid::new_v4()),
-        commercial_model,
-        price_amount_minor: None,
-        currency: None,
-        recurrence,
-        admission_policy: AdmissionPolicy::Open,
-        accepted_payment_methods: Vec::new(),
-        granted_credit_units: CreditUnits::new(credits),
-        product_ids: vec![product_id],
-    }
-}
-
 async fn join_plan(
     repository: &DatabaseRepository,
     workspace_id: Uuid,
@@ -501,3 +482,7 @@ async fn join_plan(
     .await
     .expect("join plan")
 }
+#[path = "support/admission_policy_contract.rs"]
+mod admission_policy_contract;
+#[path = "support/admission_policy_recovery.rs"]
+mod admission_policy_recovery;

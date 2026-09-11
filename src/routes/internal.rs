@@ -74,7 +74,7 @@ async fn replay_outbox_event(
     Ok(StatusCode::NO_CONTENT)
 }
 
-fn verify_request(state: &AppState, headers: &HeaderMap, body: &[u8]) -> ApiResult<()> {
+pub(super) fn verify_request(state: &AppState, headers: &HeaderMap, body: &[u8]) -> ApiResult<()> {
     let secret = state.accounts_webhook_secret().ok_or_else(|| {
         ApiError::service_unavailable(
             "accounts_webhook_not_configured",

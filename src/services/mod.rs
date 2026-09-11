@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod billing;
 pub mod billing_state;
 pub mod calendar;

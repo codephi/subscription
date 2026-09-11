@@ -41,6 +41,12 @@ impl DatabaseRepository {
         )
         .await?;
         lock_valid_plan(&mut transaction, target_plan.response.plan_version_id).await?;
+        let evidence_id = super::admission::ensure_admission_evidence(
+            &mut transaction,
+            workspace_id,
+            target_plan.response.plan_version_id,
+        )
+        .await?;
         let current =
             lock_transition_source(&mut transaction, workspace_id, customer_plan_id).await?;
         validate_transition_source(customer_plan_id, &current, target_plan)?;
@@ -54,6 +60,14 @@ impl DatabaseRepository {
             &current,
             effective_at,
             new_period_end,
+        )
+        .await?;
+        super::admission::record_admission_decision(
+            &mut transaction,
+            customer_plan_id,
+            Some(transition_id),
+            target_plan.response.plan_version_id,
+            evidence_id,
         )
         .await?;
         let reclassified = reclassify_subscription_lots(

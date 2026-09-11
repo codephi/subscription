@@ -114,7 +114,7 @@ pub async fn create_customer_plan(
             format!("subscription plan {} is revoked", request.plan_version_id),
         ));
     }
-    ensure_open_admission(&plan.response)?;
+    ensure_supported_admission(&plan.response)?;
     let anchor = repository.current_time().await?;
     let end = cycle_end(anchor, plan.response.recurrence, 1)?;
     let hash = request_hash(&request)?;
@@ -197,7 +197,7 @@ pub async fn transition_customer_plan(
             ),
         ));
     }
-    ensure_open_admission(&target.response)?;
+    ensure_supported_admission(&target.response)?;
     if !target.response.accepted_payment_methods.is_empty() {
         return Err(ApiError::conflict(
             "plan_transition_card_validation_required",
@@ -267,6 +267,15 @@ async fn validate_plan(
         ));
     }
     validate_name("plan name", &request.name)?;
+    if let Some(policy_id) = request.admission_policy_version_id {
+        if request.admission_policy != AdmissionPolicy::ApprovalRequired {
+            return Err(ApiError::unprocessable(
+                "invalid_admission_policy_reference",
+                format!("policy version {policy_id} requires APPROVAL_REQUIRED admission"),
+            ));
+        }
+        repository.find_admission_policy(policy_id).await?;
+    }
     if request.granted_credit_units.value() < 0 {
         return Err(ApiError::unprocessable(
             "invalid_plan_credit",
@@ -367,8 +376,9 @@ fn request_hash<T: Serialize>(request: &T) -> ApiResult<String> {
     Ok(format!("{:#x}", digest.finalize()))
 }
 
-fn ensure_open_admission(plan: &SubscriptionPlanResponse) -> ApiResult<()> {
-    if plan.admission_policy == AdmissionPolicy::Open {
+fn ensure_supported_admission(plan: &SubscriptionPlanResponse) -> ApiResult<()> {
+    if plan.admission_policy == AdmissionPolicy::Open || plan.admission_policy_version_id.is_some()
+    {
         return Ok(());
     }
     Err(ApiError::conflict(

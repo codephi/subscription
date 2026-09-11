@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod catalog;
 pub mod credits;
 pub mod echo;

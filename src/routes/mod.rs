@@ -6,6 +6,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{config::AppConfig, state::AppState};
 
+pub mod admission;
 pub mod catalog;
 mod cors;
 pub mod credits;
@@ -46,6 +47,7 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
         .merge(catalog::router())
         .merge(credits::router())
         .merge(plans::router())
+        .merge(admission::router())
         .merge(usage::router())
         .merge(wallets::router())
         .split_for_parts();

@@ -16,3 +16,4 @@
 - Write tests for new features or bug fixes to ensure code quality.
 - Update documentation in README.md to reflect new features or changes.
 - **Calendar scheduling**: recurring FREE cycles use `subscription_calendar_jobs`, synchronized transactionally by the cycle migration trigger. Preserve lease recovery and idempotent cycle advancement; keep paid collection and provider I/O in Billing. Test restart, concurrent claims, commit failure, and blocked-workspace isolation when changing this workflow.
+- **Admission evidence**: publish immutable admission policy versions and ingest Accounts attestations through the signed internal route. Serialize evidence updates with plan admission on the workspace row, and persist the exact evidence used by each approved join or transition.

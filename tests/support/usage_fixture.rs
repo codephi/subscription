@@ -342,6 +342,7 @@ async fn activate_plan(
         repository,
         subscription.subscription_id,
         CreateSubscriptionPlanRequest {
+            admission_policy_version_id: None,
             name: "Usage plan".to_string(),
             commercial_model: CommercialModel::Free,
             price_amount_minor: None,
