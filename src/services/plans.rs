@@ -114,15 +114,7 @@ pub async fn create_customer_plan(
             format!("subscription plan {} is revoked", request.plan_version_id),
         ));
     }
-    if plan.response.admission_policy != AdmissionPolicy::Open {
-        return Err(ApiError::conflict(
-            "customer_plan_approval_required",
-            format!(
-                "subscription plan {} requires explicit approval",
-                request.plan_version_id
-            ),
-        ));
-    }
+    ensure_open_admission(&plan.response)?;
     let anchor = repository.current_time().await?;
     let end = cycle_end(anchor, plan.response.recurrence, 1)?;
     let hash = request_hash(&request)?;
@@ -203,6 +195,13 @@ pub async fn transition_customer_plan(
                 "target plan {} requires Billing support",
                 request.new_plan_version_id
             ),
+        ));
+    }
+    ensure_open_admission(&target.response)?;
+    if !target.response.accepted_payment_methods.is_empty() {
+        return Err(ApiError::conflict(
+            "plan_transition_card_validation_required",
+            format!("target plan {} requires validated CARD evidence before transition; expected a free target without a card requirement", request.new_plan_version_id),
         ));
     }
     let effective_at = repository.current_time().await?;
@@ -366,4 +365,17 @@ fn request_hash<T: Serialize>(request: &T) -> ApiResult<String> {
     let mut digest = Sha256::new();
     digest.update(serde_json::to_vec(request).map_err(ApiError::serialization)?);
     Ok(format!("{:#x}", digest.finalize()))
+}
+
+fn ensure_open_admission(plan: &SubscriptionPlanResponse) -> ApiResult<()> {
+    if plan.admission_policy == AdmissionPolicy::Open {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "customer_plan_approval_required",
+        format!(
+            "subscription plan {} requires explicit approval; expected OPEN admission",
+            plan.plan_version_id
+        ),
+    ))
 }

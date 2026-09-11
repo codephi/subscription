@@ -1,5 +1,9 @@
+#[path = "support/plan_admission_regressions.rs"]
+mod plan_admission_regressions;
 #[path = "support/plan_calendar_regressions.rs"]
 mod plan_calendar_regressions;
+#[path = "support/plan_cancellation_regressions.rs"]
+mod plan_cancellation_regressions;
 #[path = "support/subscription_plan_contract.rs"]
 mod subscription_plan_contract;
 #[path = "support/subscription_plan_requests.rs"]

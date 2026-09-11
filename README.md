@@ -239,6 +239,20 @@ validation error instead of panicking. Run `cargo test --test subscription_plans
 for lifecycle regressions; remaining phase 5 acceptance scenarios are tracked in
 `docs/test-matrix.md` and the phase 5 exit gate remains open.
 
+Product eligibility selects an effective entitlement for the requested product;
+a newer pending or revoked subscription cannot hide another valid contract.
+The response reports the selected contract's persisted renewal status.
+Downgrades recheck admission and reject targets requiring approval or CARD
+validation; CARD transitions await the Billing evidence flow.
+
+Cancellation immediately closes unactivated contracts (including recurring
+plans) and releases their active slot. Activated recurring contracts retain the
+current cycle and entitlement until period end; nonrecurring contracts close
+immediately while preserving credit history and balance. Repeated cancellation
+preserves the first result and cannot replace an administrative revocation.
+Effective cancellation and scheduling persist one `customer_plan.canceled` or
+`customer_plan.cancellation_scheduled` event with the contract change.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

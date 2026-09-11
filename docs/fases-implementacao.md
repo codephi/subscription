@@ -214,6 +214,13 @@ três renovações sem saltos, créditos reclassificados preservados e revogaç�
 concorrente impedindo novo ciclo. O gate da fase 5 permanece aberto até concluir
 os cenários de aceitação pendentes na matriz.
 
+Continuação: elegibilidade considera o entitlement do produto mesmo com outra
+Subscription pendente/revogada; downgrade reaplica admissão e não ignora exigência
+de cartão. Cancelamento pendente libera o slot imediatamente, cancelamento
+recorrente preserva o ciclo em curso e chamadas repetidas não duplicam eventos
+nem sobrescrevem estados terminais. Política de admissão versionada com evidências
+e scheduler durável seguem pendentes; este bloco não encerra a fase.
+
 ## Fase 6 — Medição de consumo
 
 **Objetivo:** converter consumo de itens em débitos de modo determinístico,

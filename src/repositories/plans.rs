@@ -281,47 +281,6 @@ impl DatabaseRepository {
             products,
         ))
     }
-
-    pub async fn cancel_customer_plan(
-        &self,
-        workspace_id: Uuid,
-        customer_plan_id: Uuid,
-    ) -> ApiResult<CustomerPlanResponse> {
-        let mut transaction = self.pool().begin().await?;
-        let recurrence: String = sqlx::query_scalar(
-            "SELECT p.recurrence FROM customer_plans c JOIN subscription_plan_versions p \
-             ON p.plan_version_id=c.plan_version_id WHERE c.customer_id=$1 AND c.customer_plan_id=$2 FOR UPDATE OF c",
-        )
-        .bind(workspace_id)
-        .bind(customer_plan_id)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or_else(|| missing("customer_plan", customer_plan_id))?;
-        if recurrence == "NONE" {
-            sqlx::query(
-                "UPDATE customer_plans SET commercial_status='CANCELED',renewal_status='RENEWAL_INACTIVE', \
-                 version=version+1 WHERE customer_plan_id=$1",
-            )
-            .bind(customer_plan_id)
-            .execute(&mut *transaction)
-            .await?;
-            sqlx::query("DELETE FROM active_customer_plan_slots WHERE customer_plan_id=$1")
-                .bind(customer_plan_id)
-                .execute(&mut *transaction)
-                .await?;
-        } else {
-            sqlx::query(
-                "UPDATE customer_plans SET cancel_at_period_end=true,renewal_status='RENEWAL_INACTIVE', \
-                 version=version+1 WHERE customer_plan_id=$1",
-            )
-            .bind(customer_plan_id)
-            .execute(&mut *transaction)
-            .await?;
-        }
-        transaction.commit().await?;
-        self.find_customer_plan(workspace_id, customer_plan_id)
-            .await
-    }
 }
 
 async fn load_plan_products(pool: &sqlx::PgPool, plan_id: Uuid) -> ApiResult<Vec<Uuid>> {

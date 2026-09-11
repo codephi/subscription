@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
@@ -32,25 +32,21 @@ impl DatabaseRepository {
         let evaluated_at: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
             .fetch_one(&mut *transaction)
             .await?;
-        let plan = sqlx::query(
-            "SELECT commercial_status,activation_status FROM customer_plans WHERE customer_id=$1 \
-             ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(workspace_id)
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let plan = sqlx::query(include_str!("product_eligibility_plan.sql"))
+            .bind(workspace_id)
+            .bind(product_id)
+            .bind(evaluated_at)
+            .fetch_optional(&mut *transaction)
+            .await?;
         let status = plan
             .as_ref()
             .map(|row| row.get::<String, _>("commercial_status"));
-        let usable = plan.as_ref().is_some_and(|row| {
-            matches!(
-                row.get::<String, _>("commercial_status").as_str(),
-                "ACTIVE" | "ACTIVE_PAID" | "PAST_DUE"
-            ) && row.get::<String, _>("activation_status") == "ACTIVATED"
-        });
-        let entitled =
-            Self::product_entitled(&mut transaction, workspace_id, product_id, evaluated_at)
-                .await?;
+        let usable = plan
+            .as_ref()
+            .is_some_and(|row| row.get::<bool, _>("usable"));
+        let entitled = plan
+            .as_ref()
+            .is_some_and(|row| row.get::<bool, _>("entitled"));
         let wallet = sqlx::query(
             "SELECT cw.balance_credit_units,cw.version FROM customer_wallets cw JOIN wallets w \
              ON w.wallet_id=cw.wallet_id WHERE w.customer_id=$1",
@@ -69,33 +65,13 @@ impl DatabaseRepository {
             usage_model: product.get("usage_model"),
             eligible,
             reason: reason.to_string(),
-            renewal_status: status.as_deref().map(renewal_status).map(str::to_string),
+            renewal_status: plan.as_ref().map(|row| row.get("renewal_status")),
             commercial_status: status,
             entitled,
             balance_credit_units: balance.map(CreditUnits::new),
             wallet_version: wallet.as_ref().map(|row| row.get("version")),
             evaluated_at,
         })
-    }
-
-    async fn product_entitled(
-        transaction: &mut Transaction<'_, Postgres>,
-        workspace_id: Uuid,
-        product_id: Uuid,
-        evaluated_at: DateTime<Utc>,
-    ) -> Result<bool, sqlx::Error> {
-        sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM customer_plan_entitlements e JOIN customer_plans c \
-             ON c.customer_plan_id=e.customer_plan_id WHERE c.customer_id=$1 AND e.product_id=$2 \
-             AND e.effective_from<=$3 AND (e.effective_until IS NULL OR e.effective_until>$3) \
-             AND c.commercial_status IN ('ACTIVE','ACTIVE_PAID','PAST_DUE') \
-             AND c.activation_status='ACTIVATED')",
-        )
-        .bind(workspace_id)
-        .bind(product_id)
-        .bind(evaluated_at)
-        .fetch_one(&mut **transaction)
-        .await
     }
 
     pub async fn find_item_wallet_meter(
@@ -422,14 +398,6 @@ fn billing_block_from_row(row: &sqlx::postgres::PgRow) -> ApiResult<BillingBlock
         unit_offset_start: boundary(row.get("unit_offset_start")),
         unit_offset_end: boundary(row.get("unit_offset_end")),
     })
-}
-
-fn renewal_status(commercial_status: &str) -> &'static str {
-    if commercial_status == "PAST_DUE" {
-        "RENEWAL_INACTIVE"
-    } else {
-        "CURRENT"
-    }
 }
 
 fn price_cycle_key(row: &sqlx::postgres::PgRow) -> ApiResult<String> {
