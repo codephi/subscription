@@ -219,7 +219,14 @@ Subscription pendente/revogada; downgrade reaplica admissão e não ignora exig�
 de cartão. Cancelamento pendente libera o slot imediatamente, cancelamento
 recorrente preserva o ciclo em curso e chamadas repetidas não duplicam eventos
 nem sobrescrevem estados terminais. Política de admissão versionada com evidências
-e scheduler durável seguem pendentes; este bloco não encerra a fase.
+segue pendente; este bloco não encerra a fase.
+
+Scheduler de ciclos gratuitos: fila persistida por ciclo, criada e encerrada
+na transação do calendário, com backfill de ciclos existentes. Workers concorrentes
+usam lease de 60 segundos e retomam reservas expiradas; falhas reagendam o trabalho
+em 30 segundos sem bloquear outros workspaces. Testes cobrem reinício, concorrência,
+rollback no commit, bloqueio operacional e execução automática. Não executa
+cobranças nem consultas a provedores.
 
 ## Fase 6 — Medição de consumo
 

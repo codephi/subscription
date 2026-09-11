@@ -15,6 +15,7 @@ mod plan_rows;
 mod plan_transitions;
 mod plan_writes;
 pub mod plans;
+pub(crate) mod subscription_calendar_jobs;
 pub mod usage;
 mod usage_models;
 mod usage_outbox;

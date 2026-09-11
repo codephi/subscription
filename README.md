@@ -253,6 +253,17 @@ preserves the first result and cannot replace an administrative revocation.
 Effective cancellation and scheduling persist one `customer_plan.canceled` or
 `customer_plan.cancellation_scheduled` event with the contract change.
 
+The server starts a durable scheduler for materialized recurring FREE cycles.
+Migration `202609110002_subscription_calendar_jobs` backfills pending calendar work;
+cycle creation and completion update the queue in the same database transaction.
+Workers claim jobs with `SKIP LOCKED` and a 60-second lease. A restarted process
+reclaims expired leases, while cycle locking prevents duplicate allowance or
+expiry entries. Failed jobs persist an error code and retry after 30 seconds,
+allowing other workspaces to proceed. Idle workers check again after one second.
+Only internal calendar work is executed; paid collection and provider calls remain
+in the Billing flow. The administrative cycle runner continues to close queue jobs
+atomically when used for explicit catch-up.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

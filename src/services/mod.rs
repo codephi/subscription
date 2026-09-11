@@ -9,6 +9,7 @@ pub mod integrations;
 pub mod outbox;
 pub mod plans;
 pub mod signatures;
+pub mod subscription_calendar;
 pub mod usage;
 pub mod wallets;
 pub mod workspace_events;
