@@ -35,7 +35,7 @@ pub(crate) struct CycleAdvanceOutcome {
 impl DatabaseRepository {
     pub(crate) async fn find_due_cycles(&self, as_of: DateTime<Utc>) -> ApiResult<Vec<DueCycle>> {
         let rows = sqlx::query(
-            "SELECT c.customer_plan_id,c.anchor_at,cy.customer_plan_cycle_id,cy.cycle_ordinal,p.recurrence \
+            "SELECT c.customer_plan_id,c.anchor_at,cy.customer_plan_cycle_id,cy.cycle_ordinal-c.anchor_cycle_ordinal+1 cycle_ordinal,p.recurrence \
              FROM customer_plans c JOIN customer_plan_cycles cy ON cy.customer_plan_id=c.customer_plan_id \
              JOIN subscription_plan_versions p ON p.plan_version_id=c.plan_version_id \
              WHERE c.commercial_status='ACTIVE' AND cy.status='ACTIVE' \
@@ -85,6 +85,7 @@ impl DatabaseRepository {
             return Ok(CycleAdvanceOutcome::default());
         };
         let plan = load_locked_plan(&mut transaction, due.plan_version_id).await?;
+        let plan_revoked = plan.response.revoked_at.is_some();
         let wallet = expire_cycle_lot(
             &mut transaction,
             &wallet,
@@ -100,12 +101,12 @@ impl DatabaseRepository {
         .bind(due.cycle_id)
         .execute(&mut *transaction)
         .await?;
-        if due.cancel_at_period_end || due.plan_revoked {
+        if due.cancel_at_period_end || plan_revoked {
             terminalize_customer_plan(
                 &mut transaction,
                 customer_plan_id,
                 due.period_end,
-                due.plan_revoked,
+                plan_revoked,
             )
             .await?;
             insert_plan_outbox(
@@ -113,7 +114,7 @@ impl DatabaseRepository {
                 workspace_id,
                 customer_plan_id,
                 due.cycle_id,
-                if due.plan_revoked {
+                if plan_revoked {
                     "customer_plan.expired"
                 } else {
                     "customer_plan.canceled"
@@ -183,7 +184,6 @@ struct LockedDueCycle {
     period_end: DateTime<Utc>,
     plan_version_id: Uuid,
     cancel_at_period_end: bool,
-    plan_revoked: bool,
     customer_plan_version: i64,
 }
 
@@ -195,9 +195,8 @@ async fn lock_due_cycle(
 ) -> ApiResult<Option<LockedDueCycle>> {
     let row = sqlx::query(
         "SELECT cy.customer_plan_cycle_id,cy.cycle_ordinal,cy.current_period_end,c.plan_version_id,c.version, \
-         c.cancel_at_period_end,p.revoked_at IS NOT NULL plan_revoked FROM customer_plans c \
+         c.cancel_at_period_end FROM customer_plans c \
          JOIN customer_plan_cycles cy ON cy.customer_plan_id=c.customer_plan_id \
-         JOIN subscription_plan_versions p ON p.plan_version_id=c.plan_version_id \
          WHERE c.customer_plan_id=$1 AND cy.customer_plan_cycle_id=$2 \
            AND c.commercial_status='ACTIVE' AND cy.status='ACTIVE' \
            AND cy.current_period_end IS NOT NULL AND cy.current_period_end<=$3 FOR UPDATE OF c,cy",
@@ -213,7 +212,6 @@ async fn lock_due_cycle(
         period_end: row.get("current_period_end"),
         plan_version_id: row.get("plan_version_id"),
         cancel_at_period_end: row.get("cancel_at_period_end"),
-        plan_revoked: row.get("plan_revoked"),
         customer_plan_version: row.get("version"),
     }))
 }
@@ -250,7 +248,7 @@ async fn expire_cycle_lot(
         "SELECT l.credit_lot_id,l.remaining_credit_units FROM credit_lots l \
          JOIN wallet_transaction_references r ON r.credit_lot_id=l.credit_lot_id \
          JOIN wallet_transaction_references c ON c.customer_wallet_entry_id=r.customer_wallet_entry_id \
-         WHERE c.customer_plan_cycle_id=$1 FOR UPDATE OF l",
+         WHERE c.customer_plan_cycle_id=$1 AND l.source_kind='SUBSCRIPTION' FOR UPDATE OF l",
     )
     .bind(cycle_id)
     .fetch_optional(&mut **transaction)

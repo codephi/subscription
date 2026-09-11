@@ -229,6 +229,16 @@ tests also prove one version increment and one ledger/lot/event per distinct
 concurrent credit, rollback without leftover reservations, and outbox visibility
 only after commit with no private request context. No new dependency is required.
 
+Phase 5 is in progress. Migration `202609110001_plan_calendar_anchor` persists
+which historical cycle started the current calendar anchor and backfills existing
+plans. Downgrade renewals now follow the new anchor without skipping periods;
+reclassified on-demand credits survive subsequent allowance expirations.
+Renewal checks offer revocation after acquiring the plan lock, so a concurrent
+committed revocation cannot create another cycle. Calendar overflow returns a
+validation error instead of panicking. Run `cargo test --test subscription_plans`
+for lifecycle regressions; remaining phase 5 acceptance scenarios are tracked in
+`docs/test-matrix.md` and the phase 5 exit gate remains open.
+
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`

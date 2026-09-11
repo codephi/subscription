@@ -208,6 +208,12 @@ Entregas:
 ciclo; bloqueio externo não destrói créditos e impede novas mutações conforme o
 contrato; consumidores deduplicam eventos pela identidade estável.
 
+Progresso em 2026-09-11: corrigida a contagem do calendário após downgrade,
+com migração reversível que preserva ordinais históricos. Regressões verificam
+três renovações sem saltos, créditos reclassificados preservados e revogação
+concorrente impedindo novo ciclo. O gate da fase 5 permanece aberto até concluir
+os cenários de aceitação pendentes na matriz.
+
 ## Fase 6 — Medição de consumo
 
 **Objetivo:** converter consumo de itens em débitos de modo determinístico,

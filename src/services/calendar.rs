@@ -21,17 +21,23 @@ pub fn cycle_end(
     }
     if recurrence == PlanRecurrence::Weekly {
         return anchor
-            .checked_add_signed(Duration::weeks(cycle_ordinal))
+            .checked_add_signed(
+                Duration::try_weeks(cycle_ordinal)
+                    .ok_or_else(|| calendar_overflow(anchor, recurrence, cycle_ordinal))?,
+            )
             .map(Some)
             .ok_or_else(|| calendar_overflow(anchor, recurrence, cycle_ordinal));
     }
-    let months_per_cycle = match recurrence {
+    let months_per_cycle: i64 = match recurrence {
         PlanRecurrence::Monthly => 1,
         PlanRecurrence::Quarterly => 3,
         PlanRecurrence::Annually => 12,
         PlanRecurrence::None | PlanRecurrence::Weekly => unreachable!("handled above"),
     };
-    add_anchor_months(anchor, months_per_cycle * cycle_ordinal)
+    let months = months_per_cycle
+        .checked_mul(cycle_ordinal)
+        .ok_or_else(|| calendar_overflow(anchor, recurrence, cycle_ordinal))?;
+    add_anchor_months(anchor, months)
         .map(Some)
         .ok_or_else(|| calendar_overflow(anchor, recurrence, cycle_ordinal))
 }
@@ -233,6 +239,26 @@ mod tests {
             cycle_end(anchor, PlanRecurrence::None, 1).expect("none"),
             None
         );
+    }
+
+    #[test]
+    fn subscription_calendar_rejects_out_of_range_ordinals_without_panicking() {
+        let anchor = Utc.with_ymd_and_hms(2026, 1, 31, 10, 0, 0).unwrap();
+        for recurrence in [
+            PlanRecurrence::Weekly,
+            PlanRecurrence::Monthly,
+            PlanRecurrence::Quarterly,
+            PlanRecurrence::Annually,
+        ] {
+            assert_eq!(
+                cycle_end(anchor, recurrence, i64::MAX).unwrap_err().code(),
+                "subscription_calendar_overflow"
+            );
+            assert_eq!(
+                cycle_end(anchor, recurrence, 0).unwrap_err().code(),
+                "invalid_cycle_ordinal"
+            );
+        }
     }
 
     #[test]

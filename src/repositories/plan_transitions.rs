@@ -269,8 +269,8 @@ async fn apply_downgrade_state(
         effective_at,
     )
     .await?;
-    sqlx::query("UPDATE customer_plans SET plan_version_id=$2,anchor_at=$3,cancel_at_period_end=false,renewal_status='CURRENT',version=version+1 WHERE customer_plan_id=$1")
-        .bind(customer_plan_id).bind(target.response.plan_version_id).bind(effective_at)
+    sqlx::query("UPDATE customer_plans SET plan_version_id=$2,anchor_at=$3,anchor_cycle_ordinal=$4,cancel_at_period_end=false,renewal_status='CURRENT',version=version+1 WHERE customer_plan_id=$1")
+        .bind(customer_plan_id).bind(target.response.plan_version_id).bind(effective_at).bind(current.next_cycle_ordinal)
         .execute(&mut **transaction).await?;
     Ok(())
 }

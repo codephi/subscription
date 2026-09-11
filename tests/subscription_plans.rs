@@ -1,3 +1,5 @@
+#[path = "support/plan_calendar_regressions.rs"]
+mod plan_calendar_regressions;
 #[path = "support/subscription_plan_contract.rs"]
 mod subscription_plan_contract;
 #[path = "support/subscription_plan_requests.rs"]
