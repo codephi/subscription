@@ -336,6 +336,8 @@ Guidelines:
 
 ## Implementation planning
 
+- [MVP readiness](docs/mvp-readiness.md): current scope, release blockers,
+  deferred features, and the recommended path to a paid MVP.
 - [Technical plan](docs/plano-tecnico-api-assinaturas-rust.md): normative domain,
   API, transaction, and billing decisions for the subscriptions service.
 - [Implementation phases](docs/fases-implementacao.md): incremental delivery
