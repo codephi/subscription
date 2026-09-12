@@ -7,6 +7,8 @@ pub mod billing_connector;
 pub mod billing_expiration;
 pub mod billing_regularization;
 mod billing_renewal;
+pub mod billing_unmatched;
+mod billing_webhooks;
 pub mod catalog;
 mod catalog_rows;
 mod credit_rows;

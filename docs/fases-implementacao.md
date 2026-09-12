@@ -304,6 +304,8 @@ período seguinte com uma única franquia mesmo sob confirmações concorrentes.
 Regularização manual materializa uma nova solicitação idempotente para o cartão
 tokenizado escolhido. Antes da confirmação mantém `PAST_DUE`; depois reinicia a
 âncora no instante confirmado e concede somente a franquia integral vigente.
+Pagamento confirmado sem solicitação local abre um caso operacional idempotente,
+preserva a evidência bruta e não altera plano, ciclo, entitlement ou crédito.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 

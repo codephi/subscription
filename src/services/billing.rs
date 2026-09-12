@@ -1,5 +1,7 @@
 use crate::{
-    dto::billing::{CollectionRequestResponse, CreateRenewalRegularizationRequest},
+    dto::billing::{
+        CollectionRequestResponse, CreateRenewalRegularizationRequest, UnmatchedPaymentCaseResponse,
+    },
     error::{ApiError, ApiResult},
     repositories::{
         billing_attempts::StartedCollectionAttempt,
@@ -53,6 +55,54 @@ pub async fn apply_confirmed_webhook(
     repository
         .apply_payment_confirmation(webhook, period_end)
         .await
+}
+
+/// Opens or returns the operational case for a confirmed payment without a collection.
+pub async fn record_unmatched_payment(
+    repository: &DatabaseRepository,
+    billing_connection_id: uuid::Uuid,
+    webhook: &ConfirmedBillingWebhook,
+) -> ApiResult<UnmatchedPaymentCaseResponse> {
+    validate_unmatched_webhook(webhook)?;
+    let record = repository
+        .record_unmatched_payment(billing_connection_id, webhook)
+        .await?;
+    Ok(unmatched_payment_response(record))
+}
+
+fn validate_unmatched_webhook(webhook: &ConfirmedBillingWebhook) -> ApiResult<()> {
+    if webhook.event_type == "payment.confirmed"
+        && webhook.amount_minor > 0
+        && webhook.currency.len() == 3
+        && !webhook.provider_payment_id.is_empty()
+    {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_unmatched_payment",
+        format!(
+            "provider event {:?} must be payment.confirmed with positive amount, ISO currency, and payment id",
+            webhook.provider_event_id
+        ),
+    ))
+}
+
+fn unmatched_payment_response(
+    record: crate::repositories::billing_unmatched::UnmatchedPaymentRecord,
+) -> UnmatchedPaymentCaseResponse {
+    UnmatchedPaymentCaseResponse {
+        unmatched_payment_case_id: record.unmatched_payment_case_id,
+        workspace_id: record.workspace_id,
+        billing_connection_id: record.billing_connection_id,
+        provider: record.provider,
+        provider_event_id: record.provider_event_id,
+        provider_payment_id: record.provider_payment_id,
+        amount_minor: record.amount_minor,
+        currency: record.currency,
+        reason: record.reason,
+        status: record.status,
+        created_at: record.created_at,
+    }
 }
 
 /// Creates or returns the manual collection used to recover a past-due plan.

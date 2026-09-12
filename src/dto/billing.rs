@@ -24,3 +24,18 @@ pub struct CollectionRequestResponse {
     pub scheduled_at: DateTime<Utc>,
     pub payment_expires_at: DateTime<Utc>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct UnmatchedPaymentCaseResponse {
+    pub unmatched_payment_case_id: Uuid,
+    pub workspace_id: Uuid,
+    pub billing_connection_id: Uuid,
+    pub provider: String,
+    pub provider_event_id: String,
+    pub provider_payment_id: String,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub reason: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}

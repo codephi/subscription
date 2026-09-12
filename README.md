@@ -303,7 +303,9 @@ delivery. `POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/
 creates an idempotent manual regularization for a past-due plan using the
 Subscription payment window; confirmation resets the anchor and restores one
 current cycle without retroactive credit. Phase 7 flows still pending are tracked
-in `docs/test-matrix.md`.
+in `docs/test-matrix.md`. Confirmed provider payments without a matching local
+collection are persisted as idempotent operational cases without financial or
+subscription effects.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
