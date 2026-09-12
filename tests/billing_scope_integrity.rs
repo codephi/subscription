@@ -55,6 +55,42 @@ async fn billing_references_reject_cross_workspace_connection_plan_and_binding()
     assert!(cross_binding.is_err());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn v1_billing_rejects_every_payment_method_except_tokenized_card() {
+    let usage = setup_usage(1, 1, 10).await;
+    let pool = usage.repository.pool();
+    let connection_id = insert_connection(&pool, usage.workspace_id).await;
+    let invalid_binding = sqlx::query(
+        "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
+         workspace_id,customer_id,payment_method,provider_payment_method_reference,status) \
+         VALUES ($1,$2,$3,$3,'PIX',$4,'ACTIVE')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(connection_id)
+    .bind(usage.workspace_id)
+    .bind(format!("pix-{}", Uuid::new_v4()))
+    .execute(&pool)
+    .await;
+    assert!(invalid_binding.is_err());
+
+    let binding_id = Uuid::new_v4();
+    insert_binding(&pool, usage.workspace_id, connection_id, None, binding_id)
+        .await
+        .unwrap();
+    let request_id = insert_valid_request(&pool, usage.workspace_id, binding_id).await;
+    let invalid_attempt = sqlx::query(
+        "INSERT INTO collection_attempts (collection_attempt_id,collection_request_id, \
+         attempt_number,connector,payment_method,provider_idempotency_key,status,scheduled_at) \
+         VALUES ($1,$2,1,'FAKE','PIX',$3,'SCHEDULED',now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(request_id)
+    .bind(format!("attempt-{request_id}"))
+    .execute(&pool)
+    .await;
+    assert!(invalid_attempt.is_err());
+}
+
 async fn insert_workspace(pool: &sqlx::PgPool, workspace_id: Uuid) {
     sqlx::query(
         "INSERT INTO workspace_projections (workspace_id,operational_status,external_sequence, \
@@ -103,4 +139,24 @@ async fn insert_binding(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+async fn insert_valid_request(pool: &sqlx::PgPool, workspace_id: Uuid, binding_id: Uuid) -> Uuid {
+    let request_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id, \
+         payment_method_binding_id,request_kind,amount_minor,currency,granted_credit_units,status, \
+         transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
+         VALUES ($1,$2,$2,$3,'INITIAL',100,'BRL',1,'SCHEDULED',$4,$5,$6,now(),now()+interval '15 minutes')",
+    )
+    .bind(request_id)
+    .bind(workspace_id)
+    .bind(binding_id)
+    .bind(format!("transaction-{request_id}"))
+    .bind(format!("key-{request_id}"))
+    .bind(Uuid::new_v4())
+    .execute(pool)
+    .await
+    .unwrap();
+    request_id
 }

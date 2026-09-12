@@ -297,6 +297,8 @@ Falha definitiva de renovação produz o mesmo bloqueio de nova recorrência, se
 retentativa, novo ciclo, nova solicitação ou alteração do saldo já concedido.
 Chaves estrangeiras compostas impedem uso cruzado de conexão, cartão tokenizado,
 CustomerPlan e solicitação entre workspaces ou customers.
+O contrato V1 rejeita outros meios de pagamento antes da chamada externa e não
+repete automaticamente uma tentativa cujo resultado no provedor seja incerto.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 
