@@ -46,6 +46,16 @@ async fn billing_foundation_migrations_round_trip() {
     assert!(reference_exists);
     apply_migration(
         &mut connection,
+        include_str!("../migrations/202609120001_billing_scope_integrity.up.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609120001_billing_scope_integrity.down.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
         include_str!("../migrations/202609040009_billing_credit_references.down.sql"),
     )
     .await;

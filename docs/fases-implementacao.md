@@ -295,6 +295,8 @@ terminalizadas uma única vez. A adesão inicial é cancelada, a renovação pas
 confirmação posterior fica rejeitada sem efeitos financeiros ou de acesso.
 Falha definitiva de renovação produz o mesmo bloqueio de nova recorrência, sem
 retentativa, novo ciclo, nova solicitação ou alteração do saldo já concedido.
+Chaves estrangeiras compostas impedem uso cruzado de conexão, cartão tokenizado,
+CustomerPlan e solicitação entre workspaces ou customers.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 

@@ -294,7 +294,9 @@ under row locks: initial purchases are canceled, renewals become `PAST_DUE` /
 Late confirmations of terminal requests are recorded as rejected without cycle,
 entitlement or credit effects. A definitive renewal failure also moves the plan
 to `PAST_DUE` / `RENEWAL_INACTIVE` atomically while preserving available credit.
-Remaining phase 7 flows are tracked in `docs/test-matrix.md`.
+Composite database references also enforce that each connection, tokenized card,
+CustomerPlan and collection belongs to the same workspace/customer. Remaining
+phase 7 flows are tracked in `docs/test-matrix.md`.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`
