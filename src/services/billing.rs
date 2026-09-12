@@ -45,12 +45,12 @@ pub async fn apply_confirmed_webhook(
     repository: &DatabaseRepository,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<ConfirmationOutcome> {
-    let recurrence = repository
-        .confirmation_recurrence(webhook.collection_request_id)
+    let (recurrence, anchor_at, cycle_ordinal) = repository
+        .confirmation_schedule(webhook.collection_request_id, webhook.occurred_at)
         .await?;
-    let period_end = cycle_end(webhook.occurred_at, recurrence, 1)?;
+    let period_end = cycle_end(anchor_at, recurrence, cycle_ordinal)?;
     repository
-        .apply_initial_payment_confirmation(webhook, period_end)
+        .apply_payment_confirmation(webhook, period_end)
         .await
 }
 

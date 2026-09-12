@@ -236,7 +236,7 @@ pub(super) async fn load_locked_plan(
     })
 }
 
-async fn expire_cycle_lot(
+pub(super) async fn expire_cycle_lot(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
     workspace_id: Uuid,

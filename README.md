@@ -295,10 +295,11 @@ Late confirmations of terminal requests are recorded as rejected without cycle,
 entitlement or credit effects. A definitive renewal failure also moves the plan
 to `PAST_DUE` / `RENEWAL_INACTIVE` atomically while preserving available credit.
 Composite database references also enforce that each connection, tokenized card,
-CustomerPlan and collection belongs to the same workspace/customer. Remaining
-V1 attempts accept only provider-tokenized cards, and uncertain outcomes remain
-pending without automatic retry or provider polling. Phase 7 flows still pending
-are tracked in `docs/test-matrix.md`.
+CustomerPlan and collection belongs to the same workspace/customer. V1 attempts
+accept only provider-tokenized cards, and uncertain outcomes remain pending
+without automatic retry or provider polling. Confirmed paid renewals preserve the
+calendar anchor, replace the active cycle and grant one allowance under concurrent
+delivery. Phase 7 flows still pending are tracked in `docs/test-matrix.md`.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

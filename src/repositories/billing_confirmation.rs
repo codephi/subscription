@@ -8,8 +8,8 @@ use crate::{
     dto::plans::PlanRecurrence,
     error::{ApiError, ApiResult},
     repositories::{
-        credits::lock_active_customer_wallet, database::DatabaseRepository,
-        plan_cycles::load_locked_plan, plan_rows::parse_recurrence,
+        billing_renewal::renew_paid_customer_plan, credits::lock_active_customer_wallet,
+        database::DatabaseRepository, plan_cycles::load_locked_plan, plan_rows::parse_recurrence,
         plan_writes::activate_customer_plan,
     },
 };
@@ -41,23 +41,36 @@ pub struct ConfirmationOutcome {
 }
 
 impl DatabaseRepository {
-    pub async fn confirmation_recurrence(
+    pub async fn confirmation_schedule(
         &self,
         collection_request_id: Uuid,
-    ) -> ApiResult<PlanRecurrence> {
-        let recurrence: String = sqlx::query_scalar(
-            "SELECT p.recurrence FROM collection_requests cr \
+        confirmed_at: DateTime<Utc>,
+    ) -> ApiResult<(PlanRecurrence, DateTime<Utc>, i64)> {
+        let row = sqlx::query(
+            "SELECT p.recurrence,cr.request_kind,cp.anchor_at,cp.anchor_cycle_ordinal,cy.cycle_ordinal \
+             FROM collection_requests cr \
              JOIN subscription_plan_versions p ON p.plan_version_id=cr.plan_version_id \
-             WHERE cr.collection_request_id=$1",
+             JOIN customer_plans cp ON cp.customer_plan_id=cr.customer_plan_id \
+             LEFT JOIN customer_plan_cycles cy ON cy.customer_plan_id=cp.customer_plan_id \
+               AND cy.status='ACTIVE' WHERE cr.collection_request_id=$1",
         )
         .bind(collection_request_id)
         .fetch_optional(&self.pool())
         .await?
         .ok_or_else(|| missing_collection(collection_request_id))?;
-        parse_recurrence(&recurrence)
+        let recurrence = parse_recurrence(row.get("recurrence"))?;
+        if row.get::<String, _>("request_kind") != "RENEWAL" {
+            return Ok((recurrence, confirmed_at, 1));
+        }
+        let cycle_ordinal: Option<i64> = row.get("cycle_ordinal");
+        let ordinal = cycle_ordinal.ok_or_else(|| {
+            invalid_confirmation_id(collection_request_id, "active cycle required")
+        })? - row.get::<i64, _>("anchor_cycle_ordinal")
+            + 2;
+        Ok((recurrence, row.get("anchor_at"), ordinal))
     }
 
-    pub async fn apply_initial_payment_confirmation(
+    pub async fn apply_payment_confirmation(
         &self,
         webhook: &ConfirmedBillingWebhook,
         period_end: Option<DateTime<Utc>>,
@@ -88,17 +101,31 @@ impl DatabaseRepository {
         validate_pending_confirmation(webhook, &context)?;
         let plan = load_locked_plan(&mut transaction, context.plan_version_id).await?;
         validate_plan_and_customer(webhook, &context, &plan)?;
-        let cycle = activate_customer_plan(
-            &mut transaction,
-            &wallet,
-            workspace_id,
-            context.customer_plan_id,
-            &plan,
-            webhook.occurred_at,
-            period_end,
-            &context.transaction_id,
-        )
-        .await?;
+        let cycle = if context.request_kind == "RENEWAL" {
+            renew_paid_customer_plan(
+                &mut transaction,
+                &wallet,
+                workspace_id,
+                context.customer_plan_id,
+                &plan,
+                webhook.occurred_at,
+                period_end,
+                &context.transaction_id,
+            )
+            .await?
+        } else {
+            activate_customer_plan(
+                &mut transaction,
+                &wallet,
+                workspace_id,
+                context.customer_plan_id,
+                &plan,
+                webhook.occurred_at,
+                period_end,
+                &context.transaction_id,
+            )
+            .await?
+        };
         finalize_confirmation(
             &mut transaction,
             webhook,
@@ -124,6 +151,7 @@ struct ConfirmationContext {
     request_status: String,
     activation_status: String,
     commercial_status: String,
+    renewal_status: String,
     payment_expires_at: DateTime<Utc>,
     provider: String,
     provider_payment_id: Option<String>,
@@ -195,7 +223,7 @@ async fn lock_confirmation_context(
     let row = sqlx::query(
         "SELECT cr.customer_plan_id,cr.plan_version_id,cr.request_kind,cr.granted_credit_units, \
          cr.status request_status,cr.payment_expires_at,cr.amount_minor,cr.currency,cr.transaction_id, \
-         cp.plan_version_id customer_plan_version_id,cp.activation_status,cp.commercial_status, \
+         cp.plan_version_id customer_plan_version_id,cp.activation_status,cp.commercial_status,cp.renewal_status, \
          bp.billing_payment_id,bp.provider,bp.provider_payment_id \
          FROM collection_requests cr JOIN customer_plans cp ON cp.customer_plan_id=cr.customer_plan_id \
          JOIN billing_payments bp ON bp.collection_request_id=cr.collection_request_id \
@@ -220,6 +248,7 @@ fn context_from_row(row: &sqlx::postgres::PgRow) -> ConfirmationContext {
         request_status: row.get("request_status"),
         activation_status: row.get("activation_status"),
         commercial_status: row.get("commercial_status"),
+        renewal_status: row.get("renewal_status"),
         payment_expires_at: row.get("payment_expires_at"),
         provider: row.get("provider"),
         provider_payment_id: row.get("provider_payment_id"),
@@ -283,24 +312,28 @@ fn validate_plan_and_customer(
             "subscription plan must not be revoked",
         ));
     }
-    if context.request_kind != "INITIAL"
-        || context.customer_plan_version_id != context.plan_version_id
+    if context.customer_plan_version_id != context.plan_version_id
         || plan.response.commercial_model != crate::dto::plans::CommercialModel::Paid
         || context.granted_credit_units != plan.response.granted_credit_units.value()
     {
         return Err(invalid_confirmation(
             webhook,
-            "initial request must match the paid customer plan and published credit grant",
+            "request must match the paid customer plan and published credit grant",
         ));
     }
-    if context.commercial_status == "ACTIVE"
-        && context.activation_status == "PENDING_INITIAL_PAYMENT"
-    {
+    let initial = context.request_kind == "INITIAL"
+        && context.commercial_status == "ACTIVE"
+        && context.activation_status == "PENDING_INITIAL_PAYMENT";
+    let renewal = context.request_kind == "RENEWAL"
+        && context.commercial_status == "ACTIVE_PAID"
+        && context.activation_status == "ACTIVATED"
+        && context.renewal_status == "CURRENT";
+    if initial || renewal {
         return Ok(());
     }
     Err(invalid_confirmation(
         webhook,
-        "customer plan must be active and pending initial payment",
+        "customer plan state must match initial activation or paid renewal",
     ))
 }
 
@@ -437,6 +470,13 @@ fn missing_collection(collection_request_id: Uuid) -> ApiError {
     ApiError::not_found(
         "collection_request_not_found",
         format!("collection request {collection_request_id} does not exist"),
+    )
+}
+
+fn invalid_confirmation_id(collection_request_id: Uuid, expected: &str) -> ApiError {
+    ApiError::conflict(
+        "billing_confirmation_mismatch",
+        format!("collection request {collection_request_id} is invalid: {expected}"),
     )
 }
 

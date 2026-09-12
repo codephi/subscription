@@ -1,0 +1,159 @@
+use chrono::{DateTime, Utc};
+use sqlx::{Postgres, Row, Transaction};
+use uuid::Uuid;
+
+use crate::{
+    dto::plans::CustomerPlanCycleResponse,
+    error::{ApiError, ApiResult},
+    repositories::{
+        credits::LockedWallet,
+        plan_cycles::expire_cycle_lot,
+        plan_rows::{cycle_from_row, PlanRecord},
+        plan_writes::{grant_cycle_credit, insert_plan_outbox},
+    },
+};
+
+struct CurrentPaidCycle {
+    cycle_id: Uuid,
+    ordinal: i64,
+    period_end: DateTime<Utc>,
+    customer_plan_version: i64,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn renew_paid_customer_plan(
+    transaction: &mut Transaction<'_, Postgres>,
+    wallet: &LockedWallet,
+    workspace_id: Uuid,
+    customer_plan_id: Uuid,
+    plan: &PlanRecord,
+    confirmed_at: DateTime<Utc>,
+    next_period_end: Option<DateTime<Utc>>,
+    transaction_id: &str,
+) -> ApiResult<CustomerPlanCycleResponse> {
+    let current = lock_current_cycle(transaction, customer_plan_id).await?;
+    validate_renewal_boundary(&current, confirmed_at, next_period_end)?;
+    let wallet = expire_cycle_lot(
+        transaction,
+        wallet,
+        workspace_id,
+        customer_plan_id,
+        current.cycle_id,
+        plan.response.plan_version_id,
+    )
+    .await?;
+    complete_cycle(transaction, current.cycle_id).await?;
+    let cycle = insert_renewal_cycle(
+        transaction,
+        customer_plan_id,
+        plan,
+        &current,
+        next_period_end.expect("validated recurring period end"),
+    )
+    .await?;
+    if plan.response.granted_credit_units.value() > 0 {
+        grant_cycle_credit(
+            transaction,
+            &wallet,
+            workspace_id,
+            customer_plan_id,
+            cycle.customer_plan_cycle_id,
+            plan,
+            cycle.current_period_end,
+            Some(transaction_id),
+        )
+        .await?;
+    }
+    insert_plan_outbox(
+        transaction,
+        workspace_id,
+        customer_plan_id,
+        cycle.customer_plan_cycle_id,
+        "customer_plan.cycle_started",
+        current.customer_plan_version + 1,
+    )
+    .await?;
+    Ok(cycle)
+}
+
+async fn lock_current_cycle(
+    transaction: &mut Transaction<'_, Postgres>,
+    customer_plan_id: Uuid,
+) -> ApiResult<CurrentPaidCycle> {
+    let row = sqlx::query(
+        "SELECT cy.customer_plan_cycle_id,cy.cycle_ordinal,cy.current_period_end,cp.version \
+         FROM customer_plans cp JOIN customer_plan_cycles cy USING(customer_plan_id) \
+         WHERE cp.customer_plan_id=$1 AND cy.status='ACTIVE' FOR UPDATE OF cy",
+    )
+    .bind(customer_plan_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| invalid_renewal(customer_plan_id, "an active cycle is required"))?;
+    Ok(CurrentPaidCycle {
+        cycle_id: row.get("customer_plan_cycle_id"),
+        ordinal: row.get("cycle_ordinal"),
+        period_end: row.try_get("current_period_end").map_err(|_| {
+            invalid_renewal(customer_plan_id, "the active cycle must have a period end")
+        })?,
+        customer_plan_version: row.get("version"),
+    })
+}
+
+fn validate_renewal_boundary(
+    current: &CurrentPaidCycle,
+    confirmed_at: DateTime<Utc>,
+    next_period_end: Option<DateTime<Utc>>,
+) -> ApiResult<()> {
+    if current.period_end <= confirmed_at
+        && next_period_end.is_some_and(|end| end > current.period_end)
+    {
+        return Ok(());
+    }
+    Err(invalid_renewal(
+        current.cycle_id,
+        "confirmation and next boundary must follow the active cycle",
+    ))
+}
+
+async fn complete_cycle(
+    transaction: &mut Transaction<'_, Postgres>,
+    cycle_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE customer_plan_cycles SET status='COMPLETED' WHERE customer_plan_cycle_id=$1",
+    )
+    .bind(cycle_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn insert_renewal_cycle(
+    transaction: &mut Transaction<'_, Postgres>,
+    customer_plan_id: Uuid,
+    plan: &PlanRecord,
+    current: &CurrentPaidCycle,
+    period_end: DateTime<Utc>,
+) -> ApiResult<CustomerPlanCycleResponse> {
+    let row = sqlx::query(
+        "INSERT INTO customer_plan_cycles (customer_plan_cycle_id,customer_plan_id,cycle_ordinal, \
+         current_period_start,current_period_end,granted_credit_units,status) \
+         VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE') RETURNING *",
+    )
+    .bind(Uuid::new_v4())
+    .bind(customer_plan_id)
+    .bind(current.ordinal + 1)
+    .bind(current.period_end)
+    .bind(period_end)
+    .bind(plan.response.granted_credit_units.value())
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(cycle_from_row(&row))
+}
+
+fn invalid_renewal(resource_id: Uuid, expected: &str) -> ApiError {
+    ApiError::conflict(
+        "billing_confirmation_mismatch",
+        format!("paid renewal {resource_id} is invalid: {expected}"),
+    )
+}

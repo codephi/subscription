@@ -299,6 +299,8 @@ Chaves estrangeiras compostas impedem uso cruzado de conexão, cartão tokenizad
 CustomerPlan e solicitação entre workspaces ou customers.
 O contrato V1 rejeita outros meios de pagamento antes da chamada externa e não
 repete automaticamente uma tentativa cujo resultado no provedor seja incerto.
+Renovação paga confirmada conclui o ciclo anterior, preserva a âncora e inicia o
+período seguinte com uma única franquia mesmo sob confirmações concorrentes.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 
