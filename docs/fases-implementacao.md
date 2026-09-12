@@ -293,6 +293,8 @@ Solicitações vencidas são reclamadas concorrentemente por prazo comercial e
 terminalizadas uma única vez. A adesão inicial é cancelada, a renovação passa a
 `PAST_DUE`/`RENEWAL_INACTIVE`, OnDemand não altera o plano principal e uma
 confirmação posterior fica rejeitada sem efeitos financeiros ou de acesso.
+Falha definitiva de renovação produz o mesmo bloqueio de nova recorrência, sem
+retentativa, novo ciclo, nova solicitação ou alteração do saldo já concedido.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 

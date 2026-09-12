@@ -125,6 +125,82 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn definitive_renewal_failure_preserves_credit_and_creates_no_follow_up_effects() {
+    let usage = setup_usage(1, 1, 10).await;
+    let pool = usage.repository.pool();
+    let binding_id = insert_billing_binding(&pool, usage.workspace_id).await;
+    let (customer_plan_id, plan_version_id) =
+        create_paid_customer_plan(&usage.repository, usage.workspace_id, usage.product_id).await;
+    sqlx::query(
+        "UPDATE customer_plans SET commercial_status='ACTIVE_PAID',activation_status='ACTIVATED' \
+         WHERE customer_plan_id=$1",
+    )
+    .bind(customer_plan_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let request_id = insert_due_request(
+        &pool,
+        usage.workspace_id,
+        customer_plan_id,
+        Some(plan_version_id),
+        None,
+        binding_id,
+        "RENEWAL",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE collection_requests SET status='SCHEDULED',scheduled_at=now(), \
+         payment_expires_at=now()+interval '15 minutes' WHERE collection_request_id=$1",
+    )
+    .bind(request_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let attempt = usage
+        .repository
+        .begin_collection_attempt(request_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let failure = subscription::repositories::billing_connector::ConnectorCollectionResult {
+        provider_payment_id: Some("failed-renewal".into()),
+        state: subscription::repositories::billing_connector::ConnectorCollectionState::Failed,
+        failure_code: Some("card_declined".into()),
+        next_action_url: None,
+    };
+    usage
+        .repository
+        .record_collection_result(&attempt, &failure)
+        .await
+        .unwrap();
+    usage
+        .repository
+        .record_collection_result(&attempt, &failure)
+        .await
+        .unwrap();
+    assert_plan_status(&pool, customer_plan_id, "PAST_DUE", "RENEWAL_INACTIVE").await;
+    let effects: (String, Option<String>, i64, i64, i64) = sqlx::query_as(
+        "SELECT status,terminal_reason, \
+         (SELECT count(*) FROM collection_requests WHERE customer_plan_id=$2), \
+         (SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$2), \
+         (SELECT balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) \
+          WHERE w.customer_id=$3 AND w.wallet_type='CUSTOMER') \
+         FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(request_id)
+    .bind(customer_plan_id)
+    .bind(usage.workspace_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        effects,
+        ("EXHAUSTED".into(), Some("card_declined".into()), 1, 0, 10)
+    );
+}
+
 async fn insert_billing_binding(pool: &sqlx::PgPool, workspace_id: Uuid) -> Uuid {
     let connection_id = Uuid::new_v4();
     let binding_id = Uuid::new_v4();
@@ -163,7 +239,7 @@ async fn insert_due_request(
     on_demand_plan_id: Option<Uuid>,
     binding_id: Uuid,
     kind: &str,
-) {
+) -> Uuid {
     let request_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id, \
@@ -187,6 +263,7 @@ async fn insert_due_request(
     .execute(pool)
     .await
     .unwrap();
+    request_id
 }
 
 async fn create_paid_customer_plan(

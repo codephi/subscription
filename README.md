@@ -292,8 +292,9 @@ credit entry through immutable typed references. Due collection requests expire
 under row locks: initial purchases are canceled, renewals become `PAST_DUE` /
 `RENEWAL_INACTIVE`, and OnDemand expiration leaves the active plan unchanged.
 Late confirmations of terminal requests are recorded as rejected without cycle,
-entitlement or credit effects. Remaining phase 7 flows are tracked in
-`docs/test-matrix.md`.
+entitlement or credit effects. A definitive renewal failure also moves the plan
+to `PAST_DUE` / `RENEWAL_INACTIVE` atomically while preserving available credit.
+Remaining phase 7 flows are tracked in `docs/test-matrix.md`.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

@@ -57,7 +57,12 @@ impl DatabaseRepository {
             return Ok(());
         }
         update_payment(&mut transaction, attempt, result, &normalized).await?;
-        update_collection_request(&mut transaction, attempt.request_id, &normalized).await?;
+        let request_updated =
+            update_collection_request(&mut transaction, attempt.request_id, result, &normalized)
+                .await?;
+        if request_updated {
+            update_plan_after_failure(&mut transaction, attempt.request_id, &normalized).await?;
+        }
         insert_attempt_event(&mut transaction, attempt, normalized.event_type, 2).await?;
         transaction.commit().await?;
         Ok(())
@@ -272,13 +277,46 @@ async fn update_payment(
 async fn update_collection_request(
     transaction: &mut Transaction<'_, Postgres>,
     request_id: Uuid,
+    result: &ConnectorCollectionResult,
+    normalized: &NormalizedResult,
+) -> Result<bool, sqlx::Error> {
+    let updated = sqlx::query(
+        "UPDATE collection_requests SET status=$2,terminal_reason=CASE WHEN $2='EXHAUSTED' \
+         THEN COALESCE($3,'PROVIDER_FAILURE') ELSE terminal_reason END \
+         WHERE collection_request_id=$1 AND status='COLLECTING'",
+    )
+    .bind(request_id)
+    .bind(normalized.request_status)
+    .bind(&result.failure_code)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(updated.rows_affected() == 1)
+}
+
+async fn update_plan_after_failure(
+    transaction: &mut Transaction<'_, Postgres>,
+    request_id: Uuid,
     normalized: &NormalizedResult,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE collection_requests SET status=$2 WHERE collection_request_id=$1 AND status='COLLECTING'")
-        .bind(request_id)
-        .bind(normalized.request_status)
-        .execute(&mut **transaction)
-        .await?;
+    if normalized.request_status != "EXHAUSTED" {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE customer_plans cp SET commercial_status=CASE cr.request_kind \
+           WHEN 'INITIAL' THEN 'CANCELED' WHEN 'RENEWAL' THEN 'PAST_DUE' ELSE cp.commercial_status END, \
+         activation_status=CASE WHEN cr.request_kind='INITIAL' THEN 'FAILED' ELSE cp.activation_status END, \
+         renewal_status=CASE WHEN cr.request_kind IN ('INITIAL','RENEWAL') \
+           THEN 'RENEWAL_INACTIVE' ELSE cp.renewal_status END, \
+         ended_at=CASE WHEN cr.request_kind='INITIAL' THEN clock_timestamp() ELSE cp.ended_at END, \
+         end_reason=CASE WHEN cr.request_kind='INITIAL' THEN 'INITIAL_PAYMENT_FAILED' ELSE cp.end_reason END, \
+         version=cp.version+1 FROM collection_requests cr WHERE cr.collection_request_id=$1 \
+         AND cr.customer_plan_id=cp.customer_plan_id AND ((cr.request_kind='INITIAL' \
+           AND cp.activation_status='PENDING_INITIAL_PAYMENT') OR (cr.request_kind='RENEWAL' \
+           AND cp.commercial_status='ACTIVE_PAID' AND cp.renewal_status='CURRENT'))",
+    )
+    .bind(request_id)
+    .execute(&mut **transaction)
+    .await?;
     Ok(())
 }
 
