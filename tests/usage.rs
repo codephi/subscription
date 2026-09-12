@@ -395,11 +395,7 @@ async fn pending_block_keeps_old_price_then_remainder_uses_active_version() {
     .await
     .expect("old price pending");
     assert_eq!(first.pending_item_units_after.value(), 6);
-    let delay = (fixture.boundary - chrono::Utc::now())
-        .to_std()
-        .unwrap_or_default()
-        + std::time::Duration::from_millis(50);
-    tokio::time::sleep(delay).await;
+    wait_for_database_time(&fixture.usage.pool, fixture.boundary).await;
 
     let mut request = usage_request(&fixture.usage, "version-transaction-2", 8);
     request.expected_price_version_id = Some(fixture.new_price_id);
@@ -433,6 +429,19 @@ async fn pending_block_keeps_old_price_then_remainder_uses_active_version() {
             (fixture.new_price_id, 10, 14)
         ]
     );
+}
+
+async fn wait_for_database_time(pool: &sqlx::PgPool, boundary: chrono::DateTime<chrono::Utc>) {
+    loop {
+        let now: chrono::DateTime<chrono::Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+            .fetch_one(pool)
+            .await
+            .expect("database clock");
+        if now >= boundary {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
 }
 
 async fn get_json(router: &axum::Router, uri: &str) -> serde_json::Value {

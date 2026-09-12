@@ -301,6 +301,9 @@ O contrato V1 rejeita outros meios de pagamento antes da chamada externa e não
 repete automaticamente uma tentativa cujo resultado no provedor seja incerto.
 Renovação paga confirmada conclui o ciclo anterior, preserva a âncora e inicia o
 período seguinte com uma única franquia mesmo sob confirmações concorrentes.
+Regularização manual materializa uma nova solicitação idempotente para o cartão
+tokenizado escolhido. Antes da confirmação mantém `PAST_DUE`; depois reinicia a
+âncora no instante confirmado e concede somente a franquia integral vigente.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 

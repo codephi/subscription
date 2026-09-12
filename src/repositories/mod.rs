@@ -5,6 +5,7 @@ pub mod billing_attempts;
 pub mod billing_confirmation;
 pub mod billing_connector;
 pub mod billing_expiration;
+pub mod billing_regularization;
 mod billing_renewal;
 pub mod catalog;
 mod catalog_rows;

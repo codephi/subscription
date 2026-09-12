@@ -1,4 +1,5 @@
 use crate::{
+    dto::billing::{CollectionRequestResponse, CreateRenewalRegularizationRequest},
     error::{ApiError, ApiResult},
     repositories::{
         billing_attempts::StartedCollectionAttempt,
@@ -51,6 +52,28 @@ pub async fn apply_confirmed_webhook(
     let period_end = cycle_end(anchor_at, recurrence, cycle_ordinal)?;
     repository
         .apply_payment_confirmation(webhook, period_end)
+        .await
+}
+
+/// Creates or returns the manual collection used to recover a past-due plan.
+pub async fn create_renewal_regularization(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    customer_plan_id: uuid::Uuid,
+    idempotency_key: &str,
+    request: &CreateRenewalRegularizationRequest,
+) -> ApiResult<CollectionRequestResponse> {
+    if idempotency_key.is_empty() || request.transaction_id.is_empty() {
+        return Err(ApiError::unprocessable(
+            "invalid_billing_idempotency",
+            format!(
+                "idempotency key {:?} and transaction id {:?} must be non-empty",
+                idempotency_key, request.transaction_id
+            ),
+        ));
+    }
+    repository
+        .create_renewal_regularization(workspace_id, customer_plan_id, idempotency_key, request)
         .await
 }
 

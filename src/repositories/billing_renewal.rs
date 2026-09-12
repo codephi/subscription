@@ -3,15 +3,47 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    dto::plans::CustomerPlanCycleResponse,
+    dto::plans::{CustomerPlanCycleResponse, PlanRecurrence},
     error::{ApiError, ApiResult},
     repositories::{
         credits::LockedWallet,
+        database::DatabaseRepository,
         plan_cycles::expire_cycle_lot,
-        plan_rows::{cycle_from_row, PlanRecord},
+        plan_rows::{cycle_from_row, parse_recurrence, PlanRecord},
         plan_writes::{grant_cycle_credit, insert_plan_outbox},
     },
 };
+
+impl DatabaseRepository {
+    pub async fn confirmation_schedule(
+        &self,
+        collection_request_id: Uuid,
+        confirmed_at: DateTime<Utc>,
+    ) -> ApiResult<(PlanRecurrence, DateTime<Utc>, i64)> {
+        let row = sqlx::query(
+            "SELECT p.recurrence,cr.request_kind,cp.anchor_at,cp.anchor_cycle_ordinal,cy.cycle_ordinal \
+             FROM collection_requests cr JOIN subscription_plan_versions p \
+               ON p.plan_version_id=cr.plan_version_id JOIN customer_plans cp \
+               ON cp.customer_plan_id=cr.customer_plan_id LEFT JOIN customer_plan_cycles cy \
+               ON cy.customer_plan_id=cp.customer_plan_id AND cy.status='ACTIVE' \
+             WHERE cr.collection_request_id=$1",
+        )
+        .bind(collection_request_id)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| missing_schedule(collection_request_id))?;
+        let recurrence = parse_recurrence(row.get("recurrence"))?;
+        if row.get::<String, _>("request_kind") != "RENEWAL" {
+            return Ok((recurrence, confirmed_at, 1));
+        }
+        let cycle_ordinal: Option<i64> = row.get("cycle_ordinal");
+        let ordinal = cycle_ordinal
+            .ok_or_else(|| invalid_renewal(collection_request_id, "active cycle required"))?
+            - row.get::<i64, _>("anchor_cycle_ordinal")
+            + 2;
+        Ok((recurrence, row.get("anchor_at"), ordinal))
+    }
+}
 
 struct CurrentPaidCycle {
     cycle_id: Uuid,
@@ -48,6 +80,7 @@ pub(super) async fn renew_paid_customer_plan(
         customer_plan_id,
         plan,
         &current,
+        current.period_end,
         next_period_end.expect("validated recurring period end"),
     )
     .await?;
@@ -70,6 +103,78 @@ pub(super) async fn renew_paid_customer_plan(
         customer_plan_id,
         cycle.customer_plan_cycle_id,
         "customer_plan.cycle_started",
+        current.customer_plan_version + 1,
+    )
+    .await?;
+    Ok(cycle)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn regularize_paid_customer_plan(
+    transaction: &mut Transaction<'_, Postgres>,
+    wallet: &LockedWallet,
+    workspace_id: Uuid,
+    customer_plan_id: Uuid,
+    plan: &PlanRecord,
+    confirmed_at: DateTime<Utc>,
+    next_period_end: Option<DateTime<Utc>>,
+    transaction_id: &str,
+) -> ApiResult<CustomerPlanCycleResponse> {
+    let current = lock_current_cycle(transaction, customer_plan_id).await?;
+    let period_end = next_period_end
+        .filter(|end| *end > confirmed_at)
+        .ok_or_else(|| {
+            invalid_renewal(
+                customer_plan_id,
+                "regularization requires a future period end",
+            )
+        })?;
+    let wallet = expire_cycle_lot(
+        transaction,
+        wallet,
+        workspace_id,
+        customer_plan_id,
+        current.cycle_id,
+        plan.response.plan_version_id,
+    )
+    .await?;
+    complete_cycle(transaction, current.cycle_id).await?;
+    let cycle = insert_renewal_cycle(
+        transaction,
+        customer_plan_id,
+        plan,
+        &current,
+        confirmed_at,
+        period_end,
+    )
+    .await?;
+    sqlx::query(
+        "UPDATE customer_plans SET anchor_at=$2,anchor_cycle_ordinal=$3 WHERE customer_plan_id=$1",
+    )
+    .bind(customer_plan_id)
+    .bind(confirmed_at)
+    .bind(cycle.cycle_ordinal)
+    .execute(&mut **transaction)
+    .await?;
+    if plan.response.granted_credit_units.value() > 0 {
+        grant_cycle_credit(
+            transaction,
+            &wallet,
+            workspace_id,
+            customer_plan_id,
+            cycle.customer_plan_cycle_id,
+            plan,
+            cycle.current_period_end,
+            Some(transaction_id),
+        )
+        .await?;
+    }
+    insert_plan_outbox(
+        transaction,
+        workspace_id,
+        customer_plan_id,
+        cycle.customer_plan_cycle_id,
+        "customer_plan.regularized",
         current.customer_plan_version + 1,
     )
     .await?;
@@ -133,6 +238,7 @@ async fn insert_renewal_cycle(
     customer_plan_id: Uuid,
     plan: &PlanRecord,
     current: &CurrentPaidCycle,
+    period_start: DateTime<Utc>,
     period_end: DateTime<Utc>,
 ) -> ApiResult<CustomerPlanCycleResponse> {
     let row = sqlx::query(
@@ -143,7 +249,7 @@ async fn insert_renewal_cycle(
     .bind(Uuid::new_v4())
     .bind(customer_plan_id)
     .bind(current.ordinal + 1)
-    .bind(current.period_end)
+    .bind(period_start)
     .bind(period_end)
     .bind(plan.response.granted_credit_units.value())
     .fetch_one(&mut **transaction)
@@ -155,5 +261,12 @@ fn invalid_renewal(resource_id: Uuid, expected: &str) -> ApiError {
     ApiError::conflict(
         "billing_confirmation_mismatch",
         format!("paid renewal {resource_id} is invalid: {expected}"),
+    )
+}
+
+fn missing_schedule(collection_request_id: Uuid) -> ApiError {
+    ApiError::not_found(
+        "collection_request_not_found",
+        format!("collection request {collection_request_id} does not exist"),
     )
 }

@@ -5,11 +5,10 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    dto::plans::PlanRecurrence,
     error::{ApiError, ApiResult},
     repositories::{
         billing_renewal::renew_paid_customer_plan, credits::lock_active_customer_wallet,
-        database::DatabaseRepository, plan_cycles::load_locked_plan, plan_rows::parse_recurrence,
+        database::DatabaseRepository, plan_cycles::load_locked_plan,
         plan_writes::activate_customer_plan,
     },
 };
@@ -41,35 +40,6 @@ pub struct ConfirmationOutcome {
 }
 
 impl DatabaseRepository {
-    pub async fn confirmation_schedule(
-        &self,
-        collection_request_id: Uuid,
-        confirmed_at: DateTime<Utc>,
-    ) -> ApiResult<(PlanRecurrence, DateTime<Utc>, i64)> {
-        let row = sqlx::query(
-            "SELECT p.recurrence,cr.request_kind,cp.anchor_at,cp.anchor_cycle_ordinal,cy.cycle_ordinal \
-             FROM collection_requests cr \
-             JOIN subscription_plan_versions p ON p.plan_version_id=cr.plan_version_id \
-             JOIN customer_plans cp ON cp.customer_plan_id=cr.customer_plan_id \
-             LEFT JOIN customer_plan_cycles cy ON cy.customer_plan_id=cp.customer_plan_id \
-               AND cy.status='ACTIVE' WHERE cr.collection_request_id=$1",
-        )
-        .bind(collection_request_id)
-        .fetch_optional(&self.pool())
-        .await?
-        .ok_or_else(|| missing_collection(collection_request_id))?;
-        let recurrence = parse_recurrence(row.get("recurrence"))?;
-        if row.get::<String, _>("request_kind") != "RENEWAL" {
-            return Ok((recurrence, confirmed_at, 1));
-        }
-        let cycle_ordinal: Option<i64> = row.get("cycle_ordinal");
-        let ordinal = cycle_ordinal.ok_or_else(|| {
-            invalid_confirmation_id(collection_request_id, "active cycle required")
-        })? - row.get::<i64, _>("anchor_cycle_ordinal")
-            + 2;
-        Ok((recurrence, row.get("anchor_at"), ordinal))
-    }
-
     pub async fn apply_payment_confirmation(
         &self,
         webhook: &ConfirmedBillingWebhook,
@@ -103,6 +73,18 @@ impl DatabaseRepository {
         validate_plan_and_customer(webhook, &context, &plan)?;
         let cycle = if context.request_kind == "RENEWAL" {
             renew_paid_customer_plan(
+                &mut transaction,
+                &wallet,
+                workspace_id,
+                context.customer_plan_id,
+                &plan,
+                webhook.occurred_at,
+                period_end,
+                &context.transaction_id,
+            )
+            .await?
+        } else if context.request_kind == "RENEWAL_REGULARIZATION" {
+            crate::repositories::billing_renewal::regularize_paid_customer_plan(
                 &mut transaction,
                 &wallet,
                 workspace_id,
@@ -328,7 +310,11 @@ fn validate_plan_and_customer(
         && context.commercial_status == "ACTIVE_PAID"
         && context.activation_status == "ACTIVATED"
         && context.renewal_status == "CURRENT";
-    if initial || renewal {
+    let regularization = context.request_kind == "RENEWAL_REGULARIZATION"
+        && context.commercial_status == "PAST_DUE"
+        && context.activation_status == "ACTIVATED"
+        && context.renewal_status == "RENEWAL_INACTIVE";
+    if initial || renewal || regularization {
         return Ok(());
     }
     Err(invalid_confirmation(
@@ -470,13 +456,6 @@ fn missing_collection(collection_request_id: Uuid) -> ApiError {
     ApiError::not_found(
         "collection_request_not_found",
         format!("collection request {collection_request_id} does not exist"),
-    )
-}
-
-fn invalid_confirmation_id(collection_request_id: Uuid, expected: &str) -> ApiError {
-    ApiError::conflict(
-        "billing_confirmation_mismatch",
-        format!("collection request {collection_request_id} is invalid: {expected}"),
     )
 }
 

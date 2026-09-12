@@ -1,4 +1,5 @@
 pub mod admission;
+pub mod billing;
 pub mod catalog;
 pub mod credits;
 pub mod echo;

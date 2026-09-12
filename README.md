@@ -299,7 +299,11 @@ CustomerPlan and collection belongs to the same workspace/customer. V1 attempts
 accept only provider-tokenized cards, and uncertain outcomes remain pending
 without automatic retry or provider polling. Confirmed paid renewals preserve the
 calendar anchor, replace the active cycle and grant one allowance under concurrent
-delivery. Phase 7 flows still pending are tracked in `docs/test-matrix.md`.
+delivery. `POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/renewal-regularizations`
+creates an idempotent manual regularization for a past-due plan using the
+Subscription payment window; confirmation resets the anchor and restores one
+current cycle without retroactive credit. Phase 7 flows still pending are tracked
+in `docs/test-matrix.md`.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

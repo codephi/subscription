@@ -51,6 +51,16 @@ async fn billing_foundation_migrations_round_trip() {
     .await;
     apply_migration(
         &mut connection,
+        include_str!("../migrations/202609120002_subscription_payment_window.up.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609120002_subscription_payment_window.down.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
         include_str!("../migrations/202609120001_billing_scope_integrity.down.sql"),
     )
     .await;
