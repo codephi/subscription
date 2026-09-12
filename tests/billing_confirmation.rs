@@ -186,6 +186,41 @@ async fn synchronous_response_after_webhook_does_not_regress_confirmation() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn confirmed_webhook_after_commercial_expiration_is_recorded_without_effects() {
+    let fixture = setup_confirmation().await;
+    let summary =
+        billing::expire_collections(&fixture.repository, Utc::now() + chrono::Duration::hours(1))
+            .await
+            .expect("expire initial payment");
+    assert_eq!(summary.expired_requests, 1);
+    assert_eq!(summary.canceled_initial_plans, 1);
+    let outcome =
+        billing::apply_confirmed_webhook(&fixture.repository, &confirmed_webhook(&fixture))
+            .await
+            .expect("record late webhook");
+    assert_eq!(outcome.result, ConfirmationResult::Rejected);
+    let state: (String, String, i64, i64, String) = sqlx::query_as(
+        "SELECT cp.commercial_status,cr.status, \
+         (SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$1), \
+         (SELECT balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) \
+          WHERE w.customer_id=$2 AND w.wallet_type='CUSTOMER'),wi.result \
+         FROM customer_plans cp JOIN collection_requests cr ON cr.customer_plan_id=cp.customer_plan_id \
+         JOIN billing_webhook_inbox wi ON wi.provider_event_id LIKE 'event-%' \
+         WHERE cp.customer_plan_id=$1 AND cr.collection_request_id=$3",
+    )
+    .bind(fixture.customer_plan_id)
+    .bind(fixture.workspace_id)
+    .bind(fixture.collection_request_id)
+    .fetch_one(&fixture.repository.pool())
+    .await
+    .expect("late webhook state");
+    assert_eq!(
+        state,
+        ("CANCELED".into(), "EXPIRED".into(), 0, 0, "REJECTED".into())
+    );
+}
+
 async fn setup_confirmation() -> BillingConfirmationFixture {
     let fixture = setup_unstarted_confirmation().await;
     billing::execute_collection_attempt(

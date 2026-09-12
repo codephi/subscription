@@ -284,11 +284,15 @@ Entregas:
 um ciclo e concede créditos uma única vez; atraso ou ausência de webhook não
 autoriza nova cobrança, polling, cancelamento ou crédito.
 
-Progresso em 2026-09-11: a confirmação inicial de plano pago usa o contrato
+Progresso em 2026-09-12: a confirmação inicial de plano pago usa o contrato
 agnóstico `BillingConnector`, converge quando webhook e resposta síncrona chegam
 em ordens diferentes e efetiva uma única vez plano, ciclo, entitlement e crédito.
 Snapshot divergente, valor/moeda incompatível ou evento duplicado não repetem
 efeitos; o lançamento fica ligado de modo imutável à solicitação e ao pagamento.
+Solicitações vencidas são reclamadas concorrentemente por prazo comercial e
+terminalizadas uma única vez. A adesão inicial é cancelada, a renovação passa a
+`PAST_DUE`/`RENEWAL_INACTIVE`, OnDemand não altera o plano principal e uma
+confirmação posterior fica rejeitada sem efeitos financeiros ou de acesso.
 
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 

@@ -288,8 +288,12 @@ Phase 7 now has an idempotent provider-neutral confirmation path for initial
 paid plans. A fake connector proves one provider attempt, webhook/response race
 convergence and one atomic activation, cycle, entitlement and allowance grant.
 The persisted Billing payment and CollectionRequest are linked to the resulting
-credit entry through immutable typed references. Remaining phase 7 flows are
-tracked in `docs/test-matrix.md`.
+credit entry through immutable typed references. Due collection requests expire
+under row locks: initial purchases are canceled, renewals become `PAST_DUE` /
+`RENEWAL_INACTIVE`, and OnDemand expiration leaves the active plan unchanged.
+Late confirmations of terminal requests are recorded as rejected without cycle,
+entitlement or credit effects. Remaining phase 7 flows are tracked in
+`docs/test-matrix.md`.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

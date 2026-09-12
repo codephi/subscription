@@ -7,6 +7,7 @@ use crate::{
             BillingConnector, BillingPaymentMethod, CollectionCommand, ConnectorCollectionResult,
             ConnectorCollectionState,
         },
+        billing_expiration::CollectionExpirationSummary,
         database::DatabaseRepository,
     },
 };
@@ -51,6 +52,16 @@ pub async fn apply_confirmed_webhook(
     repository
         .apply_initial_payment_confirmation(webhook, period_end)
         .await
+}
+
+/// Applies the commercial payment deadline without contacting the provider.
+///
+/// Pass the scheduler's current time as `as_of`; repeated calls are idempotent.
+pub async fn expire_collections(
+    repository: &DatabaseRepository,
+    as_of: chrono::DateTime<chrono::Utc>,
+) -> ApiResult<CollectionExpirationSummary> {
+    repository.expire_due_collections(as_of).await
 }
 
 async fn execute_started_attempt(

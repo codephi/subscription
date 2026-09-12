@@ -31,6 +31,7 @@ pub struct ConfirmedBillingWebhook {
 pub enum ConfirmationResult {
     Applied,
     Duplicate,
+    Rejected,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,6 +76,14 @@ impl DatabaseRepository {
             mark_webhook(&mut transaction, webhook, "DUPLICATE").await?;
             transaction.commit().await?;
             return Ok(duplicate_outcome());
+        }
+        if matches!(
+            context.request_status.as_str(),
+            "EXPIRED" | "EXHAUSTED" | "CANCELED" | "UNMATCHED"
+        ) {
+            mark_webhook(&mut transaction, webhook, "REJECTED").await?;
+            transaction.commit().await?;
+            return Ok(rejected_outcome());
         }
         validate_pending_confirmation(webhook, &context)?;
         let plan = load_locked_plan(&mut transaction, context.plan_version_id).await?;
@@ -434,6 +443,13 @@ fn missing_collection(collection_request_id: Uuid) -> ApiError {
 fn duplicate_outcome() -> ConfirmationOutcome {
     ConfirmationOutcome {
         result: ConfirmationResult::Duplicate,
+        customer_plan_cycle_id: None,
+    }
+}
+
+fn rejected_outcome() -> ConfirmationOutcome {
+    ConfirmationOutcome {
+        result: ConfirmationResult::Rejected,
         customer_plan_cycle_id: None,
     }
 }
