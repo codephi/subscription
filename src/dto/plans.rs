@@ -211,6 +211,8 @@ pub struct RevokeCustomerPlanRequest {
 pub struct CreatePlanTransitionRequest {
     pub new_plan_version_id: Uuid,
     pub transition_kind: PlanTransitionKind,
+    #[serde(default)]
+    pub payment_method_binding_id: Option<Uuid>,
     pub transaction_id: String,
     pub actor_reference: String,
 }
@@ -223,6 +225,17 @@ pub struct PlanTransitionResponse {
     pub new_plan_version_id: Uuid,
     pub reclassified_credit_units: CreditUnits,
     pub customer_plan: CustomerPlanResponse,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(
+    tag = "result",
+    content = "details",
+    rename_all = "SCREAMING_SNAKE_CASE"
+)]
+pub enum PlanTransitionOutcomeResponse {
+    Applied(PlanTransitionResponse),
+    PaymentPending(crate::dto::billing::CollectionRequestResponse),
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]

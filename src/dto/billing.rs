@@ -4,7 +4,94 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreateBillingConnectionRequest {
+    pub provider: String,
+    pub external_account_reference: String,
+    pub secret_reference: String,
+    pub webhook_secret_reference: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct BillingConnectionResponse {
+    pub billing_connection_id: Uuid,
+    pub workspace_id: Uuid,
+    pub provider: String,
+    pub external_account_reference: String,
+    pub capabilities: Vec<String>,
+    pub status: String,
+    pub webhook_path: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct BillingCapabilitiesResponse {
+    pub payment_methods: Vec<String>,
+    pub supports_setup_session: bool,
+    pub supports_vault: bool,
+    pub supports_off_session_charge: bool,
+    pub supports_webhook: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreatePaymentMethodBindingRequest {
+    pub billing_connection_id: Uuid,
+    pub customer_plan_id: Option<Uuid>,
+    pub provider_payment_method_reference: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct PaymentMethodBindingResponse {
+    pub payment_method_binding_id: Uuid,
+    pub billing_connection_id: Uuid,
+    pub workspace_id: Uuid,
+    pub customer_plan_id: Option<Uuid>,
+    pub payment_method: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreatePaymentMethodSetupSessionRequest {
+    pub return_url: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct PaymentMethodSetupSessionResponse {
+    pub provider_setup_id: String,
+    pub client_secret: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct BillingWebhookResponse {
+    pub result: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct BillingOperationsResponse {
+    pub pending_collections: i64,
+    pub webhook_failures: i64,
+    pub unprocessed_webhooks: i64,
+    pub open_unmatched_payments: i64,
+    pub outbox_backlog: i64,
+    pub outbox_dead_letters: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreateRenewalRegularizationRequest {
+    pub payment_method_binding_id: Uuid,
+    pub transaction_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreateInitialCollectionRequest {
+    pub payment_method_binding_id: Uuid,
+    pub transaction_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreateOnDemandPurchaseRequest {
+    pub on_demand_plan_id: Uuid,
     pub payment_method_binding_id: Uuid,
     pub transaction_id: String,
 }

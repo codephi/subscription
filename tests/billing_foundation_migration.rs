@@ -61,6 +61,32 @@ async fn billing_foundation_migrations_round_trip() {
     .await;
     apply_migration(
         &mut connection,
+        include_str!("../migrations/202609130001_stripe_connector.up.sql"),
+    )
+    .await;
+    let stripe_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() \
+         AND table_name IN ('billing_plan_upgrade_contexts','external_refund_observations')",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .expect("Stripe connector tables");
+    assert_eq!(stripe_tables, 2);
+    let webhook_secret_column: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() \
+         AND table_name='billing_connections' AND column_name='webhook_secret_reference')",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .expect("Stripe webhook secret reference column");
+    assert!(webhook_secret_column);
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609130001_stripe_connector.down.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
         include_str!("../migrations/202609120003_unmatched_payment_cases.down.sql"),
     )
     .await;

@@ -28,6 +28,8 @@ impl DatabaseRepository {
         let immediate = row.get::<String, _>("activation_status") != "ACTIVATED"
             || row.get::<String, _>("recurrence") == "NONE";
         if immediate {
+            cancel_pending_collections(&mut transaction, customer_plan_id, "CUSTOMER_CANCELED")
+                .await?;
             close_customer_plan(
                 &mut transaction,
                 customer_plan_id,
@@ -85,6 +87,8 @@ impl DatabaseRepository {
             "ADMIN_REVOKED",
         )
         .await?;
+        cancel_pending_collections(&mut transaction, customer_plan_id, "CUSTOMER_PLAN_REVOKED")
+            .await?;
         insert_revocation_audit(
             &mut transaction,
             workspace_id,
@@ -106,6 +110,22 @@ impl DatabaseRepository {
         self.find_customer_plan(workspace_id, customer_plan_id)
             .await
     }
+}
+
+async fn cancel_pending_collections(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    customer_plan_id: Uuid,
+    reason: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE collection_requests SET status='CANCELED',terminal_reason=$2 \
+         WHERE customer_plan_id=$1 AND status IN ('SCHEDULED','COLLECTING','PENDING_PAYMENT')",
+    )
+    .bind(customer_plan_id)
+    .bind(reason)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 fn ensure_revocable(customer_plan_id: Uuid, status: &str) -> ApiResult<()> {

@@ -10,12 +10,12 @@ use crate::{
     dto::plans::{
         CreateCustomerPlanRequest, CreateOnDemandPlanRequest, CreatePlanTransitionRequest,
         CreateSubscriptionPlanRequest, CreateSubscriptionRequest, CustomerPlanResponse,
-        OnDemandPlanResponse, PlanTransitionResponse, RevokeCustomerPlanRequest, RevokePlanRequest,
-        RunSubscriptionCyclesRequest, RunSubscriptionCyclesResponse, SubscriptionPlanResponse,
-        SubscriptionResponse,
+        OnDemandPlanResponse, PlanTransitionKind, PlanTransitionOutcomeResponse,
+        RevokeCustomerPlanRequest, RevokePlanRequest, RunSubscriptionCyclesRequest,
+        RunSubscriptionCyclesResponse, SubscriptionPlanResponse, SubscriptionResponse,
     },
     error::{ApiError, ApiResult, ErrorResponse},
-    services::plans,
+    services::{billing, plans},
     state::AppState,
 };
 
@@ -159,7 +159,7 @@ async fn cancel_customer_plan(
     ),
     request_body = CreatePlanTransitionRequest,
     responses(
-        (status = 201, body = PlanTransitionResponse),
+        (status = 201, body = PlanTransitionOutcomeResponse),
         (status = 409, body = ErrorResponse),
         (status = 503, body = ErrorResponse, description = "Paid transition requires Billing")
     ))]
@@ -168,15 +168,31 @@ async fn transition_customer_plan(
     Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(request): Json<CreatePlanTransitionRequest>,
-) -> ApiResult<(StatusCode, Json<PlanTransitionResponse>)> {
-    let response = plans::transition_customer_plan(
-        &state.database(),
-        workspace_id,
-        customer_plan_id,
-        idempotency_key(&headers)?,
-        request,
-    )
-    .await?;
+) -> ApiResult<(StatusCode, Json<PlanTransitionOutcomeResponse>)> {
+    let key = idempotency_key(&headers)?;
+    let response = if request.transition_kind == PlanTransitionKind::Upgrade {
+        PlanTransitionOutcomeResponse::PaymentPending(
+            billing::create_paid_plan_upgrade(
+                &state.database(),
+                workspace_id,
+                customer_plan_id,
+                key,
+                &request,
+            )
+            .await?,
+        )
+    } else {
+        PlanTransitionOutcomeResponse::Applied(
+            plans::transition_customer_plan(
+                &state.database(),
+                workspace_id,
+                customer_plan_id,
+                key,
+                request,
+            )
+            .await?,
+        )
+    };
     Ok((StatusCode::CREATED, Json(response)))
 }
 

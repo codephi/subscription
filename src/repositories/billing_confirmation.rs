@@ -74,8 +74,45 @@ impl DatabaseRepository {
         validate_pending_confirmation(webhook, &context)?;
         let plan = load_locked_plan(&mut transaction, context.plan_version_id).await?;
         validate_plan_and_customer(webhook, &context, &plan)?;
-        let cycle = if context.request_kind == "RENEWAL" {
-            renew_paid_customer_plan(
+        let (cycle_id, grant_entry_id) = if context.request_kind == "PLAN_UPGRADE" {
+            let actor_reference: String = sqlx::query_scalar(
+                "SELECT actor_reference FROM billing_plan_upgrade_contexts WHERE collection_request_id=$1",
+            )
+            .bind(webhook.collection_request_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            let cycle_id = crate::repositories::plan_transitions::apply_confirmed_upgrade(
+                &mut transaction,
+                &wallet,
+                workspace_id,
+                context.customer_plan_id,
+                &plan,
+                webhook.occurred_at,
+                period_end,
+                &context.transaction_id,
+                &actor_reference,
+            )
+            .await?;
+            (Some(cycle_id), None)
+        } else if context.request_kind == "ON_DEMAND" {
+            let grant = crate::repositories::billing_on_demand_confirmation::OnDemandCreditGrant {
+                workspace_id,
+                on_demand_plan_id: context.on_demand_plan_id,
+                plan_version_id: context.plan_version_id,
+                granted_credit_units: context.granted_credit_units,
+                customer_plan_id: context.customer_plan_id,
+                transaction_id: &context.transaction_id,
+            };
+            let entry_id =
+                crate::repositories::billing_on_demand_confirmation::grant_on_demand_credit(
+                    &mut transaction,
+                    &wallet,
+                    &grant,
+                )
+                .await?;
+            (None, Some(entry_id))
+        } else if context.request_kind == "RENEWAL" {
+            let cycle = renew_paid_customer_plan(
                 &mut transaction,
                 &wallet,
                 workspace_id,
@@ -85,9 +122,10 @@ impl DatabaseRepository {
                 period_end,
                 &context.transaction_id,
             )
-            .await?
+            .await?;
+            (Some(cycle.customer_plan_cycle_id), None)
         } else if context.request_kind == "RENEWAL_REGULARIZATION" {
-            crate::repositories::billing_renewal::regularize_paid_customer_plan(
+            let cycle = crate::repositories::billing_renewal::regularize_paid_customer_plan(
                 &mut transaction,
                 &wallet,
                 workspace_id,
@@ -97,9 +135,10 @@ impl DatabaseRepository {
                 period_end,
                 &context.transaction_id,
             )
-            .await?
+            .await?;
+            (Some(cycle.customer_plan_cycle_id), None)
         } else {
-            activate_customer_plan(
+            let cycle = activate_customer_plan(
                 &mut transaction,
                 &wallet,
                 workspace_id,
@@ -109,19 +148,21 @@ impl DatabaseRepository {
                 period_end,
                 &context.transaction_id,
             )
-            .await?
+            .await?;
+            (Some(cycle.customer_plan_cycle_id), None)
         };
         finalize_confirmation(
             &mut transaction,
             webhook,
             &context,
-            cycle.customer_plan_cycle_id,
+            cycle_id,
+            grant_entry_id,
         )
         .await?;
         transaction.commit().await?;
         Ok(ConfirmationOutcome {
             result: ConfirmationResult::Applied,
-            customer_plan_cycle_id: Some(cycle.customer_plan_cycle_id),
+            customer_plan_cycle_id: cycle_id,
         })
     }
 }
@@ -143,6 +184,7 @@ struct ConfirmationContext {
     amount_minor: i64,
     currency: String,
     transaction_id: String,
+    on_demand_plan_id: Option<Uuid>,
 }
 
 async fn find_collection_workspace(
@@ -164,7 +206,7 @@ async fn lock_confirmation_context(
 ) -> ApiResult<ConfirmationContext> {
     let row = sqlx::query(
         "SELECT cr.customer_plan_id,cr.plan_version_id,cr.request_kind,cr.granted_credit_units, \
-         cr.status request_status,cr.payment_expires_at,cr.amount_minor,cr.currency,cr.transaction_id, \
+         cr.status request_status,cr.payment_expires_at,cr.amount_minor,cr.currency,cr.transaction_id,cr.on_demand_plan_id, \
          cp.plan_version_id customer_plan_version_id,cp.activation_status,cp.commercial_status,cp.renewal_status, \
          bp.billing_payment_id,bp.provider,bp.provider_payment_id \
          FROM collection_requests cr JOIN customer_plans cp ON cp.customer_plan_id=cr.customer_plan_id \
@@ -197,6 +239,7 @@ fn context_from_row(row: &sqlx::postgres::PgRow) -> ConfirmationContext {
         amount_minor: row.get("amount_minor"),
         currency: row.get("currency"),
         transaction_id: row.get("transaction_id"),
+        on_demand_plan_id: row.get("on_demand_plan_id"),
     }
 }
 
@@ -254,15 +297,31 @@ fn validate_plan_and_customer(
             "subscription plan must not be revoked",
         ));
     }
-    if context.customer_plan_version_id != context.plan_version_id
-        || plan.response.commercial_model != crate::dto::plans::CommercialModel::Paid
-        || context.granted_credit_units != plan.response.granted_credit_units.value()
-    {
+    let snapshot_matches = if context.request_kind == "ON_DEMAND" {
+        context.customer_plan_version_id == context.plan_version_id
+    } else if context.request_kind == "PLAN_UPGRADE" {
+        context.customer_plan_version_id != context.plan_version_id
+            && plan.response.commercial_model == crate::dto::plans::CommercialModel::Paid
+            && context.granted_credit_units == plan.response.granted_credit_units.value()
+    } else {
+        context.customer_plan_version_id == context.plan_version_id
+            && plan.response.commercial_model == crate::dto::plans::CommercialModel::Paid
+            && context.granted_credit_units == plan.response.granted_credit_units.value()
+    };
+    if !snapshot_matches {
         return Err(invalid_confirmation(
             webhook,
             "request must match the paid customer plan and published credit grant",
         ));
     }
+    let on_demand = context.request_kind == "ON_DEMAND"
+        && matches!(context.commercial_status.as_str(), "ACTIVE" | "ACTIVE_PAID")
+        && context.activation_status == "ACTIVATED"
+        && context.on_demand_plan_id.is_some();
+    let upgrade = context.request_kind == "PLAN_UPGRADE"
+        && matches!(context.commercial_status.as_str(), "ACTIVE" | "ACTIVE_PAID")
+        && context.activation_status == "ACTIVATED"
+        && context.renewal_status == "CURRENT";
     let initial = context.request_kind == "INITIAL"
         && context.commercial_status == "ACTIVE"
         && context.activation_status == "PENDING_INITIAL_PAYMENT";
@@ -274,7 +333,7 @@ fn validate_plan_and_customer(
         && context.commercial_status == "PAST_DUE"
         && context.activation_status == "ACTIVATED"
         && context.renewal_status == "RENEWAL_INACTIVE";
-    if initial || renewal || regularization {
+    if initial || renewal || regularization || on_demand || upgrade {
         return Ok(());
     }
     Err(invalid_confirmation(
@@ -287,15 +346,18 @@ async fn finalize_confirmation(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
     context: &ConfirmationContext,
-    cycle_id: Uuid,
+    cycle_id: Option<Uuid>,
+    grant_entry_id: Option<Uuid>,
 ) -> ApiResult<()> {
-    sqlx::query(
+    if !matches!(context.request_kind.as_str(), "ON_DEMAND" | "PLAN_UPGRADE") {
+        sqlx::query(
         "UPDATE customer_plans SET commercial_status='ACTIVE_PAID',activation_status='ACTIVATED', \
          renewal_status='CURRENT',version=version+1 WHERE customer_plan_id=$1",
-    )
-    .bind(context.customer_plan_id)
-    .execute(&mut **transaction)
-    .await?;
+        )
+        .bind(context.customer_plan_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
     sqlx::query(
         "UPDATE billing_payments SET state='CONFIRMED',confirmed_at=$2, \
          provider_payment_id=COALESCE(provider_payment_id,$3) WHERE billing_payment_id=$1",
@@ -312,7 +374,8 @@ async fn finalize_confirmation(
         .bind(webhook.collection_request_id)
         .execute(&mut **transaction)
         .await?;
-    insert_billing_credit_reference(transaction, webhook, context, cycle_id).await?;
+    insert_billing_credit_reference(transaction, webhook, context, cycle_id, grant_entry_id)
+        .await?;
     mark_webhook(transaction, webhook, "APPLIED", None).await?;
     insert_confirmation_event(transaction, webhook, context.customer_plan_id).await
 }
@@ -321,16 +384,17 @@ async fn insert_billing_credit_reference(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
     context: &ConfirmationContext,
-    cycle_id: Uuid,
+    cycle_id: Option<Uuid>,
+    grant_entry_id: Option<Uuid>,
 ) -> ApiResult<()> {
-    let entry_id: Option<Uuid> = sqlx::query_scalar(
+    let cycle_entry_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT customer_wallet_entry_id FROM wallet_transaction_references \
          WHERE reference_kind='CUSTOMER_PLAN_CYCLE' AND customer_plan_cycle_id=$1",
     )
     .bind(cycle_id)
     .fetch_optional(&mut **transaction)
     .await?;
-    let Some(entry_id) = entry_id else {
+    let Some(entry_id) = grant_entry_id.or(cycle_entry_id) else {
         return Ok(());
     };
     sqlx::query(

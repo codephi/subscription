@@ -10,6 +10,25 @@ use crate::{
 };
 
 impl DatabaseRepository {
+    pub async fn find_collection_request(
+        &self,
+        workspace_id: Uuid,
+        collection_request_id: Uuid,
+    ) -> ApiResult<CollectionRequestResponse> {
+        let row = sqlx::query(
+            "SELECT * FROM collection_requests WHERE workspace_id=$1 AND collection_request_id=$2",
+        )
+        .bind(workspace_id)
+        .bind(collection_request_id)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| ApiError::not_found(
+            "collection_request_not_found",
+            format!("collection request {collection_request_id} does not exist in workspace {workspace_id}"),
+        ))?;
+        Ok(collection_from_row(&row))
+    }
+
     pub async fn create_renewal_regularization(
         &self,
         workspace_id: Uuid,
@@ -224,7 +243,7 @@ async fn insert_regularization_event(
     Ok(())
 }
 
-fn collection_from_row(row: &sqlx::postgres::PgRow) -> CollectionRequestResponse {
+pub(crate) fn collection_from_row(row: &sqlx::postgres::PgRow) -> CollectionRequestResponse {
     CollectionRequestResponse {
         collection_request_id: row.get("collection_request_id"),
         customer_plan_id: row.get("customer_plan_id"),

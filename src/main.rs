@@ -24,6 +24,9 @@ async fn main() -> Result<()> {
 
     let repository = DatabaseRepository::new(pool);
     tokio::spawn(subscription::services::subscription_calendar::run_scheduler(repository.clone()));
+    tokio::spawn(
+        subscription::services::billing_dispatcher::run_billing_dispatcher(repository.clone()),
+    );
     let state = AppState::new(repository.clone())
         .with_accounts_webhook_secret(config.accounts_webhook_secret.clone());
 

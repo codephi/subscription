@@ -179,6 +179,7 @@ async fn admission_evidence_controls_join_and_transition_with_immutable_decision
     let transition = subscription::dto::plans::CreatePlanTransitionRequest {
         new_plan_version_id: target.plan_version_id,
         transition_kind: subscription::dto::plans::PlanTransitionKind::Downgrade,
+        payment_method_binding_id: None,
         transaction_id: "proof-transition".into(),
         actor_reference: "customer:test".into(),
     };

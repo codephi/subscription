@@ -1,6 +1,6 @@
 # Prontidão para o MVP
 
-Status revisado em 12 de setembro de 2026.
+Status revisado em 14 de setembro de 2026.
 
 ## Decisão de escopo
 
@@ -31,50 +31,31 @@ para a fase 9, salvo se passarem a ser requisito comercial explícito.
 - expiração comercial, falha definitiva e preservação de resultados incertos;
 - caso operacional idempotente para pagamento confirmado sem solicitação local.
 
-## Bloqueadores do MVP pago
+## MVP pago implementado
 
-### 1. Concluir a fase 7
+As fases 7 e 8 foram concluídas no recorte do primeiro MVP:
 
-- receber e validar webhook assinado, inclusive duplicado, atrasado e fora de
-  ordem;
-- reprocessar eventos válidos pela `WebhookInbox` sem regredir estado terminal;
-- concluir cancelamento normal e revogação administrativa, incluindo o
-  encerramento atômico de cobranças pendentes;
-- provar o comportamento de planos com recorrência `NONE`;
-- implementar compra `OnDemand` com crédito persistente e sem criar ciclo;
-- concluir upgrade pago sem prorrata e com troca atômica após confirmação;
-- aplicar `payment_completion_window` e idempotência em todos os tipos de
-  `CollectionRequest`;
-- cobrir recuperação antes e depois de falha de commit;
-- aprovar `PH-07`, `AC-10`, `AC-11` e `EX-07` na matriz de testes.
+- conexões Stripe e vínculos de cartão armazenam apenas referências tokenizadas;
+- SetupIntent e PaymentIntent usam o adaptador Stripe e idempotência estável;
+- o webhook valida a assinatura antes de escrever, deduplica e não regride
+  estados finais;
+- confirmação, falha definitiva e `requires_action` são normalizados;
+- adesão, renovação, regularização, OnDemand e upgrade usam a janela comercial;
+- OnDemand não cria ciclo e upgrade só efetiva após confirmação integral;
+- cancelamento e revogação terminalizam solicitações pendentes atomicamente;
+- pagamentos sem solicitação e estornos externos não geram efeitos automáticos;
+- os gates acumulados das fases 7 e 8 estão aprovados.
 
-### 2. Implementar a fase 8
+## Preparação operacional mínima
 
-- criar e consultar `BillingConnection`;
-- criar sessão segura de setup e persistir somente o vínculo tokenizado do
-  cartão;
-- implementar o `BillingConnector` do Stripe;
-- criar `PaymentIntent` com chave idempotente e metadata de correlação;
-- normalizar confirmação, falha e `requires_action`;
-- expor o endpoint real de webhook e validar a assinatura do Stripe antes de
-  qualquer escrita;
-- provar convergência para eventos duplicados, atrasados e fora de ordem;
-- disponibilizar consulta operacional de pagamentos não correspondidos;
-- observar estorno executado externamente sem iniciar refund ou efeito de
-  crédito automático;
-- aprovar `PH-08`, `AC-12`, `AC-13` e `EX-08`.
+O recorte mínimo foi entregue sem declarar a fase 10 completa:
 
-### 3. Preparação operacional mínima
-
-O MVP não precisa concluir toda a fase 10, mas não deve ser liberado sem:
-
-- reconciliação de cobranças, wallets e saldos;
-- métricas e alertas para falha de webhook, backlog de inbox/outbox,
-  dead-letter e cobrança não correspondida;
-- replay operacional auditável;
-- rotação das credenciais de webhook e do provedor;
-- testes essenciais de carga, concorrência e recuperação;
-- runbooks para cobrança incerta, pagamento não conciliado e replay.
+- reconciliações existentes de wallets, saldo, lotes e uso;
+- consulta de cobranças, webhook, outbox, dead-letter e não conciliados;
+- replay auditável e deduplicação/reprocessamento seguro;
+- rotação de segredos por referências `env://`, sem persisti-los;
+- testes de concorrência e recuperação nos fluxos críticos;
+- [runbook do MVP pago](runbooks/billing-mvp.md).
 
 ## Fora do primeiro MVP
 
@@ -87,16 +68,8 @@ O MVP não precisa concluir toda a fase 10, mas não deve ser liberado sem:
 - recursos avançados da fase 10, como disaster recovery completo e testes de
   escala máxima.
 
-## Ordem de implementação
-
-1. Fechar o contrato de webhook assinado e os cenários de atraso/replay.
-2. Completar cancelamento, revogação e recorrência `NONE`.
-3. Completar `OnDemand` e upgrade pago.
-4. Aprovar o gate integral da fase 7.
-5. Implementar o conector Stripe e seu fluxo de cartão/webhook.
-6. Aprovar o gate integral da fase 8.
-7. Entregar a preparação operacional mínima e executar a validação ponta a
-   ponta em ambiente semelhante ao de produção.
+Antes da liberação ainda é necessária uma validação ponta a ponta com chaves de
+teste Stripe e a configuração dos alertas no ambiente de observabilidade.
 
 O estado detalhado e executável permanece na
 [matriz de testes](test-matrix.md). O desenho normativo está no

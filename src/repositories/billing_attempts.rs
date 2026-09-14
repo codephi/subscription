@@ -20,7 +20,34 @@ pub struct StartedCollectionAttempt {
     pub command: CollectionCommand,
 }
 
+pub struct DueCollectionAttempt {
+    pub collection_request_id: Uuid,
+    pub provider: String,
+    pub external_account_reference: String,
+    pub secret_reference: String,
+}
+
 impl DatabaseRepository {
+    pub async fn find_due_collection_attempt(&self) -> ApiResult<Option<DueCollectionAttempt>> {
+        let row = sqlx::query(
+            "SELECT cr.collection_request_id,bc.provider,bc.external_account_reference,bc.secret_reference \
+             FROM collection_requests cr JOIN payment_method_bindings pmb USING(payment_method_binding_id) \
+             JOIN billing_connections bc USING(billing_connection_id) WHERE cr.status='SCHEDULED' \
+             AND cr.attempts_started=0 AND cr.scheduled_at<=clock_timestamp() \
+             AND cr.payment_expires_at>clock_timestamp() AND bc.status='ACTIVE' \
+             AND bc.provider='STRIPE' \
+             ORDER BY cr.scheduled_at,cr.collection_request_id LIMIT 1",
+        )
+        .fetch_optional(&self.pool())
+        .await?;
+        Ok(row.map(|row| DueCollectionAttempt {
+            collection_request_id: row.get("collection_request_id"),
+            provider: row.get("provider"),
+            external_account_reference: row.get("external_account_reference"),
+            secret_reference: row.get("secret_reference"),
+        }))
+    }
+
     pub async fn begin_collection_attempt(
         &self,
         request_id: Uuid,

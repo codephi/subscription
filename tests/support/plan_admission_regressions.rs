@@ -95,6 +95,7 @@ async fn downgrade_cannot_bypass_approval_or_card_requirements() {
         let transition = CreatePlanTransitionRequest {
             new_plan_version_id: target.plan_version_id,
             transition_kind: PlanTransitionKind::Downgrade,
+            payment_method_binding_id: None,
             transaction_id: "reusable-transition".to_string(),
             actor_reference: "customer:test".to_string(),
         };
@@ -138,6 +139,7 @@ async fn downgrade_cannot_bypass_approval_or_card_requirements() {
         CreatePlanTransitionRequest {
             new_plan_version_id: target.plan_version_id,
             transition_kind: PlanTransitionKind::Downgrade,
+            payment_method_binding_id: None,
             transaction_id: "reusable-transition".to_string(),
             actor_reference: "customer:test".to_string(),
         },

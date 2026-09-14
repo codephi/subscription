@@ -17,6 +17,7 @@ pub async fn assert_downgrade(
     let request = CreatePlanTransitionRequest {
         new_plan_version_id: target_plan_id,
         transition_kind: PlanTransitionKind::Downgrade,
+        payment_method_binding_id: None,
         transaction_id: "downgrade-transaction".to_string(),
         actor_reference: "customer:test".to_string(),
     };

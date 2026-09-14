@@ -7,9 +7,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use subscription::{
     dto::{
+        billing::CreateOnDemandPurchaseRequest,
         plans::{
-            AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest,
-            CreateSubscriptionPlanRequest, CreateSubscriptionRequest, PlanRecurrence,
+            AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest, CreateOnDemandPlanRequest,
+            CreatePlanTransitionRequest, CreateSubscriptionPlanRequest, CreateSubscriptionRequest,
+            PlanRecurrence, PlanTransitionKind, RevokeCustomerPlanRequest, RevokePlanRequest,
             SubscriptionModel,
         },
         units::CreditUnits,
@@ -125,6 +127,268 @@ async fn distinct_duplicate_and_mismatched_confirmation_never_repeat_credit() {
         .expect_err("mismatched amount");
     assert_eq!(error.code(), "billing_confirmation_mismatch");
     assert_confirmation_effects(&fixture).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_plan() {
+    let fixture = setup_confirmation().await;
+    billing::apply_confirmed_webhook(&fixture.repository, &confirmed_webhook(&fixture))
+        .await
+        .expect("activate paid plan");
+    let (subscription_id, plan_version_id, binding_id): (Uuid, Uuid, Uuid) = sqlx::query_as(
+        "SELECT sp.subscription_id,cp.plan_version_id,pmb.payment_method_binding_id \
+         FROM customer_plans cp JOIN subscription_plan_versions sp USING(plan_version_id) \
+         JOIN payment_method_bindings pmb ON pmb.customer_plan_id=cp.customer_plan_id \
+         WHERE cp.customer_plan_id=$1",
+    )
+    .bind(fixture.customer_plan_id)
+    .fetch_one(&fixture.repository.pool())
+    .await
+    .unwrap();
+    let offer = plans::create_on_demand_plan(
+        &fixture.repository,
+        subscription_id,
+        CreateOnDemandPlanRequest {
+            name: "Extra credits".into(),
+            price_amount_minor: 500,
+            currency: "BRL".into(),
+            credit_units: CreditUnits::new(40),
+        },
+    )
+    .await
+    .unwrap();
+    let purchase = billing::create_on_demand_purchase(
+        &fixture.repository,
+        fixture.workspace_id,
+        fixture.customer_plan_id,
+        &format!("on-demand-key-{}", Uuid::new_v4()),
+        &CreateOnDemandPurchaseRequest {
+            on_demand_plan_id: offer.on_demand_plan_id,
+            payment_method_binding_id: binding_id,
+            transaction_id: format!("on-demand-transaction-{}", Uuid::new_v4()),
+        },
+    )
+    .await
+    .unwrap();
+    billing::execute_collection_attempt(
+        &fixture.repository,
+        &FakeBillingConnector,
+        purchase.collection_request_id,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let webhook = ConfirmedBillingWebhook {
+        provider: "FAKE".into(),
+        provider_event_id: format!("on-demand-event-{}", Uuid::new_v4()),
+        event_type: "payment.confirmed".into(),
+        payload_sha256: "c".repeat(64),
+        collection_request_id: purchase.collection_request_id,
+        provider_payment_id: format!(
+            "fake-payment-collection:{}:attempt:1",
+            purchase.collection_request_id
+        ),
+        amount_minor: 500,
+        currency: "BRL".into(),
+        occurred_at: Utc::now(),
+    };
+    let outcome = billing::apply_confirmed_webhook(&fixture.repository, &webhook)
+        .await
+        .unwrap();
+    assert_eq!(outcome.result, ConfirmationResult::Applied);
+    assert!(outcome.customer_plan_cycle_id.is_none());
+    let state: (Uuid, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT cp.plan_version_id,cw.balance_credit_units, \
+         (SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$1), \
+         (SELECT count(*) FROM credit_lots WHERE customer_id=$2 AND source_kind='ON_DEMAND'), \
+         (SELECT count(*) FROM customer_plan_entitlements WHERE customer_plan_id=$1 AND effective_until IS NULL) \
+         FROM customer_plans cp JOIN wallets w ON w.customer_id=cp.customer_id AND w.wallet_type='CUSTOMER' \
+         JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id WHERE cp.customer_plan_id=$1",
+    )
+    .bind(fixture.customer_plan_id)
+    .bind(fixture.workspace_id)
+    .fetch_one(&fixture.repository.pool())
+    .await
+    .unwrap();
+    assert_eq!(state, (plan_version_id, 140, 1, 1, 1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paid_upgrade_changes_plan_and_cycle_only_after_full_confirmation() {
+    let fixture = setup_confirmation().await;
+    billing::apply_confirmed_webhook(&fixture.repository, &confirmed_webhook(&fixture))
+        .await
+        .unwrap();
+    let (subscription_id, product_id, old_plan_id, binding_id): (Uuid, Uuid, Uuid, Uuid) =
+        sqlx::query_as(
+            "SELECT sp.subscription_id,spp.product_id,cp.plan_version_id,pmb.payment_method_binding_id \
+             FROM customer_plans cp JOIN subscription_plan_versions sp USING(plan_version_id) \
+             JOIN subscription_plan_products spp USING(plan_version_id) \
+             JOIN payment_method_bindings pmb ON pmb.customer_plan_id=cp.customer_plan_id \
+             WHERE cp.customer_plan_id=$1",
+        )
+        .bind(fixture.customer_plan_id)
+        .fetch_one(&fixture.repository.pool())
+        .await
+        .unwrap();
+    let target = plans::create_plan(
+        &fixture.repository,
+        subscription_id,
+        CreateSubscriptionPlanRequest {
+            admission_policy_version_id: None,
+            name: "Paid upgrade".into(),
+            commercial_model: CommercialModel::Paid,
+            price_amount_minor: Some(2_000),
+            currency: Some("BRL".into()),
+            recurrence: PlanRecurrence::Monthly,
+            admission_policy: AdmissionPolicy::Open,
+            accepted_payment_methods: vec!["CARD".into()],
+            granted_credit_units: CreditUnits::new(200),
+            product_ids: vec![product_id],
+        },
+    )
+    .await
+    .unwrap();
+    let upgrade = billing::create_paid_plan_upgrade(
+        &fixture.repository,
+        fixture.workspace_id,
+        fixture.customer_plan_id,
+        &format!("upgrade-key-{}", Uuid::new_v4()),
+        &CreatePlanTransitionRequest {
+            new_plan_version_id: target.plan_version_id,
+            transition_kind: PlanTransitionKind::Upgrade,
+            payment_method_binding_id: Some(binding_id),
+            transaction_id: format!("upgrade-transaction-{}", Uuid::new_v4()),
+            actor_reference: "customer:test".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let before: (Uuid, i64, i64) = sqlx::query_as(
+        "SELECT cp.plan_version_id,cw.balance_credit_units, \
+         (SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$1) \
+         FROM customer_plans cp JOIN wallets w ON w.customer_id=cp.customer_id AND w.wallet_type='CUSTOMER' \
+         JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id WHERE cp.customer_plan_id=$1",
+    )
+    .bind(fixture.customer_plan_id)
+    .fetch_one(&fixture.repository.pool())
+    .await
+    .unwrap();
+    assert_eq!(before, (old_plan_id, 100, 1));
+    billing::execute_collection_attempt(
+        &fixture.repository,
+        &FakeBillingConnector,
+        upgrade.collection_request_id,
+    )
+    .await
+    .unwrap();
+    let webhook = ConfirmedBillingWebhook {
+        provider: "FAKE".into(),
+        provider_event_id: format!("upgrade-event-{}", Uuid::new_v4()),
+        event_type: "payment.confirmed".into(),
+        payload_sha256: "d".repeat(64),
+        collection_request_id: upgrade.collection_request_id,
+        provider_payment_id: format!(
+            "fake-payment-collection:{}:attempt:1",
+            upgrade.collection_request_id
+        ),
+        amount_minor: 2_000,
+        currency: "BRL".into(),
+        occurred_at: Utc::now(),
+    };
+    billing::apply_confirmed_webhook(&fixture.repository, &webhook)
+        .await
+        .unwrap();
+    let after: (Uuid, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT cp.plan_version_id,cw.balance_credit_units, \
+         (SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$1), \
+         (SELECT count(*) FROM customer_plan_transitions WHERE customer_plan_id=$1 AND transition_kind='UPGRADE'), \
+         (SELECT count(*) FROM credit_lots WHERE customer_id=$2 AND source_kind='ON_DEMAND') \
+         FROM customer_plans cp JOIN wallets w ON w.customer_id=cp.customer_id AND w.wallet_type='CUSTOMER' \
+         JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id WHERE cp.customer_plan_id=$1",
+    )
+    .bind(fixture.customer_plan_id)
+    .bind(fixture.workspace_id)
+    .fetch_one(&fixture.repository.pool())
+    .await
+    .unwrap();
+    assert_eq!(after, (target.plan_version_id, 300, 2, 1, 1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancellation_and_plan_revocation_terminalize_pending_collections() {
+    let canceled = setup_unstarted_confirmation().await;
+    plans::cancel_customer_plan(
+        &canceled.repository,
+        canceled.workspace_id,
+        canceled.customer_plan_id,
+    )
+    .await
+    .unwrap();
+    let canceled_request: (String, Option<String>) = sqlx::query_as(
+        "SELECT status,terminal_reason FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(canceled.collection_request_id)
+    .fetch_one(&canceled.repository.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        canceled_request,
+        ("CANCELED".into(), Some("CUSTOMER_CANCELED".into()))
+    );
+
+    let revoked = setup_unstarted_confirmation().await;
+    let plan_id: Uuid =
+        sqlx::query_scalar("SELECT plan_version_id FROM customer_plans WHERE customer_plan_id=$1")
+            .bind(revoked.customer_plan_id)
+            .fetch_one(&revoked.repository.pool())
+            .await
+            .unwrap();
+    plans::revoke_plan(
+        &revoked.repository,
+        plan_id,
+        RevokePlanRequest {
+            reason: "offer withdrawn".into(),
+            actor_reference: "operator:test".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let revoked_request: (String, Option<String>) = sqlx::query_as(
+        "SELECT status,terminal_reason FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(revoked.collection_request_id)
+    .fetch_one(&revoked.repository.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        revoked_request,
+        ("CANCELED".into(), Some("PLAN_REVOKED".into()))
+    );
+
+    let admin_revoked = setup_unstarted_confirmation().await;
+    plans::revoke_customer_plan(
+        &admin_revoked.repository,
+        admin_revoked.workspace_id,
+        admin_revoked.customer_plan_id,
+        RevokeCustomerPlanRequest {
+            reason: "risk review".into(),
+            actor_reference: "operator:risk".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let admin_request: (String, Option<String>) = sqlx::query_as(
+        "SELECT status,terminal_reason FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(admin_revoked.collection_request_id)
+    .fetch_one(&admin_revoked.repository.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        admin_request,
+        ("CANCELED".into(), Some("CUSTOMER_PLAN_REVOKED".into()))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

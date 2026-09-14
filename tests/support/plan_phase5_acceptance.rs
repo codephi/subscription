@@ -143,6 +143,7 @@ async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
         subscription::dto::plans::CreatePlanTransitionRequest {
             new_plan_version_id: withdrawn_target.plan_version_id,
             transition_kind: subscription::dto::plans::PlanTransitionKind::Downgrade,
+            payment_method_binding_id: None,
             transaction_id: "withdrawn-target".into(),
             actor_reference: "customer:test".into(),
         },

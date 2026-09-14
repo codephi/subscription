@@ -13,7 +13,9 @@ use crate::{
         credits::{lock_active_customer_wallet, reserve_idempotency, reserve_transaction},
         database::DatabaseRepository,
         plan_rows::PlanRecord,
-        plan_writes::{insert_entitlements, insert_plan_outbox, lock_valid_plan},
+        plan_writes::{
+            grant_cycle_credit, insert_entitlements, insert_plan_outbox, lock_valid_plan,
+        },
     },
 };
 
@@ -117,6 +119,140 @@ impl DatabaseRepository {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn apply_confirmed_upgrade(
+    transaction: &mut Transaction<'_, Postgres>,
+    wallet: &crate::repositories::credits::LockedWallet,
+    workspace_id: Uuid,
+    customer_plan_id: Uuid,
+    target_plan: &PlanRecord,
+    effective_at: DateTime<Utc>,
+    new_period_end: Option<DateTime<Utc>>,
+    transaction_id: &str,
+    actor_reference: &str,
+) -> ApiResult<Uuid> {
+    let current = lock_transition_source(transaction, workspace_id, customer_plan_id).await?;
+    validate_transition_source(customer_plan_id, &current, target_plan)?;
+    let transition_id = Uuid::new_v4();
+    let request = CreatePlanTransitionRequest {
+        new_plan_version_id: target_plan.response.plan_version_id,
+        transition_kind: crate::dto::plans::PlanTransitionKind::Upgrade,
+        payment_method_binding_id: None,
+        transaction_id: transaction_id.to_string(),
+        actor_reference: actor_reference.to_string(),
+    };
+    insert_transition_row(
+        transaction,
+        transition_id,
+        customer_plan_id,
+        &request,
+        target_plan,
+        &current,
+        effective_at,
+        new_period_end,
+    )
+    .await?;
+    reclassify_subscription_lots(
+        transaction,
+        customer_plan_id,
+        transition_id,
+        actor_reference,
+    )
+    .await?;
+    close_current_access(transaction, customer_plan_id, effective_at).await?;
+    let cycle_id = insert_upgrade_cycle(
+        transaction,
+        customer_plan_id,
+        current.next_cycle_ordinal,
+        target_plan,
+        effective_at,
+        new_period_end,
+    )
+    .await?;
+    insert_entitlements(
+        transaction,
+        customer_plan_id,
+        &target_plan.response.product_ids,
+        effective_at,
+    )
+    .await?;
+    update_upgraded_plan(
+        transaction,
+        customer_plan_id,
+        target_plan,
+        &current,
+        effective_at,
+    )
+    .await?;
+    if target_plan.response.granted_credit_units.value() > 0 {
+        grant_cycle_credit(
+            transaction,
+            wallet,
+            workspace_id,
+            customer_plan_id,
+            cycle_id,
+            target_plan,
+            new_period_end,
+            Some(transaction_id),
+        )
+        .await?;
+    }
+    insert_plan_outbox(
+        transaction,
+        workspace_id,
+        customer_plan_id,
+        transition_id,
+        "customer_plan.plan_changed",
+        current.version + 1,
+    )
+    .await?;
+    Ok(cycle_id)
+}
+
+async fn close_current_access(
+    transaction: &mut Transaction<'_, Postgres>,
+    customer_plan_id: Uuid,
+    effective_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE customer_plan_cycles SET status='COMPLETED' WHERE customer_plan_id=$1 AND status='ACTIVE'")
+        .bind(customer_plan_id).execute(&mut **transaction).await?;
+    sqlx::query("UPDATE customer_plan_entitlements SET effective_until=$2 WHERE customer_plan_id=$1 AND effective_until IS NULL")
+        .bind(customer_plan_id).bind(effective_at).execute(&mut **transaction).await?;
+    Ok(())
+}
+
+async fn insert_upgrade_cycle(
+    transaction: &mut Transaction<'_, Postgres>,
+    customer_plan_id: Uuid,
+    ordinal: i64,
+    target_plan: &PlanRecord,
+    effective_at: DateTime<Utc>,
+    period_end: Option<DateTime<Utc>>,
+) -> Result<Uuid, sqlx::Error> {
+    let cycle_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO customer_plan_cycles (customer_plan_cycle_id,customer_plan_id,cycle_ordinal, \
+         current_period_start,current_period_end,granted_credit_units,status) VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')")
+        .bind(cycle_id).bind(customer_plan_id).bind(ordinal).bind(effective_at)
+        .bind(period_end).bind(target_plan.response.granted_credit_units.value())
+        .execute(&mut **transaction).await?;
+    Ok(cycle_id)
+}
+
+async fn update_upgraded_plan(
+    transaction: &mut Transaction<'_, Postgres>,
+    customer_plan_id: Uuid,
+    target_plan: &PlanRecord,
+    current: &TransitionSource,
+    effective_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE customer_plans SET plan_version_id=$2,commercial_status='ACTIVE_PAID', \
+         anchor_at=$3,anchor_cycle_ordinal=$4,cancel_at_period_end=false,renewal_status='CURRENT',version=version+1 \
+         WHERE customer_plan_id=$1")
+        .bind(customer_plan_id).bind(target_plan.response.plan_version_id).bind(effective_at)
+        .bind(current.next_cycle_ordinal).execute(&mut **transaction).await?;
+    Ok(())
+}
+
 struct TransitionSource {
     plan_version_id: Uuid,
     subscription_id: Uuid,
@@ -163,7 +299,7 @@ async fn lock_transition_source(
     .ok_or_else(|| missing_customer_plan(workspace_id, customer_plan_id))?;
     let status: String = row.get("commercial_status");
     let activation: String = row.get("activation_status");
-    if status != "ACTIVE" || activation != "ACTIVATED" {
+    if !matches!(status.as_str(), "ACTIVE" | "ACTIVE_PAID") || activation != "ACTIVATED" {
         return Err(ApiError::conflict(
             "customer_plan_not_active",
             format!("customer plan {customer_plan_id} must be ACTIVE/ACTIVATED, found {status}/{activation}"),

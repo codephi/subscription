@@ -1,6 +1,11 @@
 use crate::{
     dto::billing::{
-        CollectionRequestResponse, CreateRenewalRegularizationRequest, UnmatchedPaymentCaseResponse,
+        BillingCapabilitiesResponse, BillingConnectionResponse, CollectionRequestResponse,
+        CreateBillingConnectionRequest, CreateInitialCollectionRequest,
+        CreateOnDemandPurchaseRequest, CreatePaymentMethodBindingRequest,
+        CreatePaymentMethodSetupSessionRequest, CreateRenewalRegularizationRequest,
+        PaymentMethodBindingResponse, PaymentMethodSetupSessionResponse,
+        UnmatchedPaymentCaseResponse,
     },
     error::{ApiError, ApiResult},
     repositories::{
@@ -8,12 +13,234 @@ use crate::{
         billing_confirmation::{ConfirmationOutcome, ConfirmedBillingWebhook},
         billing_connector::{
             BillingConnector, BillingPaymentMethod, CollectionCommand, ConnectorCollectionResult,
-            ConnectorCollectionState,
+            ConnectorCollectionState, SetupSessionCommand,
         },
         billing_expiration::CollectionExpirationSummary,
         database::DatabaseRepository,
     },
 };
+
+pub async fn create_initial_collection(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    customer_plan_id: uuid::Uuid,
+    idempotency_key: &str,
+    request: &CreateInitialCollectionRequest,
+) -> ApiResult<CollectionRequestResponse> {
+    if idempotency_key.is_empty() || request.transaction_id.is_empty() {
+        return Err(ApiError::unprocessable(
+            "invalid_billing_idempotency",
+            format!(
+                "collection key {idempotency_key:?} and transaction {:?} must be non-empty",
+                request.transaction_id
+            ),
+        ));
+    }
+    repository
+        .create_initial_collection(workspace_id, customer_plan_id, idempotency_key, request)
+        .await
+}
+
+pub async fn create_on_demand_purchase(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    customer_plan_id: uuid::Uuid,
+    idempotency_key: &str,
+    request: &CreateOnDemandPurchaseRequest,
+) -> ApiResult<CollectionRequestResponse> {
+    if idempotency_key.is_empty() || request.transaction_id.is_empty() {
+        return Err(ApiError::unprocessable(
+            "invalid_billing_idempotency",
+            format!(
+                "idempotency key {idempotency_key:?} and transaction id {:?} must be non-empty",
+                request.transaction_id
+            ),
+        ));
+    }
+    repository
+        .create_on_demand_purchase(workspace_id, customer_plan_id, idempotency_key, request)
+        .await
+}
+
+pub async fn create_paid_plan_upgrade(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    customer_plan_id: uuid::Uuid,
+    idempotency_key: &str,
+    request: &crate::dto::plans::CreatePlanTransitionRequest,
+) -> ApiResult<CollectionRequestResponse> {
+    if idempotency_key.is_empty()
+        || request.transaction_id.is_empty()
+        || request.actor_reference.is_empty()
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_billing_idempotency",
+            format!(
+                "upgrade key {idempotency_key:?}, transaction {:?}, and actor {:?} must be non-empty",
+                request.transaction_id, request.actor_reference
+            ),
+        ));
+    }
+    repository
+        .create_paid_plan_upgrade(workspace_id, customer_plan_id, idempotency_key, request)
+        .await
+}
+
+pub async fn create_payment_method_setup_session(
+    repository: &DatabaseRepository,
+    connection_id: uuid::Uuid,
+    request: &CreatePaymentMethodSetupSessionRequest,
+) -> ApiResult<PaymentMethodSetupSessionResponse> {
+    if !request.return_url.starts_with("https://") {
+        return Err(ApiError::unprocessable(
+            "invalid_setup_return_url",
+            format!("return_url {:?} must use HTTPS", request.return_url),
+        ));
+    }
+    let configuration = repository
+        .billing_connector_configuration(connection_id)
+        .await?;
+    if configuration.provider != "STRIPE" || configuration.status != "ACTIVE" {
+        return Err(ApiError::conflict(
+            "billing_connection_not_usable",
+            format!("billing connection {connection_id} must be an ACTIVE STRIPE connection"),
+        ));
+    }
+    let secret = resolve_secret(&configuration.secret_reference)?;
+    let connector = crate::repositories::stripe::StripeConnector::new(
+        secret,
+        stripe_account(&configuration.external_account_reference),
+    );
+    let session = connector
+        .create_setup_session(&SetupSessionCommand {
+            customer_reference: configuration.external_account_reference,
+            return_url: request.return_url.clone(),
+        })
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
+    Ok(PaymentMethodSetupSessionResponse {
+        provider_setup_id: session.provider_setup_id,
+        client_secret: session.client_secret,
+    })
+}
+
+pub(crate) fn resolve_secret(reference: &str) -> ApiResult<String> {
+    let variable = reference.strip_prefix("env://").ok_or_else(|| {
+        ApiError::unprocessable(
+            "invalid_secret_reference",
+            format!("secret reference {reference:?} must use env://VARIABLE"),
+        )
+    })?;
+    std::env::var(variable).map_err(|_| {
+        ApiError::service_unavailable(
+            "billing_secret_unavailable",
+            format!("secret reference {reference:?} is not available in this process"),
+        )
+    })
+}
+
+fn stripe_account(reference: &str) -> Option<String> {
+    reference
+        .starts_with("acct_")
+        .then(|| reference.to_string())
+}
+
+pub async fn create_billing_connection(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    request: &CreateBillingConnectionRequest,
+) -> ApiResult<BillingConnectionResponse> {
+    if request.provider != "STRIPE" {
+        return Err(ApiError::unprocessable(
+            "billing_provider_not_supported",
+            format!("provider {:?} must be STRIPE in V1", request.provider),
+        ));
+    }
+    validate_reference(
+        "external_account_reference",
+        &request.external_account_reference,
+    )?;
+    validate_secret_reference("secret_reference", &request.secret_reference)?;
+    validate_secret_reference(
+        "webhook_secret_reference",
+        &request.webhook_secret_reference,
+    )?;
+    repository
+        .create_billing_connection(workspace_id, request)
+        .await
+}
+
+pub async fn get_billing_connection(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
+) -> ApiResult<BillingConnectionResponse> {
+    repository
+        .find_billing_connection(workspace_id, connection_id)
+        .await
+}
+
+pub fn billing_capabilities() -> BillingCapabilitiesResponse {
+    BillingCapabilitiesResponse {
+        payment_methods: vec!["CARD".to_string()],
+        supports_setup_session: true,
+        supports_vault: true,
+        supports_off_session_charge: true,
+        supports_webhook: true,
+    }
+}
+
+pub async fn create_payment_method_binding(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    request: &CreatePaymentMethodBindingRequest,
+) -> ApiResult<PaymentMethodBindingResponse> {
+    repository
+        .create_payment_method_binding(workspace_id, request)
+        .await
+}
+
+pub async fn list_payment_method_bindings(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+) -> ApiResult<Vec<PaymentMethodBindingResponse>> {
+    repository.list_payment_method_bindings(workspace_id).await
+}
+
+pub async fn list_unmatched_payments(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+) -> ApiResult<Vec<UnmatchedPaymentCaseResponse>> {
+    repository.list_unmatched_payments(workspace_id).await
+}
+
+fn validate_reference(name: &str, reference: &str) -> ApiResult<()> {
+    if !reference.trim().is_empty() && reference.len() <= 255 {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_billing_reference",
+        format!("{name} {reference:?} must contain 1 to 255 characters"),
+    ))
+}
+
+fn validate_secret_reference(name: &str, reference: &str) -> ApiResult<()> {
+    let variable = reference.strip_prefix("env://").unwrap_or_default();
+    let mut characters = variable.chars();
+    let valid_start = characters
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_');
+    if valid_start
+        && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+        && reference.len() <= 255
+    {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_secret_reference",
+        format!("{name} {reference:?} must use env://VARIABLE without containing a secret"),
+    ))
+}
 
 use crate::services::calendar::cycle_end;
 
@@ -217,88 +444,5 @@ fn validate_connector_capabilities(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-    use crate::repositories::billing_connector::{
-        BillingCapabilities, BillingPaymentMethod, ConnectorCollectionState, ConnectorFuture,
-    };
-
-    struct FakeBillingConnector {
-        capabilities: BillingCapabilities,
-        calls: Arc<Mutex<Vec<CollectionCommand>>>,
-    }
-
-    impl BillingConnector for FakeBillingConnector {
-        fn capabilities(&self) -> BillingCapabilities {
-            self.capabilities.clone()
-        }
-
-        fn start_collection<'a>(&'a self, command: &'a CollectionCommand) -> ConnectorFuture<'a> {
-            let calls = Arc::clone(&self.calls);
-            let command = command.clone();
-            Box::pin(async move {
-                calls.lock().expect("fake calls lock").push(command);
-                Ok(ConnectorCollectionResult {
-                    provider_payment_id: Some("fake-payment-1".to_string()),
-                    state: ConnectorCollectionState::Pending,
-                    failure_code: None,
-                    next_action_url: None,
-                })
-            })
-        }
-    }
-
-    fn command(amount_minor: i64) -> CollectionCommand {
-        CollectionCommand {
-            provider_idempotency_key: "collection-request-1:1".to_string(),
-            payment_method: BillingPaymentMethod::Card,
-            payment_method_reference: "pm_fake".to_string(),
-            amount_minor,
-            currency: "BRL".to_string(),
-        }
-    }
-
-    fn billing_capabilities(methods: Vec<BillingPaymentMethod>) -> BillingCapabilities {
-        BillingCapabilities {
-            payment_methods: methods,
-            supports_setup_session: true,
-            supports_vault: true,
-            supports_off_session_charge: true,
-            supports_webhook: true,
-        }
-    }
-
-    #[tokio::test]
-    async fn fake_billing_connector_receives_stable_collection_command() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let connector = FakeBillingConnector {
-            capabilities: billing_capabilities(vec![BillingPaymentMethod::Card]),
-            calls: Arc::clone(&calls),
-        };
-        let result = start_collection(&connector, &command(1_500))
-            .await
-            .expect("fake collection");
-        assert_eq!(result.state, ConnectorCollectionState::Pending);
-        assert_eq!(calls.lock().expect("fake calls lock").len(), 1);
-    }
-
-    #[tokio::test]
-    async fn unsupported_capability_and_invalid_amount_skip_external_call() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let connector = FakeBillingConnector {
-            capabilities: billing_capabilities(Vec::new()),
-            calls: Arc::clone(&calls),
-        };
-        let capability = start_collection(&connector, &command(1_500))
-            .await
-            .expect_err("unsupported card");
-        assert_eq!(capability.code(), "billing_capability_not_supported");
-        let amount = start_collection(&connector, &command(0))
-            .await
-            .expect_err("zero amount");
-        assert_eq!(amount.code(), "invalid_collection_amount");
-        assert!(calls.lock().expect("fake calls lock").is_empty());
-    }
-}
+#[path = "billing_tests.rs"]
+mod tests;

@@ -158,6 +158,13 @@ impl DatabaseRepository {
         .bind(reason)
         .execute(&mut *transaction)
         .await?;
+        sqlx::query(
+            "UPDATE collection_requests SET status='CANCELED',terminal_reason='PLAN_REVOKED' \
+             WHERE plan_version_id=$1 AND status IN ('SCHEDULED','COLLECTING','PENDING_PAYMENT')",
+        )
+        .bind(plan_id)
+        .execute(&mut *transaction)
+        .await?;
         transaction.commit().await?;
         let products = load_plan_products(&self.pool(), plan_id).await?;
         plan_from_row(&row, products)

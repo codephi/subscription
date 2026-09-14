@@ -34,10 +34,16 @@ Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
   item-wallet meter, statement, and pricing-accumulator routes for usage reads.
 - `/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile` for
   non-destructive item ledger reconciliation.
+- `/v1/workspaces/{workspace_id}/billing-connections` and nested capabilities
+  and setup-session routes for Stripe configuration without persisted secrets.
+- `/v1/workspaces/{workspace_id}/payment-method-bindings` for tokenized cards.
+- customer-plan collection, OnDemand, regularization and paid-upgrade flows.
+- `/v1/billing/webhooks/{connection_id}` for exact-body Stripe signature
+  validation and idempotent payment convergence.
+- `/v1/admin/billing/operations` and the unmatched-payment queue for monitoring.
 
 The provider-neutral Billing foundation defines connector capabilities and the
-normalized collection state machine. No production payment provider is enabled
-until its adapter and signed webhook flow are configured. Collection attempts
+normalized collection state machine. Stripe is the first adapter. Collection attempts
 are persisted before external I/O, use a stable provider idempotency key, and
 preserve uncertain outcomes without an automatic retry.
 
@@ -91,6 +97,8 @@ If you want to override the detected name, pass it explicitly:
    - `MCP_ALLOWED_ORIGINS=*` to keep the MCP endpoint fully open, or provide a comma-separated allowlist if you want to restrict it.
    - `ACCOUNTS_WEBHOOK_SECRET` to verify Accounts event signatures.
    - `OUTBOUND_EVENT_WEBHOOK_URL` and `OUTBOUND_EVENT_WEBHOOK_SECRET` together to enable durable signed event delivery.
+   - Stripe API and webhook secrets in environment variables selected by each
+     BillingConnection's `env://VARIABLE` references.
 4. Run:
    - `cargo run --all-features`
 
@@ -158,10 +166,11 @@ after assertion failures. Docker must be running; the application database is no
 
 The [test matrix](docs/test-matrix.md) preserves individual normative scenarios and
 explicit coverage gaps. A green suite does **not** imply all V1 scenarios are covered.
-Use `bash scripts/check-phase-gate.sh 6` to validate phase 6 and every previous phase;
+Use `bash scripts/check-phase-gate.sh 8` to validate the paid MVP and every previous phase;
 any open matrix row blocks the gate before the full quality checks. `--check-only`
-prints coverage blockers without running Cargo. Phases 5 and 6 have passed their
-coverage gates; Billing remains the next implementation boundary.
+prints coverage blockers without running Cargo. Phases 5–8 have passed their
+coverage gates and complete the paid MVP boundary. Phases 9 and 10 remain
+explicitly deferred in the matrix.
 
 Catalog price validation rejects invalid tier boundaries and accumulation cycles
 without a representable next UTC boundary with HTTP 422. Publication revalidates
@@ -302,10 +311,15 @@ calendar anchor, replace the active cycle and grant one allowance under concurre
 delivery. `POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/renewal-regularizations`
 creates an idempotent manual regularization for a past-due plan using the
 Subscription payment window; confirmation resets the anchor and restores one
-current cycle without retroactive credit. Phase 7 flows still pending are tracked
-in `docs/test-matrix.md`. Confirmed provider payments without a matching local
+current cycle without retroactive credit. Confirmed provider payments without a matching local
 collection are persisted as idempotent operational cases without financial or
 subscription effects.
+
+Phase 8 adds the first production adapter: Stripe SetupIntent and PaymentIntent,
+environment-referenced secrets, signed webhooks, tokenized payment bindings and
+operational views for unmatched payments and externally observed refunds. See
+`docs/runbooks/billing-mvp.md` for uncertain payments, replay and credential
+rotation procedures.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

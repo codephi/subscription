@@ -307,6 +307,10 @@ tokenizado escolhido. Antes da confirmação mantém `PAST_DUE`; depois reinicia
 Pagamento confirmado sem solicitação local abre um caso operacional idempotente,
 preserva a evidência bruta e não altera plano, ciclo, entitlement ou crédito.
 
+Fase concluída em 2026-09-14: cancelamento e revogação encerram cobranças
+pendentes; recorrência `NONE`, OnDemand persistente e upgrade pago sem prorrata
+estão cobertos. O gate acumulado `check-phase-gate.sh 7` está aprovado.
+
 ## Fase 8 — Primeiro conector: Stripe e cartão tokenizado
 
 **Objetivo:** habilitar planos pagos e recargas sem armazenar dados sensíveis.
@@ -322,6 +326,12 @@ Entregas:
 **Critério de saída:** eventos duplicados, atrasados ou fora de ordem não
 duplicam cobrança, plano, ciclo ou crédito; adicionar outro conector não exige
 alterar contratos ou invariantes de Subscription e Wallet.
+
+Fase concluída em 2026-09-14: conexões, capacidades, setup e vínculos
+tokenizados estão expostos; o adaptador Stripe cria PaymentIntent idempotente e
+o webhook assinado normaliza confirmação, falha e ação adicional. Pagamentos
+não correspondidos e estornos externos são observados sem efeito automático.
+O gate acumulado `check-phase-gate.sh 8` está aprovado.
 
 ## Fase 9 — Promoções e ajustes administrativos
 

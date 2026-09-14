@@ -39,6 +39,18 @@ pub struct ConnectorCollectionResult {
     pub next_action_url: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SetupSessionCommand {
+    pub customer_reference: String,
+    pub return_url: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SetupSessionResult {
+    pub provider_setup_id: String,
+    pub client_secret: String,
+}
+
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("billing connector rejected collection: {code}: {message}")]
 pub struct BillingConnectorError {
@@ -52,10 +64,27 @@ pub type ConnectorFuture<'a> = Pin<
     Box<dyn Future<Output = Result<ConnectorCollectionResult, BillingConnectorError>> + Send + 'a>,
 >;
 
+pub type SetupSessionFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<SetupSessionResult, BillingConnectorError>> + Send + 'a>>;
+
 pub trait BillingConnector: Send + Sync {
     /// Declares payment methods supported before any external request is made.
     fn capabilities(&self) -> BillingCapabilities;
 
     /// Starts the single provider attempt represented by the stable idempotency key.
     fn start_collection<'a>(&'a self, command: &'a CollectionCommand) -> ConnectorFuture<'a>;
+
+    fn create_setup_session<'a>(
+        &'a self,
+        _command: &'a SetupSessionCommand,
+    ) -> SetupSessionFuture<'a> {
+        Box::pin(async {
+            Err(BillingConnectorError {
+                code: "setup_session_not_supported".to_string(),
+                message: "connector does not implement setup sessions".to_string(),
+                retryable: false,
+                outcome_uncertain: false,
+            })
+        })
+    }
 }

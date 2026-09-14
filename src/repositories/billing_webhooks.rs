@@ -6,7 +6,7 @@ use crate::{
     repositories::billing_confirmation::ConfirmedBillingWebhook,
 };
 
-pub(super) async fn insert_webhook_inbox(
+pub(crate) async fn insert_webhook_inbox(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<bool> {
@@ -26,7 +26,7 @@ pub(super) async fn insert_webhook_inbox(
     Ok(result.rows_affected() == 1)
 }
 
-pub(super) async fn validate_duplicate_payload(
+pub(crate) async fn validate_duplicate_payload(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<()> {
@@ -49,7 +49,7 @@ pub(super) async fn validate_duplicate_payload(
     ))
 }
 
-pub(super) async fn mark_webhook(
+pub(crate) async fn mark_webhook(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
     result: &str,

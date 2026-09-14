@@ -1,5 +1,6 @@
 pub mod admission;
 pub mod billing;
+pub mod billing_dispatcher;
 pub mod billing_state;
 pub mod calendar;
 pub mod catalog;
@@ -10,6 +11,7 @@ pub mod integrations;
 pub mod outbox;
 pub mod plans;
 pub mod signatures;
+pub mod stripe_webhooks;
 pub mod subscription_calendar;
 pub mod usage;
 pub mod wallets;
