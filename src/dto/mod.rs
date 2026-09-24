@@ -1,3 +1,4 @@
+pub mod admin_queries;
 pub mod admission;
 pub mod billing;
 pub mod catalog;

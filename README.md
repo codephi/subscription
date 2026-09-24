@@ -1,5 +1,31 @@
 # subscription
 
+## Painel administrativo
+
+O painel de leitura fica em [`admin-ui/`](admin-ui/). Ele mostra indicadores de
+Billing, lista workspaces e consulta planos, ciclos, carteira, créditos e consumo.
+Foi criado para acesso por rede local/VPN e ainda não tem login; mantenha também
+a API restrita a essa rede.
+
+Para executar localmente com a API na porta 3000:
+
+```sh
+cp .env.example .env
+cargo run
+cd admin-ui
+npm ci
+npm run dev
+```
+
+O Vite encaminha `/v1` para `http://127.0.0.1:3000`. Para outra origem, configure
+`VITE_API_BASE_URL` no frontend e `APP_CORS_ALLOW_ORIGINS` na API. Nunca coloque
+segredos Stripe em variáveis `VITE_`. Rode `npm run api:types` em `admin-ui/`
+após mudar contratos HTTP; o comando exporta `/openapi.json` para o snapshot e
+regenera `src/api/generated.ts`. Verifique com `npm test` e `npm run build`.
+
+O [plano do frontend](docs/plano-frontend-administrativo.md) registra as fases
+concluídas e as próximas entregas.
+
 Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
 - `/health` as a liveness endpoint that returns `200 OK` with a JSON status payload.

@@ -1,4 +1,5 @@
 //! Persistence and integration-facing structs live here.
+pub mod admin_queries;
 pub mod admission;
 
 pub mod billing_attempts;

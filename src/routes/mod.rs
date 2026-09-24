@@ -6,6 +6,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{config::AppConfig, state::AppState};
 
+pub mod admin_queries;
 pub mod admission;
 pub mod billing;
 pub mod catalog;
@@ -23,7 +24,7 @@ pub mod wallets;
 #[openapi(
     info(
         title = env!("CARGO_PKG_NAME"),
-        description = "Starter API with health and echo features.",
+        description = "Subscription, credits, usage, billing, and administrative operations API.",
         version = env!("CARGO_PKG_VERSION"),
         license(name = "Apache-2.0", url = "https://www.apache.org/licenses/LICENSE-2.0.html")
     ),
@@ -42,17 +43,7 @@ pub mod wallets;
 struct ApiDoc;
 
 pub fn create_router(state: AppState, config: &AppConfig) -> Router {
-    let (api_router, api) = utoipa_axum::router::OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .merge(system::router())
-        .merge(internal::router())
-        .merge(catalog::router())
-        .merge(credits::router())
-        .merge(plans::router())
-        .merge(admission::router())
-        .merge(billing::router())
-        .merge(usage::router())
-        .merge(wallets::router())
-        .split_for_parts();
+    let (api_router, api) = api_router().split_for_parts();
 
     let api_router = api_router.merge(SwaggerUi::new("/docs").url("/openapi.json", api));
 
@@ -76,4 +67,40 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
     };
 
     api_router.with_state(state)
+}
+
+/// Return the generated REST contract; e.g. `openapi_document().to_json()`.
+pub fn openapi_document() -> utoipa::openapi::OpenApi {
+    api_router().split_for_parts().1
+}
+
+fn api_router() -> utoipa_axum::router::OpenApiRouter<AppState> {
+    utoipa_axum::router::OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .merge(system::router())
+        .merge(internal::router())
+        .merge(catalog::router())
+        .merge(credits::router())
+        .merge(plans::router())
+        .merge(admission::router())
+        .merge(admin_queries::router())
+        .merge(billing::router())
+        .merge(usage::router())
+        .merge(wallets::router())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openapi_document;
+
+    #[test]
+    fn administrative_reads_are_in_openapi() {
+        let paths = openapi_document().paths;
+        assert!(paths.paths.contains_key("/v1/admin/workspaces"));
+        assert!(paths
+            .paths
+            .contains_key("/v1/admin/workspaces/{workspace_id}"));
+        assert!(paths
+            .paths
+            .contains_key("/v1/admin/workspaces/{workspace_id}/customer-plans"));
+    }
 }

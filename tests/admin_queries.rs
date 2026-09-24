@@ -1,0 +1,108 @@
+mod support;
+
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use tower::ServiceExt;
+use uuid::Uuid;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn admin_workspace_and_plan_reads_page_without_cross_workspace_data() {
+    let (router, pool) = support::setup_router_with_options(false, None).await;
+    let first = Uuid::from_u128(1);
+    let second = Uuid::from_u128(2);
+    for id in [first, second] {
+        insert_workspace(&pool, id).await;
+    }
+    let first_page = get_json(&router, "/v1/admin/workspaces?limit=1").await;
+    assert_eq!(first_page["items"][0]["workspace_id"], first.to_string());
+    assert_eq!(first_page["next_cursor"], first.to_string());
+    let next = get_json(
+        &router,
+        &format!("/v1/admin/workspaces?limit=1&cursor={first}"),
+    )
+    .await;
+    assert_eq!(next["items"][0]["workspace_id"], second.to_string());
+    assert!(next["next_cursor"].is_null());
+
+    let mut plan_ids = [
+        insert_customer_plan(&pool, first).await,
+        insert_customer_plan(&pool, first).await,
+    ];
+    plan_ids.sort();
+    let plans = get_json(
+        &router,
+        &format!("/v1/admin/workspaces/{first}/customer-plans?limit=1"),
+    )
+    .await;
+    assert_eq!(
+        plans["items"][0]["customer_plan_id"],
+        plan_ids[0].to_string()
+    );
+    assert_eq!(plans["next_cursor"], plan_ids[0].to_string());
+    let second_plan_page = get_json(
+        &router,
+        &format!(
+            "/v1/admin/workspaces/{first}/customer-plans?limit=1&cursor={}",
+            plan_ids[0]
+        ),
+    )
+    .await;
+    assert_eq!(
+        second_plan_page["items"][0]["customer_plan_id"],
+        plan_ids[1].to_string()
+    );
+    assert!(second_plan_page["next_cursor"].is_null());
+    let other = get_json(
+        &router,
+        &format!("/v1/admin/workspaces/{second}/customer-plans"),
+    )
+    .await;
+    assert_eq!(other["items"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        get_status(&router, "/v1/admin/workspaces?limit=0").await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        get_status(&router, &format!("/v1/admin/workspaces/{}", Uuid::new_v4())).await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+async fn insert_workspace(pool: &sqlx::PgPool, id: Uuid) {
+    sqlx::query("INSERT INTO workspace_projections (workspace_id,operational_status,external_sequence,external_occurred_at,last_event_id) VALUES ($1,'ACTIVE',2,now(),$2)")
+        .bind(id).bind(Uuid::new_v4()).execute(pool).await.unwrap();
+}
+
+async fn insert_customer_plan(pool: &sqlx::PgPool, workspace_id: Uuid) -> Uuid {
+    let subscription_id = Uuid::new_v4();
+    let plan_id = Uuid::new_v4();
+    let customer_plan_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO subscriptions (subscription_id,name,subscription_model) VALUES ($1,'Test','CREDIT_STRICT')")
+        .bind(subscription_id).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO subscription_plan_versions (plan_version_id,subscription_id,name,commercial_model,recurrence,admission_policy,granted_credit_units) VALUES ($1,$2,'Test','FREE','MONTHLY','OPEN',0)")
+        .bind(plan_id).bind(subscription_id).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO customer_plans (customer_plan_id,customer_id,plan_version_id,commercial_status,activation_status,renewal_status,anchor_at) VALUES ($1,$2,$3,'ACTIVE','ACTIVATED','CURRENT',now())")
+        .bind(customer_plan_id).bind(workspace_id).bind(plan_id).execute(pool).await.unwrap();
+    customer_plan_id
+}
+
+async fn get_json(router: &axum::Router, uri: &str) -> serde_json::Value {
+    let response = router
+        .clone()
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    support::response_json(response).await
+}
+
+async fn get_status(router: &axum::Router, uri: &str) -> StatusCode {
+    router
+        .clone()
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
