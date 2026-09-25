@@ -8,10 +8,14 @@ use crate::{config::AppConfig, state::AppState};
 
 pub mod admin_queries;
 pub mod admission;
+pub mod audit_admin;
 pub mod billing;
+pub mod billing_investigation;
 pub mod catalog;
+pub mod catalog_admin;
 mod cors;
 pub mod credits;
+pub mod inbox_admin;
 pub mod internal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
@@ -78,12 +82,16 @@ fn api_router() -> utoipa_axum::router::OpenApiRouter<AppState> {
     utoipa_axum::router::OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(system::router())
         .merge(internal::router())
+        .merge(inbox_admin::router())
         .merge(catalog::router())
+        .merge(catalog_admin::router())
         .merge(credits::router())
         .merge(plans::router())
         .merge(admission::router())
+        .merge(audit_admin::router())
         .merge(admin_queries::router())
         .merge(billing::router())
+        .merge(billing_investigation::router())
         .merge(usage::router())
         .merge(wallets::router())
 }

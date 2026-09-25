@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { OverviewPage } from "./overview-page";
 
-vi.mock("@/api/client", () => ({
+vi.mock("@/api/billing-api", () => ({
   getOperations: vi.fn().mockResolvedValue({
     pending_collections: 2,
     webhook_failures: 0,

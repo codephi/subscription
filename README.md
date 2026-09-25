@@ -2,8 +2,9 @@
 
 ## Painel administrativo
 
-O painel de leitura fica em [`admin-ui/`](admin-ui/). Ele mostra indicadores de
-Billing, lista workspaces e consulta planos, ciclos, carteira, créditos e consumo.
+O painel interno fica em [`admin-ui/`](admin-ui/). Ele mostra indicadores e
+evidências de Billing, catálogo, auditoria e detalhes de workspaces, planos,
+carteira, créditos e consumo. Há formulários para ofertas e ações operacionais.
 Foi criado para acesso por rede local/VPN e ainda não tem login; mantenha também
 a API restrita a essa rede.
 
@@ -21,10 +22,19 @@ O Vite encaminha `/v1` para `http://127.0.0.1:3000`. Para outra origem, configur
 `VITE_API_BASE_URL` no frontend e `APP_CORS_ALLOW_ORIGINS` na API. Nunca coloque
 segredos Stripe em variáveis `VITE_`. Rode `npm run api:types` em `admin-ui/`
 após mudar contratos HTTP; o comando exporta `/openapi.json` para o snapshot e
-regenera `src/api/generated.ts`. Verifique com `npm test` e `npm run build`.
+regenera `src/api/generated.ts`. Verifique com `npm test`, `npm run test:e2e`
+e `npm run build`. O teste ponta a ponta usa Playwright com respostas de API
+simuladas; na primeira execução, rode `npx playwright install chromium`.
 
-O [plano do frontend](docs/plano-frontend-administrativo.md) registra as fases
-concluídas e as próximas entregas.
+As consultas novas incluem `/v1/admin/billing/records/{kind}` e detalhe,
+`/v1/admin/catalog/{kind}` e `/v1/admin/audit-events`, paginadas por UUID.
+Filtros de Billing aceitam workspace, estado, cobrança e correlação. Operações
+de crédito e transição preservam a chave de idempotência no navegador até a
+resolução da tentativa. O painel usa apenas referências de ator digitadas pelo
+operador; isso não representa autenticação.
+
+O [plano do frontend](docs/plano-frontend-administrativo.md) registra o escopo
+entregue e os limites operacionais atuais.
 
 Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 

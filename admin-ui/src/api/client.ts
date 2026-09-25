@@ -1,19 +1,36 @@
 import createClient from "openapi-fetch";
 import type { paths } from "./generated";
 
-const api = createClient<paths>({
+export const api = createClient<paths>({
   baseUrl: import.meta.env.VITE_API_BASE_URL ?? "",
 });
 
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly existingOperation?: {
+    workspace_id: string;
+    operation_kind: string;
+    resource_id: string;
+    transaction_id: string;
+  };
 
-  constructor(status: number, code: string, message: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    existingOperation?: {
+      workspace_id: string;
+      operation_kind: string;
+      resource_id: string;
+      transaction_id: string;
+    },
+  ) {
     super(message);
     this.name = "ApiRequestError";
     this.status = status;
     this.code = code;
+    this.existingOperation = existingOperation;
   }
 }
 
@@ -24,18 +41,26 @@ export function unwrapResponse<T>(response: {
 }): T {
   if (response.data !== undefined) return response.data;
   const body = response.error as
-    { error?: { code?: string; message?: string } } | undefined;
+    | {
+        error?: {
+          code?: string;
+          message?: string;
+          existing_operation?: {
+            workspace_id: string;
+            operation_kind: string;
+            resource_id: string;
+            transaction_id: string;
+          };
+        };
+      }
+    | undefined;
   throw new ApiRequestError(
     response.response.status,
     body?.error?.code ?? "request_failed",
     body?.error?.message ??
       `A API respondeu com HTTP ${response.response.status}.`,
+    body?.error?.existing_operation,
   );
-}
-
-/** Read operational counters; e.g. `getOperations()` in the overview query. */
-export async function getOperations() {
-  return unwrapResponse(await api.GET("/v1/admin/billing/operations"));
 }
 
 /** Page workspace projections; e.g. `listWorkspaces()` for the search table. */
@@ -125,3 +150,42 @@ export async function getItemStatement(
     ),
   );
 }
+
+export {
+  createBillingConnection,
+  getBillingConfig,
+  getBillingRecord,
+  getOperations,
+  grantDirectCredit,
+  listBillingRecords,
+  reconcileCredits,
+  reconcileItemUsage,
+  reconcileProvisioning,
+  replayOutbox,
+  updateBillingConfig,
+} from "./billing-api";
+export {
+  createAdmissionPolicy,
+  createItem,
+  createOnDemandPlan,
+  createProduct,
+  createSubscription,
+  createSubscriptionPlan,
+  createTieredPrice,
+  createUnitPrice,
+  getCatalogDetail,
+  listCatalogEntries,
+  publishPriceVersion,
+  revokeSubscriptionPlan,
+} from "./catalog-api";
+export {
+  cancelCustomerPlan,
+  getCustomerPlan,
+  revokeCustomerPlan,
+  transitionCustomerPlan,
+} from "./plan-api";
+export {
+  listAuditEvents,
+  listIntegrationInbox,
+  replayInbox,
+} from "./operations-api";

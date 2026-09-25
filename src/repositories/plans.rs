@@ -125,6 +125,16 @@ impl DatabaseRepository {
         Ok(on_demand_from_row(&row))
     }
 
+    /// Read an on-demand offer; e.g. `repo.find_on_demand_plan(id).await`.
+    pub async fn find_on_demand_plan(&self, id: Uuid) -> ApiResult<OnDemandPlanResponse> {
+        let row = sqlx::query("SELECT * FROM on_demand_plans WHERE on_demand_plan_id=$1")
+            .bind(id)
+            .fetch_optional(&self.pool())
+            .await?
+            .ok_or_else(|| missing("on_demand_plan", id))?;
+        Ok(on_demand_from_row(&row))
+    }
+
     pub async fn revoke_subscription_plan(
         &self,
         plan_id: Uuid,

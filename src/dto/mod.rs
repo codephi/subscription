@@ -1,12 +1,16 @@
 pub mod admin_queries;
 pub mod admission;
+pub mod audit_admin;
 pub mod billing;
+pub mod billing_investigation;
 pub mod catalog;
+pub mod catalog_admin;
 pub mod credits;
 pub mod echo;
 pub mod events;
 pub mod health;
 pub mod idempotency;
+pub mod inbox_admin;
 pub mod plans;
 pub mod units;
 pub mod usage;

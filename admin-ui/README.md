@@ -1,11 +1,12 @@
 # Subscription Admin UI
 
-Painel interno de consulta do serviço Subscription. Veja o [plano completo](../docs/plano-frontend-administrativo.md) e as [instruções de execução](../README.md#painel-administrativo).
+Painel interno do serviço Subscription. Veja o [plano completo](../docs/plano-frontend-administrativo.md) e as [instruções de execução](../README.md#painel-administrativo).
 
 ```sh
 npm ci
 npm run dev
 npm test
+npm run test:e2e
 npm run build
 ```
 

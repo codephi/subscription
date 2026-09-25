@@ -12,7 +12,7 @@ vi.mock("@/api/client", () => ({
   listWorkspaces: vi.fn().mockResolvedValue({
     items: [
       {
-          workspace_id: "00000000-0000-4000-8000-000000000001",
+        workspace_id: "00000000-0000-4000-8000-000000000001",
         operational_status: "ACTIVE",
         external_sequence: 2,
         updated_at: "2026-09-24T12:00:00Z",

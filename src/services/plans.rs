@@ -99,6 +99,14 @@ pub async fn create_on_demand_plan(
         .await
 }
 
+/// Read an on-demand offer; e.g. `get_on_demand_plan(&repo, id).await`.
+pub async fn get_on_demand_plan(
+    repository: &DatabaseRepository,
+    id: Uuid,
+) -> ApiResult<OnDemandPlanResponse> {
+    repository.find_on_demand_plan(id).await
+}
+
 pub async fn create_customer_plan(
     repository: &DatabaseRepository,
     workspace_id: Uuid,

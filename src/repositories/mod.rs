@@ -1,6 +1,7 @@
 //! Persistence and integration-facing structs live here.
 pub mod admin_queries;
 pub mod admission;
+pub mod audit_admin;
 
 pub mod billing_attempts;
 pub mod billing_confirmation;
@@ -8,6 +9,7 @@ pub mod billing_connections;
 pub mod billing_connector;
 pub mod billing_expiration;
 pub mod billing_initial;
+pub mod billing_investigation;
 pub mod billing_on_demand;
 pub mod billing_on_demand_confirmation;
 pub mod billing_operations;
@@ -18,11 +20,13 @@ pub mod billing_unmatched;
 pub mod billing_upgrade;
 mod billing_webhooks;
 pub mod catalog;
+pub mod catalog_admin;
 mod catalog_rows;
 mod credit_rows;
 mod credit_writes;
 pub mod credits;
 pub mod database;
+pub mod inbox_admin;
 pub mod outbox;
 pub(crate) mod plan_cycles;
 mod plan_lifecycle;

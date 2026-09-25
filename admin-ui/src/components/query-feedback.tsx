@@ -31,6 +31,13 @@ export function QueryError({ error }: { error: Error }) {
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription>
         {apiError ? `${apiError.code}: ${apiError.message}` : error.message}
+        {apiError?.existingOperation && (
+          <p className="mt-2 break-all font-mono text-xs">
+            Operação existente: {apiError.existingOperation.operation_kind} ·{" "}
+            {apiError.existingOperation.resource_id} · transação{" "}
+            {apiError.existingOperation.transaction_id}
+          </p>
+        )}
       </AlertDescription>
     </Alert>
   );

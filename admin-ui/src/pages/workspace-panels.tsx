@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { reconcileItemUsage } from "@/api/billing-api";
 import {
   getItemMeter,
   getItemStatement,
@@ -76,12 +78,13 @@ export function PlansPanel({ workspaceId }: { workspaceId: string }) {
                   <TableRow key={plan.customer_plan_id}>
                     <TableCell>
                       <div className="flex flex-col">
-                        <span
-                          className="font-mono text-xs"
+                        <Link
+                          className="font-mono text-xs text-primary hover:underline"
                           title={plan.customer_plan_id}
+                          to={`/workspaces/${workspaceId}/plans/${plan.customer_plan_id}/actions`}
                         >
                           {shortId(plan.customer_plan_id)}
-                        </span>
+                        </Link>
                         <span
                           className="text-xs text-muted-foreground"
                           title={plan.plan_version_id}
@@ -294,8 +297,27 @@ function SelectedItemUsage({
     queryKey: ["usage", workspaceId, itemId, cursor],
     queryFn: () => getItemStatement(workspaceId, itemId, cursor),
   });
+  const reconciliation = useMutation({
+    mutationFn: () => reconcileItemUsage(workspaceId, itemId),
+  });
   return (
     <div className="flex flex-col gap-4 border-t pt-5">
+      <div>
+        <Button
+          variant="outline"
+          disabled={reconciliation.isPending}
+          onClick={() => reconciliation.mutate()}
+        >
+          Conferir consumo
+        </Button>
+        {reconciliation.error && <QueryError error={reconciliation.error} />}
+        {reconciliation.data && (
+          <p role="status" className="mt-2 text-sm">
+            Consistência do medidor:{" "}
+            {reconciliation.data.consistent ? "confirmada" : "divergente"}.
+          </p>
+        )}
+      </div>
       {meter.isLoading && <QueryLoading />}
       {meter.error && <QueryError error={meter.error} />}
       {meter.data && (

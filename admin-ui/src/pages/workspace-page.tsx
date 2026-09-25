@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { getProvisioning, getWallets, getWorkspace } from "@/api/client";
 import { QueryError, QueryLoading } from "@/components/query-feedback";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -59,6 +60,13 @@ function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
             {workspaceId}
           </h1>
         </div>
+        <Button
+          variant="outline"
+          nativeButton={false}
+          render={<Link to={`/workspaces/${workspaceId}/actions`} />}
+        >
+          Ações administrativas
+        </Button>
       </header>
       {workspace.isLoading && <QueryLoading />}
       {workspace.error && <QueryError error={workspace.error} />}

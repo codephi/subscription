@@ -27,6 +27,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_subscription_plan))
         .routes(routes!(revoke_subscription_plan))
         .routes(routes!(create_on_demand_plan))
+        .routes(routes!(get_on_demand_plan))
         .routes(routes!(create_customer_plan))
         .routes(routes!(get_customer_plan))
         .routes(routes!(cancel_customer_plan))
@@ -105,6 +106,18 @@ async fn create_on_demand_plan(
     Ok((
         StatusCode::CREATED,
         Json(plans::create_on_demand_plan(&state.database(), subscription_id, request).await?),
+    ))
+}
+
+#[utoipa::path(get, path = "/v1/on-demand-plans/{on_demand_plan_id}", tag = "Subscriptions",
+    params(("on_demand_plan_id" = Uuid, Path)),
+    responses((status = 200, body = OnDemandPlanResponse), (status = 404, body = ErrorResponse)))]
+async fn get_on_demand_plan(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<OnDemandPlanResponse>> {
+    Ok(Json(
+        plans::get_on_demand_plan(&state.database(), id).await?,
     ))
 }
 
