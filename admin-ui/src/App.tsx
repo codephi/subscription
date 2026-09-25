@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import {
   QueryCache,
   QueryClient,
@@ -15,20 +16,69 @@ import {
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { OverviewPage } from "@/pages/overview-page";
-import { WorkspaceListPage } from "@/pages/workspace-list-page";
-import { WorkspacePage } from "@/pages/workspace-page";
-import { BillingListPage } from "@/pages/billing-list-page";
-import { BillingDetailPage } from "@/pages/billing-detail-page";
-import { CatalogListPage } from "@/pages/catalog-list-page";
-import { CatalogDetailPage } from "@/pages/catalog-detail-page";
-import { CatalogCreatePage } from "@/pages/catalog-create-page";
-import { WorkspaceActionsPage } from "@/pages/workspace-actions-page";
-import { PlanActionsPage } from "@/pages/plan-actions-page";
-import { AuditPage } from "@/pages/audit-page";
-import { InboxPage } from "@/pages/inbox-page";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
 import { logFrontendError } from "@/lib/telemetry";
+
+const OverviewPage = lazy(() =>
+  import("@/pages/overview-page").then((module) => ({
+    default: module.OverviewPage,
+  })),
+);
+const WorkspaceListPage = lazy(() =>
+  import("@/pages/workspace-list-page").then((module) => ({
+    default: module.WorkspaceListPage,
+  })),
+);
+const WorkspacePage = lazy(() =>
+  import("@/pages/workspace-page").then((module) => ({
+    default: module.WorkspacePage,
+  })),
+);
+const BillingListPage = lazy(() =>
+  import("@/pages/billing-list-page").then((module) => ({
+    default: module.BillingListPage,
+  })),
+);
+const BillingDetailPage = lazy(() =>
+  import("@/pages/billing-detail-page").then((module) => ({
+    default: module.BillingDetailPage,
+  })),
+);
+const CatalogListPage = lazy(() =>
+  import("@/pages/catalog-list-page").then((module) => ({
+    default: module.CatalogListPage,
+  })),
+);
+const CatalogDetailPage = lazy(() =>
+  import("@/pages/catalog-detail-page").then((module) => ({
+    default: module.CatalogDetailPage,
+  })),
+);
+const CatalogCreatePage = lazy(() =>
+  import("@/pages/catalog-create-page").then((module) => ({
+    default: module.CatalogCreatePage,
+  })),
+);
+const WorkspaceActionsPage = lazy(() =>
+  import("@/pages/workspace-actions-page").then((module) => ({
+    default: module.WorkspaceActionsPage,
+  })),
+);
+const PlanActionsPage = lazy(() =>
+  import("@/pages/plan-actions-page").then((module) => ({
+    default: module.PlanActionsPage,
+  })),
+);
+const AuditPage = lazy(() =>
+  import("@/pages/audit-page").then((module) => ({
+    default: module.AuditPage,
+  })),
+);
+const InboxPage = lazy(() =>
+  import("@/pages/inbox-page").then((module) => ({
+    default: module.InboxPage,
+  })),
+);
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -88,27 +138,32 @@ function Shell() {
         </div>
       </aside>
       <main className="mx-auto w-full max-w-7xl p-5 md:p-8 lg:p-10">
-        <Routes>
-          <Route path="/" element={<OverviewPage />} />
-          <Route path="/workspaces" element={<WorkspaceListPage />} />
-          <Route path="/workspaces/:workspaceId" element={<WorkspacePage />} />
-          <Route
-            path="/workspaces/:workspaceId/actions"
-            element={<WorkspaceActionsPage />}
-          />
-          <Route
-            path="/workspaces/:workspaceId/plans/:planId/actions"
-            element={<PlanActionsPage />}
-          />
-          <Route path="/billing/:kind" element={<BillingListPage />} />
-          <Route path="/billing/:kind/:id" element={<BillingDetailPage />} />
-          <Route path="/catalog/:kind" element={<CatalogListPage />} />
-          <Route path="/catalog/:kind/new" element={<CatalogCreatePage />} />
-          <Route path="/catalog/:kind/:id" element={<CatalogDetailPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/inbox" element={<InboxPage />} />
-          <Route path="*" element={<div>Página não encontrada.</div>} />
-        </Routes>
+        <Suspense fallback={<p role="status">Carregando página…</p>}>
+          <Routes>
+            <Route path="/" element={<OverviewPage />} />
+            <Route path="/workspaces" element={<WorkspaceListPage />} />
+            <Route
+              path="/workspaces/:workspaceId"
+              element={<WorkspacePage />}
+            />
+            <Route
+              path="/workspaces/:workspaceId/actions"
+              element={<WorkspaceActionsPage />}
+            />
+            <Route
+              path="/workspaces/:workspaceId/plans/:planId/actions"
+              element={<PlanActionsPage />}
+            />
+            <Route path="/billing/:kind" element={<BillingListPage />} />
+            <Route path="/billing/:kind/:id" element={<BillingDetailPage />} />
+            <Route path="/catalog/:kind" element={<CatalogListPage />} />
+            <Route path="/catalog/:kind/new" element={<CatalogCreatePage />} />
+            <Route path="/catalog/:kind/:id" element={<CatalogDetailPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/inbox" element={<InboxPage />} />
+            <Route path="*" element={<div>Página não encontrada.</div>} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
