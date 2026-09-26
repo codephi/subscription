@@ -64,7 +64,20 @@ pub async fn process_stripe_webhook(
             format!("billing connection {connection_id} must be an ACTIVE STRIPE connection"),
         ));
     }
-    let secret = billing::resolve_secret(&configuration.webhook_secret_reference)?;
+    if configuration.webhook_secret_reference.is_empty() {
+        return Err(ApiError::conflict(
+            "billing_webhook_not_configured",
+            format!("billing connection {connection_id} has no configured webhook secret"),
+        ));
+    }
+    let secret = billing::resolve_connection_secret(
+        repository,
+        configuration.workspace_id,
+        connection_id,
+        "stripe_webhook",
+        &configuration.webhook_secret_reference,
+        configuration.managed,
+    )?;
     verify_stripe_signature(signature, payload, &secret, Utc::now())?;
     let event: StripeEvent = serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
     if event.event_type == "charge.refunded" {

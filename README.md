@@ -93,7 +93,10 @@ Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 - `/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile` for
   non-destructive item ledger reconciliation.
 - `/v1/workspaces/{workspace_id}/billing-connections` and nested capabilities
-  and setup-session routes for Stripe configuration without persisted secrets.
+  and setup-session routes for legacy environment-referenced connections.
+- `/v1/admin/integrations/providers` and
+  `/v1/admin/workspaces/{workspace_id}/integrations` for provider discovery,
+  encrypted Stripe credential setup, rotation and connection tests.
 - `/v1/workspaces/{workspace_id}/payment-method-bindings` for tokenized cards.
 - customer-plan collection, OnDemand, regularization and paid-upgrade flows.
 - `/v1/billing/webhooks/{connection_id}` for exact-body Stripe signature
@@ -374,7 +377,7 @@ collection are persisted as idempotent operational cases without financial or
 subscription effects.
 
 Phase 8 adds the first production adapter: Stripe SetupIntent and PaymentIntent,
-environment-referenced secrets, signed webhooks, tokenized payment bindings and
+environment-referenced legacy secrets, encrypted workspace credentials, signed webhooks, tokenized payment bindings and
 operational views for unmatched payments and externally observed refunds. See
 `docs/runbooks/billing-mvp.md` for uncertain payments, replay and credential
 rotation procedures.

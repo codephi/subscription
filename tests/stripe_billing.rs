@@ -36,6 +36,97 @@ use tokio::{
 
 use usage_fixture::setup_usage;
 
+struct EnvironmentValue {
+    name: String,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvironmentValue {
+    fn set(name: &str, value: &str) -> Self {
+        let previous = std::env::var_os(name);
+        std::env::set_var(name, value);
+        Self {
+            name: name.into(),
+            previous,
+        }
+    }
+}
+
+impl Drop for EnvironmentValue {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            std::env::set_var(&self.name, previous);
+        } else {
+            std::env::remove_var(&self.name);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_connection() {
+    let fixture = setup_usage(1, 1, 0).await;
+    let _key = EnvironmentValue::set(
+        "BILLING_CREDENTIAL_ENCRYPTION_KEY",
+        "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+    );
+    let repository =
+        subscription::repositories::database::DatabaseRepository::new(fixture.repository.pool())
+            .with_credential_vault()
+            .expect("configure credential vault");
+    let integration = repository
+        .create_stripe_integration(
+            fixture.workspace_id,
+            "acct_managed_test",
+            "TEST",
+            None,
+            "sk_test_managed_secret",
+        )
+        .await
+        .unwrap();
+    assert_eq!(integration.status, "PENDING_SETUP");
+    let stored: String = sqlx::query_scalar(
+        "SELECT secret_reference FROM billing_connections WHERE billing_connection_id=$1",
+    )
+    .bind(integration.billing_connection_id)
+    .fetch_one(&repository.pool())
+    .await
+    .unwrap();
+    assert!(!stored.contains("sk_test_managed_secret"));
+    assert_eq!(
+        repository
+            .credential_vault()
+            .unwrap()
+            .open(
+                fixture.workspace_id,
+                integration.billing_connection_id,
+                "stripe_api",
+                &stored,
+            )
+            .unwrap(),
+        "sk_test_managed_secret"
+    );
+
+    let configured = repository
+        .update_stripe_integration(
+            fixture.workspace_id,
+            integration.billing_connection_id,
+            integration.configuration_version,
+            None,
+            Some("whsec_managed_test"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(configured.status, "ACTIVE");
+    assert!(configured.webhook_secret_configured);
+    let summaries = repository
+        .list_integrations(fixture.workspace_id)
+        .await
+        .unwrap();
+    let public_summary = serde_json::to_string(&summaries).unwrap();
+    assert!(!public_summary.contains("whsec_managed_test"));
+    assert!(!public_summary.contains("sk_test_managed_secret"));
+}
+
 struct FakeStripeServer {
     address: std::net::SocketAddr,
     received: Arc<Mutex<String>>,
@@ -339,6 +430,7 @@ async fn stripe_payment_intent_uses_stable_idempotency_and_domain_metadata() {
                 .into(),
             payment_method: BillingPaymentMethod::Card,
             payment_method_reference: "pm_test".into(),
+            customer_reference: Some("cus_test".into()),
             amount_minor: 1500,
             currency: "BRL".into(),
         })

@@ -1,5 +1,64 @@
 import { api, unwrapResponse } from "./client";
 
+/** List the available billing providers; e.g. `listIntegrationProviders()`. */
+export async function listIntegrationProviders() {
+  return unwrapResponse(await api.GET("/v1/admin/integrations/providers"));
+}
+
+/** List workspace integration summaries without secret values. */
+export async function listWorkspaceIntegrations(workspaceId: string) {
+  return unwrapResponse(
+    await api.GET("/v1/admin/workspaces/{workspace_id}/integrations", {
+      params: { path: { workspace_id: workspaceId } },
+    }),
+  );
+}
+
+/** Configure a Stripe account; secrets are sent directly to the API. */
+export async function createStripeIntegration(
+  workspaceId: string,
+  body: {
+    secret_key: string;
+    environment: string;
+    existing_customer_reference?: string | null;
+  },
+) {
+  return unwrapResponse(
+    await api.POST("/v1/admin/workspaces/{workspace_id}/integrations", {
+      params: { path: { workspace_id: workspaceId } },
+      body,
+    }),
+  );
+}
+
+/** Save webhook configuration or rotate a Stripe API key. */
+export async function updateStripeIntegration(
+  workspaceId: string,
+  connectionId: string,
+  body: {
+    expected_version: number;
+    secret_key?: string;
+    webhook_secret?: string;
+  },
+) {
+  return unwrapResponse(
+    await api.PATCH(
+      "/v1/admin/workspaces/{workspace_id}/integrations/{connection_id}",
+      { params: { path: { workspace_id: workspaceId, connection_id: connectionId } }, body },
+    ),
+  );
+}
+
+/** Test saved Stripe credentials; e.g. `testStripeIntegration(workspaceId, id)`. */
+export async function testStripeIntegration(workspaceId: string, connectionId: string) {
+  return unwrapResponse(
+    await api.POST(
+      "/v1/admin/workspaces/{workspace_id}/integrations/{connection_id}/test",
+      { params: { path: { workspace_id: workspaceId, connection_id: connectionId } } },
+    ),
+  );
+}
+
 /** Read operational counters; e.g. `getOperations()` in the overview query. */
 export async function getOperations() {
   return unwrapResponse(await api.GET("/v1/admin/billing/operations"));
@@ -89,7 +148,7 @@ export async function updateBillingConfig(
   );
 }
 
-/** Register a Stripe connection using environment variable references; e.g. `createBillingConnection(id, body)`. */
+/** Register a legacy environment-referenced Stripe connection. */
 export async function createBillingConnection(
   workspaceId: string,
   body: {

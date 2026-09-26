@@ -1032,6 +1032,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/admin/integrations/providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_providers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/admin/workspaces/{workspace_id}/integrations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["list_workspace_integrations"];
+    put?: never;
+    post: operations["create_workspace_integration"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/admin/workspaces/{workspace_id}/integrations/{connection_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations["get_workspace_integration"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch: operations["update_workspace_integration"];
+    trace?: never;
+  };
+  "/v1/admin/workspaces/{workspace_id}/integrations/{connection_id}/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["test_workspace_integration"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2029,6 +2093,42 @@ export interface components {
     WorkspaceTransactionResponse:
       | components["schemas"]["CustomerWalletEntryResponse"]
       | components["schemas"]["PendingUsageTransactionResponse"];
+    CreateStripeIntegrationRequest: {
+      environment: string;
+      existing_customer_reference?: string | null;
+      secret_key: string;
+    };
+    IntegrationProviderResponse: {
+      available: boolean;
+      display_name: string;
+      provider: string;
+    };
+    StripeIntegrationTestResponse: {
+      account_reference: string;
+      environment: string;
+      successful: boolean;
+    };
+    UpdateStripeIntegrationRequest: {
+      /** Format: int32 */
+      expected_version: number;
+      secret_key?: string | null;
+      webhook_secret?: string | null;
+    };
+    WorkspaceIntegrationResponse: {
+      account_reference: string;
+      api_secret_configured: boolean;
+      /** Format: uuid */
+      billing_connection_id: string;
+      /** Format: int32 */
+      configuration_version: number;
+      customer_reference?: string | null;
+      environment: string;
+      provider: string;
+      status: string;
+      webhook_path: string;
+      webhook_secret_configured: boolean;
+      webhook_url?: string | null;
+    };
   };
   responses: never;
   parameters: never;
@@ -4356,6 +4456,173 @@ export interface operations {
       };
       /** @description Wallet hierarchy is incomplete */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  list_providers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationProviderResponse"][];
+        };
+      };
+    };
+  };
+  list_workspace_integrations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspace_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceIntegrationResponse"][];
+        };
+      };
+    };
+  };
+  create_workspace_integration: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspace_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateStripeIntegrationRequest"];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceIntegrationResponse"];
+        };
+      };
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  get_workspace_integration: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspace_id: string;
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceIntegrationResponse"];
+        };
+      };
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  update_workspace_integration: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspace_id: string;
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateStripeIntegrationRequest"];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceIntegrationResponse"];
+        };
+      };
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  test_workspace_integration: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        workspace_id: string;
+        connection_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StripeIntegrationTestResponse"];
+        };
+      };
+      422: {
         headers: {
           [name: string]: unknown;
         };

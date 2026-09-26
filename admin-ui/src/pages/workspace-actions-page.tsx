@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  createBillingConnection,
   getBillingConfig,
   grantDirectCredit,
   reconcileCredits,
@@ -96,14 +95,6 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
       await client.invalidateQueries({ queryKey: ["wallets", workspaceId] });
     },
   });
-  const connection = useMutation({
-    mutationFn: (body: {
-      provider: string;
-      external_account_reference: string;
-      secret_reference: string;
-      webhook_secret_reference: string;
-    }) => createBillingConnection(workspaceId, body),
-  });
 
   function submitCredit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,21 +114,6 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
       direct_credit_enabled: form.has("direct_credit_enabled"),
       recurring_credit_enabled: form.has("recurring_credit_enabled"),
       expected_version: config.data.version,
-    });
-  }
-
-  function submitConnection(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    connection.mutate({
-      provider: "STRIPE",
-      external_account_reference: String(
-        form.get("external_account_reference") ?? "",
-      ).trim(),
-      secret_reference: String(form.get("secret_reference") ?? "").trim(),
-      webhook_secret_reference: String(
-        form.get("webhook_secret_reference") ?? "",
-      ).trim(),
     });
   }
 
@@ -207,65 +183,6 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
           {update.data && (
             <p role="status" className="mt-3 text-sm">
               Configuração salva na versão {update.data.version}.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Conexão Stripe</CardTitle>
-          <CardDescription>
-            Informe referências a variáveis de ambiente configuradas na API. Não
-            digite valores secretos.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submitConnection} className="flex flex-col gap-4">
-            <FieldGroup className="grid gap-4 md:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="external_account_reference">
-                  Conta externa
-                </FieldLabel>
-                <Input
-                  id="external_account_reference"
-                  name="external_account_reference"
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="secret_reference">
-                  Referência da chave
-                </FieldLabel>
-                <Input
-                  id="secret_reference"
-                  name="secret_reference"
-                  required
-                  placeholder="env://STRIPE_SECRET_KEY"
-                  pattern="env://[A-Za-z_][A-Za-z0-9_]*"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="webhook_secret_reference">
-                  Referência do webhook
-                </FieldLabel>
-                <Input
-                  id="webhook_secret_reference"
-                  name="webhook_secret_reference"
-                  required
-                  placeholder="env://STRIPE_WEBHOOK_SECRET"
-                  pattern="env://[A-Za-z_][A-Za-z0-9_]*"
-                />
-              </Field>
-            </FieldGroup>
-            <Button type="submit" disabled={connection.isPending}>
-              Criar conexão
-            </Button>
-          </form>
-          {connection.error && <QueryError error={connection.error} />}
-          {connection.data && (
-            <p role="status" className="mt-3 break-all text-sm">
-              Conexão {connection.data.billing_connection_id} criada. Webhook:{" "}
-              {connection.data.webhook_path}
             </p>
           )}
         </CardContent>

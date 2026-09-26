@@ -117,6 +117,7 @@ fn test_config(
         },
         accounts_webhook_secret,
         outbound_event_webhook: None,
+        public_api_base_url: None,
     }
 }
 

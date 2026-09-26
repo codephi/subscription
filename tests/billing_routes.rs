@@ -50,6 +50,23 @@ async fn regularization_route_requires_idempotency_and_is_in_openapi() {
         .is_some());
 }
 
+#[tokio::test]
+async fn stripe_provider_is_advertised_without_database_access() {
+    let router = test_router();
+    let response = router
+        .oneshot(
+            Request::get("/v1/admin/integrations/providers")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let providers = response_json(response).await;
+    assert_eq!(providers[0]["provider"], "STRIPE");
+    assert_eq!(providers[0]["available"], true);
+}
+
 fn test_router() -> axum::Router {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .connect_lazy("postgres://postgres:postgres@127.0.0.1:1/postgres")
@@ -73,6 +90,7 @@ fn test_config() -> AppConfig {
         },
         accounts_webhook_secret: None,
         outbound_event_webhook: None,
+        public_api_base_url: None,
     }
 }
 

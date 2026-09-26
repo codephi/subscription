@@ -1,8 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getProvisioning, getWallets, getWorkspace } from "@/api/client";
+import {
+  getProvisioning,
+  getWallets,
+  getWorkspace,
+  reconcileProvisioning,
+} from "@/api/client";
 import { QueryError, QueryLoading } from "@/components/query-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +33,7 @@ export function WorkspacePage() {
 }
 
 function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
+  const queryClient = useQueryClient();
   const selectItem = usePanelStore((state) => state.selectItem);
   const workspace = useQuery({
     queryKey: ["workspace", workspaceId],
@@ -40,6 +46,17 @@ function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
   const provisioning = useQuery({
     queryKey: ["provisioning", workspaceId],
     queryFn: () => getProvisioning(workspaceId),
+  });
+  const provisionWallets = useMutation({
+    mutationFn: () => reconcileProvisioning(workspaceId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["provisioning", workspaceId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["wallets", workspaceId],
+      });
+    },
   });
   useEffect(() => selectItem(null), [workspaceId, selectItem]);
   return (
@@ -66,6 +83,13 @@ function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
           render={<Link to={`/workspaces/${workspaceId}/actions`} />}
         >
           Ações administrativas
+        </Button>
+        <Button
+          variant="outline"
+          nativeButton={false}
+          render={<Link to={`/workspaces/${workspaceId}/integrations`} />}
+        >
+          Integrações
         </Button>
       </header>
       {workspace.isLoading && <QueryLoading />}
@@ -118,6 +142,32 @@ function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
                 : provisioning.isLoading
                   ? "Carregando…"
                   : "Sem estado disponível"}
+              <p className="mt-2">
+                Materializa a carteira do workspace e as item-wallets do
+                catálogo atual. A operação pode ser repetida com segurança.
+              </p>
+              <Button
+                className="mt-4"
+                variant="outline"
+                disabled={provisionWallets.isPending}
+                onClick={() => provisionWallets.mutate()}
+              >
+                {provisionWallets.isPending
+                  ? "Provisionando…"
+                  : "Provisionar wallet"}
+              </Button>
+              {provisionWallets.error && (
+                <div className="mt-3">
+                  <QueryError error={provisionWallets.error} />
+                </div>
+              )}
+              {provisionWallets.data && (
+                <p role="status" className="mt-3 text-foreground">
+                  Provisionamento: {provisionWallets.data.status} (
+                  {provisionWallets.data.materialized_item_wallets}/
+                  {provisionWallets.data.expected_item_wallets} item wallets).
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

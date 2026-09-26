@@ -22,13 +22,14 @@ async fn main() -> Result<()> {
         return Err(error);
     }
 
-    let repository = DatabaseRepository::new(pool);
+    let repository = DatabaseRepository::new(pool).with_credential_vault()?;
     tokio::spawn(subscription::services::subscription_calendar::run_scheduler(repository.clone()));
     tokio::spawn(
         subscription::services::billing_dispatcher::run_billing_dispatcher(repository.clone()),
     );
     let state = AppState::new(repository.clone())
-        .with_accounts_webhook_secret(config.accounts_webhook_secret.clone());
+        .with_accounts_webhook_secret(config.accounts_webhook_secret.clone())
+        .with_public_api_base_url(config.public_api_base_url.clone());
 
     if let Some(webhook) = &config.outbound_event_webhook {
         tokio::spawn(outbox::run_dispatcher(

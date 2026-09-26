@@ -22,6 +22,8 @@ pub struct StartedCollectionAttempt {
 
 pub struct DueCollectionAttempt {
     pub collection_request_id: Uuid,
+    pub workspace_id: Uuid,
+    pub billing_connection_id: Uuid,
     pub provider: String,
     pub external_account_reference: String,
     pub secret_reference: String,
@@ -30,7 +32,7 @@ pub struct DueCollectionAttempt {
 impl DatabaseRepository {
     pub async fn find_due_collection_attempt(&self) -> ApiResult<Option<DueCollectionAttempt>> {
         let row = sqlx::query(
-            "SELECT cr.collection_request_id,bc.provider,bc.external_account_reference,bc.secret_reference \
+            "SELECT cr.collection_request_id,bc.workspace_id,bc.billing_connection_id,bc.provider,bc.external_account_reference,bc.secret_reference \
              FROM collection_requests cr JOIN payment_method_bindings pmb USING(payment_method_binding_id) \
              JOIN billing_connections bc USING(billing_connection_id) WHERE cr.status='SCHEDULED' \
              AND cr.attempts_started=0 AND cr.scheduled_at<=clock_timestamp() \
@@ -42,6 +44,8 @@ impl DatabaseRepository {
         .await?;
         Ok(row.map(|row| DueCollectionAttempt {
             collection_request_id: row.get("collection_request_id"),
+            workspace_id: row.get("workspace_id"),
+            billing_connection_id: row.get("billing_connection_id"),
             provider: row.get("provider"),
             external_account_reference: row.get("external_account_reference"),
             secret_reference: row.get("secret_reference"),
@@ -103,7 +107,10 @@ async fn lock_scheduled_request(
     Ok(sqlx::query(
         "SELECT cr.*,clock_timestamp() AS database_now, \
          pmb.provider_payment_method_reference,pmb.payment_method, \
-         pmb.status AS binding_status,bc.provider,bc.status AS connection_status \
+         pmb.status AS binding_status,bc.provider,bc.status AS connection_status, \
+         COALESCE(bc.provider_customer_reference,CASE WHEN bc.environment IS NULL \
+           AND bc.external_account_reference LIKE 'cus_%' THEN bc.external_account_reference END) \
+           AS provider_customer_reference \
          FROM collection_requests cr JOIN payment_method_bindings pmb \
            ON pmb.payment_method_binding_id=cr.payment_method_binding_id \
            AND pmb.workspace_id=cr.workspace_id AND pmb.customer_id=cr.customer_id \
@@ -173,6 +180,7 @@ fn command_from_row(row: &sqlx::postgres::PgRow, key: String) -> CollectionComma
         provider_idempotency_key: key,
         payment_method: BillingPaymentMethod::Card,
         payment_method_reference: row.get("provider_payment_method_reference"),
+        customer_reference: row.try_get("provider_customer_reference").unwrap_or(None),
         amount_minor: row.get("amount_minor"),
         currency: row.get("currency"),
     }

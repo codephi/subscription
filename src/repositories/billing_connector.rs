@@ -19,6 +19,7 @@ pub struct CollectionCommand {
     pub provider_idempotency_key: String,
     pub payment_method: BillingPaymentMethod,
     pub payment_method_reference: String,
+    pub customer_reference: Option<String>,
     pub amount_minor: i64,
     pub currency: String,
 }

@@ -16,6 +16,7 @@ pub mod catalog_admin;
 mod cors;
 pub mod credits;
 pub mod inbox_admin;
+pub mod integrations;
 pub mod internal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
@@ -91,6 +92,7 @@ fn api_router() -> utoipa_axum::router::OpenApiRouter<AppState> {
         .merge(audit_admin::router())
         .merge(admin_queries::router())
         .merge(billing::router())
+        .merge(integrations::router())
         .merge(billing_investigation::router())
         .merge(usage::router())
         .merge(wallets::router())

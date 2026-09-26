@@ -106,14 +106,35 @@ pub async fn create_payment_method_setup_session(
             format!("billing connection {connection_id} must be an ACTIVE STRIPE connection"),
         ));
     }
-    let secret = resolve_secret(&configuration.secret_reference)?;
+    let secret = resolve_connection_secret(
+        repository,
+        configuration.workspace_id,
+        connection_id,
+        "stripe_api",
+        &configuration.secret_reference,
+        configuration.managed,
+    )?;
+    let customer_reference = match configuration.managed {
+        true => {
+            crate::services::billing_integrations::ensure_customer(
+                repository,
+                &repository
+                    .integration_secrets(configuration.workspace_id, connection_id)
+                    .await?,
+            )
+            .await?
+        }
+        false => configuration.external_account_reference.clone(),
+    };
     let connector = crate::repositories::stripe::StripeConnector::new(
         secret,
-        stripe_account(&configuration.external_account_reference),
+        (!configuration.managed)
+            .then(|| stripe_account(&configuration.external_account_reference))
+            .flatten(),
     );
     let session = connector
         .create_setup_session(&SetupSessionCommand {
-            customer_reference: configuration.external_account_reference,
+            customer_reference,
             return_url: request.return_url.clone(),
         })
         .await
@@ -122,6 +143,25 @@ pub async fn create_payment_method_setup_session(
         provider_setup_id: session.provider_setup_id,
         client_secret: session.client_secret,
     })
+}
+
+pub(crate) fn resolve_connection_secret(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
+    purpose: &str,
+    reference: &str,
+    managed: bool,
+) -> ApiResult<String> {
+    if managed {
+        return repository.credential_vault()?.open(
+            workspace_id,
+            connection_id,
+            purpose,
+            reference,
+        );
+    }
+    resolve_secret(reference)
 }
 
 pub(crate) fn resolve_secret(reference: &str) -> ApiResult<String> {

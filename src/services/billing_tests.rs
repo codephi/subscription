@@ -35,6 +35,7 @@ fn command(amount_minor: i64) -> CollectionCommand {
         provider_idempotency_key: "collection-request-1:1".to_string(),
         payment_method: BillingPaymentMethod::Card,
         payment_method_reference: "pm_fake".to_string(),
+        customer_reference: Some("cus_fake".to_string()),
         amount_minor,
         currency: "BRL".to_string(),
     }

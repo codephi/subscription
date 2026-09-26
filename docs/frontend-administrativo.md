@@ -12,7 +12,8 @@ uma interface pública para clientes.
 | `/`                                              | Visão geral               | Indicadores de operação de Billing e atalhos para investigar cada fila.                      |
 | `/workspaces`                                    | Workspaces                | Lista paginada, busca direta por UUID e acesso aos detalhes.                                 |
 | `/workspaces/:workspaceId`                       | Detalhe do workspace      | Estado operacional, provisionamento, carteira, planos, extrato e consumo.                    |
-| `/workspaces/:workspaceId/actions`               | Ações do workspace        | Configuração de Billing, conexão Stripe por referências, crédito direto e reconciliações.    |
+| `/workspaces/:workspaceId/integrations`          | Integrações do workspace  | Configuração de provedores de Billing; Stripe na primeira versão.                            |
+| `/workspaces/:workspaceId/actions`               | Ações do workspace        | Configuração de Billing, crédito direto e reconciliações.                                    |
 | `/workspaces/:workspaceId/plans/:planId/actions` | Ações do plano do cliente | Cancelamento ao fim do período, transição e revogação.                                       |
 | `/billing/:kind`                                 | Fila de Billing           | Listagem filtrável de cobranças, tentativas, pagamentos, webhooks, outbox e não conciliados. |
 | `/billing/:kind/:id`                             | Registro de Billing       | Detalhe, IDs relacionados e replay de dead letter.                                           |
@@ -133,10 +134,24 @@ Na configuração de Billing, o operador pode alterar as permissões de crédito
 direto e recorrente. O envio usa a versão lida da configuração, permitindo que a
 API detecte alterações concorrentes.
 
-A conexão Stripe recebe o identificador da conta externa e referências a
-variáveis de ambiente, por exemplo `env://STRIPE_SECRET_KEY` e
-`env://STRIPE_WEBHOOK_SECRET`. O formulário não recebe nem envia o conteúdo dos
-segredos.
+A área Integrações lista os provedores disponíveis e as conexões do workspace.
+Para Stripe, o operador informa uma chave `sk_test_` ou `sk_live_`; a API valida
+a conta e guarda a chave cifrada. O ambiente escolhido deve corresponder ao
+prefixo da chave. Um cliente `cus_` existente pode ser informado em opções
+avançadas; caso contrário, a API cria um cliente idempotente ao preparar o
+primeiro cartão.
+
+Na etapa seguinte, a página mostra a URL formada com `PUBLIC_API_BASE_URL` e
+orienta o cadastro manual do webhook no Stripe. A chave `whsec_` é guardada
+cifrada separadamente. Salvar essa chave não confirma que o Stripe já entregou
+um evento; teste a entrega no painel Stripe. Novos segredos nunca são retornados
+pela API, mantidos em cache do frontend ou escritos na auditoria.
+
+As chaves são cifradas com AES-256-GCM. Configure
+`BILLING_CREDENTIAL_ENCRYPTION_KEY` como base64 de 32 bytes em um secret manager
+no servidor. Gere uma chave diferente por ambiente e preserve-a junto aos
+backups do banco: sem a chave, a API não consegue usar as novas conexões,\ embora conexões antigas `env://` continuem funcionando. Não altere a chave sem
+migrar as credenciais.
 
 O crédito direto pede ID de transação, unidades de crédito e descrição opcional.
 Antes de enviar, mostra uma confirmação com workspace, unidades e transação. O
@@ -226,6 +241,8 @@ npm run api:types
   `GET`/`PUT /v1/workspaces/{workspace_id}/billing-config`,
   `POST /v1/workspaces/{workspace_id}/credits/direct`,
   `POST /v1/workspaces/{workspace_id}/billing-connections`,
+  `GET /v1/admin/integrations/providers` and
+  `/v1/admin/workspaces/{workspace_id}/integrations` for managed providers,
   `POST /v1/admin/workspaces/{workspace_id}/customer-wallet/reconcile` e
   `POST /v1/admin/outbox-events/{event_id}/replay`.
 - **Planos de cliente:**

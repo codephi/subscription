@@ -1,0 +1,279 @@
+use uuid::Uuid;
+
+use crate::{
+    dto::billing::{
+        CreateStripeIntegrationRequest, IntegrationProviderResponse, StripeIntegrationTestResponse,
+        UpdateStripeIntegrationRequest, WorkspaceIntegrationResponse,
+    },
+    error::{ApiError, ApiResult},
+    repositories::{
+        database::DatabaseRepository, integrations::IntegrationSecrets, stripe::StripeConnector,
+    },
+};
+
+pub fn providers() -> Vec<IntegrationProviderResponse> {
+    vec![IntegrationProviderResponse {
+        provider: "STRIPE".into(),
+        display_name: "Stripe".into(),
+        available: true,
+    }]
+}
+
+pub async fn list(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+) -> ApiResult<Vec<WorkspaceIntegrationResponse>> {
+    repository.list_integrations(workspace_id).await
+}
+
+pub async fn get(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+) -> ApiResult<WorkspaceIntegrationResponse> {
+    repository
+        .get_integration(workspace_id, connection_id)
+        .await
+}
+
+pub async fn create_stripe(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+    request: &CreateStripeIntegrationRequest,
+) -> ApiResult<WorkspaceIntegrationResponse> {
+    let environment = validate_stripe_key(&request.secret_key, &request.environment)?;
+    if let Some(customer_id) = &request.existing_customer_reference {
+        validate_customer_id(customer_id)?;
+    }
+    let connector = StripeConnector::new(request.secret_key.clone(), None);
+    let account_id = connector
+        .identify_account()
+        .await
+        .map_err(invalid_stripe_credentials)?;
+    if let Some(customer_id) = &request.existing_customer_reference {
+        connector
+            .validate_customer(customer_id)
+            .await
+            .map_err(|_| invalid_customer(customer_id))?;
+    }
+    repository
+        .create_stripe_integration(
+            workspace_id,
+            &account_id,
+            environment,
+            request.existing_customer_reference.as_deref(),
+            &request.secret_key,
+        )
+        .await
+}
+
+pub async fn update_stripe(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+    request: &UpdateStripeIntegrationRequest,
+) -> ApiResult<WorkspaceIntegrationResponse> {
+    let current = repository
+        .integration_secrets(workspace_id, connection_id)
+        .await?;
+    require_managed_stripe(&current)?;
+    if let Some(secret_key) = &request.secret_key {
+        validate_rotation(&current, secret_key).await?;
+    }
+    validate_webhook_secret(request.webhook_secret.as_deref())?;
+    repository
+        .update_stripe_integration(
+            workspace_id,
+            connection_id,
+            request.expected_version,
+            request.secret_key.as_deref(),
+            request.webhook_secret.as_deref(),
+        )
+        .await
+}
+
+pub async fn test_stripe(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+) -> ApiResult<StripeIntegrationTestResponse> {
+    let current = repository
+        .integration_secrets(workspace_id, connection_id)
+        .await?;
+    require_managed_stripe(&current)?;
+    let secret = open_api_secret(repository, &current)?;
+    let connector = StripeConnector::new(secret, None);
+    let account = connector
+        .identify_account()
+        .await
+        .map_err(invalid_stripe_credentials)?;
+    let expected = current.provider_account_reference.as_deref().unwrap_or("");
+    if account != expected {
+        return Err(ApiError::conflict(
+            "stripe_account_changed",
+            "Stripe key belongs to a different account; create a new integration",
+        ));
+    }
+    Ok(StripeIntegrationTestResponse {
+        successful: true,
+        account_reference: account,
+        environment: current.environment.unwrap_or_else(|| "UNKNOWN".into()),
+    })
+}
+
+pub async fn ensure_customer(
+    repository: &DatabaseRepository,
+    current: &IntegrationSecrets,
+) -> ApiResult<String> {
+    if let Some(customer_id) = &current.provider_customer_reference {
+        return Ok(customer_id.clone());
+    }
+    let recovered = repository
+        .begin_customer_operation(current.workspace_id, current.billing_connection_id)
+        .await?;
+    if let Some(customer_id) = recovered {
+        return Ok(customer_id);
+    }
+    let secret = open_api_secret(repository, current)?;
+    let connector = StripeConnector::new(secret, None);
+    let customer_id = connector
+        .create_workspace_customer(
+            &current.workspace_id.to_string(),
+            &current.billing_connection_id.to_string(),
+        )
+        .await
+        .map_err(invalid_stripe_credentials)?;
+    repository
+        .finish_customer_operation(
+            current.workspace_id,
+            current.billing_connection_id,
+            &customer_id,
+        )
+        .await?;
+    Ok(customer_id)
+}
+
+async fn validate_rotation(current: &IntegrationSecrets, secret_key: &str) -> ApiResult<()> {
+    let (environment, _) = split_stripe_key(secret_key)?;
+    if Some(environment) != current.environment.as_deref() {
+        return Err(ApiError::unprocessable(
+            "stripe_environment_mismatch",
+            "replacement key must use the integration's existing environment",
+        ));
+    }
+    let account = StripeConnector::new(secret_key.to_string(), None)
+        .identify_account()
+        .await
+        .map_err(invalid_stripe_credentials)?;
+    if Some(account.as_str()) != current.provider_account_reference.as_deref() {
+        return Err(ApiError::unprocessable(
+            "stripe_account_mismatch",
+            "replacement key must belong to the integration's existing Stripe account",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_stripe_key<'a>(secret_key: &'a str, environment: &str) -> ApiResult<&'a str> {
+    let (key_environment, _) = split_stripe_key(secret_key)?;
+    if key_environment != environment {
+        return Err(ApiError::unprocessable(
+            "stripe_environment_mismatch",
+            "selected environment must match the Stripe key prefix",
+        ));
+    }
+    Ok(key_environment)
+}
+
+fn split_stripe_key(secret_key: &str) -> ApiResult<(&'static str, &'static str)> {
+    if secret_key.starts_with("sk_test_") {
+        return Ok(("TEST", "test"));
+    }
+    if secret_key.starts_with("sk_live_") {
+        return Ok(("LIVE", "live"));
+    }
+    Err(ApiError::unprocessable(
+        "stripe_secret_key_invalid",
+        "secret_key must be a Stripe secret key beginning with sk_test_ or sk_live_",
+    ))
+}
+
+fn validate_customer_id(customer_id: &str) -> ApiResult<()> {
+    if customer_id.starts_with("cus_") && customer_id.len() <= 255 {
+        return Ok(());
+    }
+    Err(invalid_customer(customer_id))
+}
+
+fn validate_webhook_secret(secret: Option<&str>) -> ApiResult<()> {
+    if secret.is_none_or(|value| value.starts_with("whsec_") && value.len() <= 255) {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "stripe_webhook_secret_invalid",
+        "webhook_secret must be a Stripe signing secret beginning with whsec_",
+    ))
+}
+
+fn require_managed_stripe(current: &IntegrationSecrets) -> ApiResult<()> {
+    if current.provider == "STRIPE" && current.environment.is_some() {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "integration_not_managed",
+        format!(
+            "integration {} is a legacy environment-based connection",
+            current.billing_connection_id
+        ),
+    ))
+}
+
+fn open_api_secret(
+    repository: &DatabaseRepository,
+    current: &IntegrationSecrets,
+) -> ApiResult<String> {
+    repository.credential_vault()?.open(
+        current.workspace_id,
+        current.billing_connection_id,
+        "stripe_api",
+        &current.secret_reference,
+    )
+}
+
+fn invalid_stripe_credentials(_: impl std::fmt::Display) -> ApiError {
+    ApiError::unprocessable(
+        "stripe_credentials_rejected",
+        "Stripe rejected the credentials or the account could not be verified",
+    )
+}
+
+fn invalid_customer(customer_id: &str) -> ApiError {
+    ApiError::unprocessable(
+        "stripe_customer_invalid",
+        format!("customer reference {customer_id:?} must be an accessible Stripe cus_ id"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        split_stripe_key, validate_customer_id, validate_stripe_key, validate_webhook_secret,
+    };
+
+    #[test]
+    fn stripe_environment_must_match_secret_key_prefix() {
+        assert!(validate_stripe_key("sk_test_example", "TEST").is_ok());
+        assert!(validate_stripe_key("sk_live_example", "LIVE").is_ok());
+        assert!(validate_stripe_key("sk_test_example", "LIVE").is_err());
+        assert!(split_stripe_key("pk_test_example").is_err());
+    }
+
+    #[test]
+    fn optional_customer_and_webhook_values_require_provider_identifiers() {
+        assert!(validate_customer_id("cus_existing").is_ok());
+        assert!(validate_customer_id("pm_not_a_customer").is_err());
+        assert!(validate_webhook_secret(None).is_ok());
+        assert!(validate_webhook_secret(Some("whsec_existing")).is_ok());
+        assert!(validate_webhook_secret(Some("sk_test_example")).is_err());
+    }
+}

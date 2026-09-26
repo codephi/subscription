@@ -11,6 +11,7 @@ pub struct AppState {
 struct SharedState {
     pub database: DatabaseRepository,
     pub accounts_webhook_secret: Option<String>,
+    pub public_api_base_url: Option<String>,
 }
 
 impl AppState {
@@ -18,6 +19,7 @@ impl AppState {
         let inner = SharedState {
             database,
             accounts_webhook_secret: None,
+            public_api_base_url: None,
         };
         Self {
             inner: Arc::new(inner),
@@ -35,6 +37,15 @@ impl AppState {
 
     pub fn accounts_webhook_secret(&self) -> Option<String> {
         self.inner.accounts_webhook_secret.clone()
+    }
+
+    pub fn with_public_api_base_url(mut self, base_url: Option<String>) -> Self {
+        Arc::make_mut(&mut self.inner).public_api_base_url = base_url;
+        self
+    }
+
+    pub fn public_api_base_url(&self) -> Option<String> {
+        self.inner.public_api_base_url.clone()
     }
 }
 

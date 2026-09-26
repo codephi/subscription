@@ -26,11 +26,22 @@ async fn dispatch_once(repository: &DatabaseRepository) -> crate::error::ApiResu
     if due.provider != "STRIPE" {
         return Ok(());
     }
-    let secret = billing::resolve_secret(&due.secret_reference)?;
-    let connected_account = due
-        .external_account_reference
-        .starts_with("acct_")
-        .then_some(due.external_account_reference);
+    let managed = due.secret_reference.starts_with("v1:");
+    let secret = billing::resolve_connection_secret(
+        repository,
+        due.workspace_id,
+        due.billing_connection_id,
+        "stripe_api",
+        &due.secret_reference,
+        managed,
+    )?;
+    let connected_account = if managed {
+        None
+    } else {
+        due.external_account_reference
+            .starts_with("acct_")
+            .then_some(due.external_account_reference)
+    };
     let connector = StripeConnector::new(secret, connected_account);
     let _ = billing::execute_collection_attempt(repository, &connector, due.collection_request_id)
         .await?;

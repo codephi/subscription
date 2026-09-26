@@ -66,6 +66,11 @@ const WorkspaceActionsPage = lazy(() =>
     default: module.WorkspaceActionsPage,
   })),
 );
+const WorkspaceIntegrationsPage = lazy(() =>
+  import("@/pages/workspace-integrations-page").then((module) => ({
+    default: module.WorkspaceIntegrationsPage,
+  })),
+);
 const PlanActionsPage = lazy(() =>
   import("@/pages/plan-actions-page").then((module) => ({
     default: module.PlanActionsPage,
@@ -173,6 +178,10 @@ function Shell() {
             <Route
               path="/workspaces/:workspaceId/actions"
               element={<WorkspaceActionsPage />}
+            />
+            <Route
+              path="/workspaces/:workspaceId/integrations"
+              element={<WorkspaceIntegrationsPage />}
             />
             <Route
               path="/workspaces/:workspaceId/plans/:planId/actions"

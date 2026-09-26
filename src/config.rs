@@ -71,6 +71,7 @@ pub struct AppConfig {
     pub mcp: McpConfig,
     pub accounts_webhook_secret: Option<String>,
     pub outbound_event_webhook: Option<OutboundWebhookConfig>,
+    pub public_api_base_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +105,10 @@ impl AppConfig {
         let mcp = McpConfig::from_env();
         let accounts_webhook_secret = std::env::var("ACCOUNTS_WEBHOOK_SECRET").ok();
         let outbound_event_webhook = outbound_webhook_from_env()?;
+        let public_api_base_url = std::env::var("PUBLIC_API_BASE_URL")
+            .ok()
+            .map(|value| value.trim_end_matches('/').to_string())
+            .filter(|value| !value.is_empty());
 
         Ok(Self {
             database_url,
@@ -115,6 +120,7 @@ impl AppConfig {
             mcp,
             accounts_webhook_secret,
             outbound_event_webhook,
+            public_api_base_url,
         })
     }
 

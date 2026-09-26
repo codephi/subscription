@@ -12,6 +12,49 @@ pub struct CreateBillingConnectionRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct IntegrationProviderResponse {
+    pub provider: String,
+    pub display_name: String,
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct WorkspaceIntegrationResponse {
+    pub billing_connection_id: Uuid,
+    pub provider: String,
+    pub account_reference: String,
+    pub environment: String,
+    pub status: String,
+    pub api_secret_configured: bool,
+    pub webhook_secret_configured: bool,
+    pub customer_reference: Option<String>,
+    pub webhook_path: String,
+    pub webhook_url: Option<String>,
+    pub configuration_version: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreateStripeIntegrationRequest {
+    pub secret_key: String,
+    pub environment: String,
+    pub existing_customer_reference: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct UpdateStripeIntegrationRequest {
+    pub expected_version: i32,
+    pub secret_key: Option<String>,
+    pub webhook_secret: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct StripeIntegrationTestResponse {
+    pub successful: bool,
+    pub account_reference: String,
+    pub environment: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct BillingConnectionResponse {
     pub billing_connection_id: Uuid,
     pub workspace_id: Uuid,

@@ -31,6 +31,65 @@ impl StripeConnector {
         }
     }
 
+    pub async fn identify_account(&self) -> Result<String, BillingConnectorError> {
+        let response = self
+            .client
+            .get(format!("{}/v1/account", self.api_base))
+            .basic_auth(&self.secret_key, Some(""))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        let account_id = required_string(&body, "id")?;
+        if !account_id.starts_with("acct_") {
+            return Err(invalid_response("id", &account_id));
+        }
+        Ok(account_id)
+    }
+
+    pub async fn validate_customer(&self, customer_id: &str) -> Result<(), BillingConnectorError> {
+        let response = self
+            .client
+            .get(format!("{}/v1/customers/{customer_id}", self.api_base))
+            .basic_auth(&self.secret_key, Some(""))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        if body.get("id").and_then(Value::as_str) != Some(customer_id) {
+            return Err(invalid_response("customer.id", &body.to_string()));
+        }
+        Ok(())
+    }
+
+    pub async fn create_workspace_customer(
+        &self,
+        workspace_id: &str,
+        connection_id: &str,
+    ) -> Result<String, BillingConnectorError> {
+        let fields = vec![
+            ("name", format!("Workspace {workspace_id}")),
+            ("metadata[workspace_id]", workspace_id.to_string()),
+            ("metadata[billing_connection_id]", connection_id.to_string()),
+        ];
+        let value = self
+            .post_form(
+                "/v1/customers",
+                &fields,
+                Some(&format!("billing-connection:{connection_id}:customer:v1")),
+            )
+            .await?;
+        required_string(&value, "id")
+    }
+
     async fn post_form(
         &self,
         path: &str,
@@ -72,7 +131,7 @@ impl BillingConnector for StripeConnector {
     fn start_collection<'a>(&'a self, command: &'a CollectionCommand) -> ConnectorFuture<'a> {
         Box::pin(async move {
             let amount = command.amount_minor.to_string();
-            let fields = vec![
+            let mut fields = vec![
                 ("amount", amount),
                 ("currency", command.currency.to_ascii_lowercase()),
                 ("payment_method", command.payment_method_reference.clone()),
@@ -83,6 +142,9 @@ impl BillingConnector for StripeConnector {
                     collection_id_from_key(&command.provider_idempotency_key),
                 ),
             ];
+            if let Some(customer) = &command.customer_reference {
+                fields.push(("customer", customer.clone()));
+            }
             let value = self
                 .post_form(
                     "/v1/payment_intents",

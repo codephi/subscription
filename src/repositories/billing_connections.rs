@@ -11,11 +11,18 @@ use crate::{
 };
 
 pub struct BillingConnectorConfiguration {
+    pub workspace_id: Uuid,
+    pub billing_connection_id: Uuid,
     pub provider: String,
     pub external_account_reference: String,
     pub secret_reference: String,
     pub webhook_secret_reference: String,
     pub status: String,
+    pub provider_account_reference: Option<String>,
+    pub provider_customer_reference: Option<String>,
+    pub environment: Option<String>,
+    pub configuration_version: i32,
+    pub managed: bool,
 }
 
 impl DatabaseRepository {
@@ -24,7 +31,7 @@ impl DatabaseRepository {
         connection_id: Uuid,
     ) -> ApiResult<BillingConnectorConfiguration> {
         let row = sqlx::query(
-            "SELECT provider,external_account_reference,secret_reference,webhook_secret_reference,status \
+            "SELECT * \
              FROM billing_connections WHERE billing_connection_id=$1",
         )
         .bind(connection_id)
@@ -36,14 +43,30 @@ impl DatabaseRepository {
                 format!("billing connection {connection_id} does not exist"),
             )
         })?;
+        let secret_reference: String = row.get("secret_reference");
+        let managed = secret_reference.starts_with("v1:");
+        let webhook_secret_reference = row
+            .get::<Option<String>, _>("webhook_secret_reference")
+            .unwrap_or_else(|| {
+                if managed {
+                    String::new()
+                } else {
+                    secret_reference.clone()
+                }
+            });
         Ok(BillingConnectorConfiguration {
+            workspace_id: row.get("workspace_id"),
+            billing_connection_id: connection_id,
             provider: row.get("provider"),
             external_account_reference: row.get("external_account_reference"),
-            secret_reference: row.get("secret_reference"),
-            webhook_secret_reference: row
-                .get::<Option<String>, _>("webhook_secret_reference")
-                .unwrap_or_else(|| row.get("secret_reference")),
+            secret_reference,
+            webhook_secret_reference,
             status: row.get("status"),
+            provider_account_reference: row.try_get("provider_account_reference").unwrap_or(None),
+            provider_customer_reference: row.try_get("provider_customer_reference").unwrap_or(None),
+            environment: row.try_get("environment").unwrap_or(None),
+            configuration_version: row.try_get("configuration_version").unwrap_or(1),
+            managed,
         })
     }
 

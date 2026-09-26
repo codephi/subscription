@@ -3,6 +3,7 @@ pub mod admission;
 pub mod audit_admin;
 pub mod billing;
 pub mod billing_dispatcher;
+pub mod billing_integrations;
 pub mod billing_investigation;
 pub mod billing_state;
 pub mod calendar;
