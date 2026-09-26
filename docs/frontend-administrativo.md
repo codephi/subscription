@@ -17,8 +17,8 @@ uma interface pública para clientes.
 | `/billing/:kind`                                 | Fila de Billing           | Listagem filtrável de cobranças, tentativas, pagamentos, webhooks, outbox e não conciliados. |
 | `/billing/:kind/:id`                             | Registro de Billing       | Detalhe, IDs relacionados e replay de dead letter.                                           |
 | `/catalog/:kind`                                 | Catálogo                  | Listagem paginada por tipo de registro e entrada para criação.                               |
-| `/catalog/:kind/new`                             | Criar oferta              | Formulários para cada tipo suportado do catálogo.                                            |
-| `/catalog/:kind/:id`                             | Detalhe do catálogo       | Contrato retornado pela API; publicar rascunho de preço ou revogar versão de plano.          |
+| `/catalog/:kind/new`                             | Criar oferta              | Cadastro conectado de produto, itens e preços; formulários para os demais tipos.              |
+| `/catalog/:kind/:id`                             | Detalhe do catálogo       | Produto com itens e preços; publicar rascunho, ativar produto ou revogar versão de plano.    |
 | `/audit`                                         | Auditoria                 | Eventos paginados com filtros de workspace e ação.                                           |
 | `/inbox`                                         | Inbox de Accounts         | Metadados de eventos recebidos, filtros e replay de evento em quarentena.                    |
 
@@ -92,11 +92,17 @@ retornados pela API e identifica versões imutáveis.
 
 Os formulários de criação cobrem:
 
-- **Produto:** nome, descrição e uma escolha em linguagem simples entre
-  “Consumo cobrado em créditos” e “Acesso por assinatura, sem cobrança por
-  consumo”. A tela informa que, na versão atual, somente produtos com consumo
-  medido podem ser publicados. Os valores do contrato (`CREDIT_METERED` e
-  `ENTITLEMENT_ONLY`) continuam iguais no envio à API.
+- **Produto:** nome, descrição, itens e preços em um único fluxo, sem entrada
+  manual de IDs. O caminho rápido começa com um item, unidade “unidade”, escala
+  1, bloco 1 e cobrança por créditos. Opções avançadas incluem escala,
+  hierarquia, faixas e ciclos de acumulação. “Salvar sem publicar” cria produto
+  e itens inativos com preços em rascunho; é possível salvar somente o produto.
+  “Revisar e publicar” publica os preços, ativa os itens e ativa o produto por
+  último. Publicar não cria assinaturas nem concede acesso; preços publicados
+  são imutáveis. `ENTITLEMENT_ONLY` pode ser salvo sem itens, mas não publicado.
+  Etapas confirmadas ficam na sessão para retomar falhas conhecidas. Uma criação
+  sem resposta confirmada exige conferência manual antes de iniciar outra.
+- **Item e preço individuais:** continuam disponíveis para cadastro avulso.
 - **Item:** produto pai, nome, item pai opcional, unidade e escala de quantidade.
 - **Preço:** item, período de vigência e conversão; suporta preço unitário e
   faixas de preço com blocos e créditos.
@@ -107,9 +113,13 @@ Os formulários de criação cobrem:
 - **Política de admissão:** identificador, versão e um fato obrigatório
   (`EMAIL_VERIFIED` ou `IDENTITY_VERIFIED`).
 
-Preço é criado como rascunho. A publicação só é oferecida para um rascunho e
-exige confirmação; versões publicadas são apresentadas como imutáveis. A página
-de detalhe de um plano de catálogo permite revogar a versão com motivo e
+Preço avulso é criado como rascunho. A publicação só é oferecida para um
+rascunho e exige confirmação; versões publicadas são apresentadas como
+imutáveis. O detalhe do produto lista todos os itens e suas versões de preço,
+permite publicar cada rascunho e ativa o produto somente quando cada item possui
+uma versão publicada. Produtos salvos sem itens oferecem um atalho para adicionar
+consumo já vinculado; itens sem preço oferecem um atalho para criar um preço
+preenchido com o item atual. A página de detalhe de um plano de catálogo permite revogar a versão com motivo e
 referência operacional, depois de confirmar.
 
 ### Ações de workspace

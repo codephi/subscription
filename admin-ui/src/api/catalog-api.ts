@@ -1,4 +1,10 @@
 import { api, unwrapResponse, ApiRequestError } from "./client";
+import type { components } from "./generated";
+
+export type ProductResponse = components["schemas"]["ProductResponse"];
+export type ItemResponse = components["schemas"]["ItemResponse"];
+export type PriceVersionResponse = components["schemas"]["PriceVersionResponse"];
+export type CatalogEntryResponse = components["schemas"]["CatalogEntryResponse"];
 
 /** Page catalog entries; e.g. `listCatalogEntries("products")`. */
 export async function listCatalogEntries(
@@ -14,6 +20,21 @@ export async function listCatalogEntries(
       },
     }),
   );
+}
+
+/** Read every page of one catalog kind; e.g. `listAllCatalogEntries("items", productId)`. */
+export async function listAllCatalogEntries(
+  kind: string,
+  parentId?: string,
+): Promise<CatalogEntryResponse[]> {
+  const entries: CatalogEntryResponse[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listCatalogEntries(kind, cursor, parentId);
+    entries.push(...page.items);
+    cursor = page.next_cursor ?? undefined;
+  } while (cursor);
+  return entries;
 }
 
 /** Read a catalog entry through its public contract; e.g. `getCatalogDetail("items", id)`. */
@@ -82,6 +103,28 @@ export async function createProduct(body: {
   return unwrapResponse(await api.POST("/v1/products", { body }));
 }
 
+/** Read a product through its public contract; e.g. `getProduct(productId)`. */
+export async function getProduct(productId: string): Promise<ProductResponse> {
+  return unwrapResponse(
+    await api.GET("/v1/products/{product_id}", {
+      params: { path: { product_id: productId } },
+    }),
+  );
+}
+
+/** Update a product with optimistic concurrency; e.g. `updateProductStatus(product)`. */
+export async function updateProduct(
+  productId: string,
+  body: components["schemas"]["UpdateProductRequest"],
+) {
+  return unwrapResponse(
+    await api.PATCH("/v1/products/{product_id}", {
+      params: { path: { product_id: productId } },
+      body,
+    }),
+  );
+}
+
 /** Create an item under a product; e.g. `createItem(productId, body)`. */
 export async function createItem(
   productId: string,
@@ -96,6 +139,39 @@ export async function createItem(
     await api.POST("/v1/products/{product_id}/items", {
       params: { path: { product_id: productId } },
       body,
+    }),
+  );
+}
+
+/** Update an item with optimistic concurrency; e.g. `updateItemStatus(item)`. */
+export async function updateItem(
+  itemId: string,
+  body: components["schemas"]["UpdateItemRequest"],
+) {
+  return unwrapResponse(
+    await api.PATCH("/v1/items/{item_id}", {
+      params: { path: { item_id: itemId } },
+      body,
+    }),
+  );
+}
+
+/** Read one item through its public contract; e.g. `getItem(itemId)`. */
+export async function getItem(itemId: string): Promise<ItemResponse> {
+  return unwrapResponse(
+    await api.GET("/v1/items/{item_id}", {
+      params: { path: { item_id: itemId } },
+    }),
+  );
+}
+
+/** Read one price version through its public contract; e.g. `getPriceVersion(priceId)`. */
+export async function getPriceVersion(
+  priceId: string,
+): Promise<PriceVersionResponse> {
+  return unwrapResponse(
+    await api.GET("/v1/price-versions/{price_id}", {
+      params: { path: { price_id: priceId } },
     }),
   );
 }

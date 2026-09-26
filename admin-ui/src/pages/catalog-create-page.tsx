@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   createAdmissionPolicy,
   createItem,
@@ -11,6 +11,8 @@ import {
   createUnitPrice,
 } from "@/api/catalog-api";
 import { QueryError } from "@/components/query-feedback";
+import { CatalogTierEditor, PriceModelSelect } from "@/components/catalog-price-fields";
+import { CatalogProductCreatePage } from "@/pages/catalog-product-create-page";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -170,11 +172,13 @@ const fields: Record<CatalogKind, FieldSpec[]> = {
 
 export function CatalogCreatePage() {
   const { kind: rawKind } = useParams();
+  const [searchParams] = useSearchParams();
   const kind = parseCatalogKind(rawKind);
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   if (!kind) return <p>Tipo de catálogo desconhecido.</p>;
+  if (kind === "products") return <CatalogProductCreatePage />;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -254,6 +258,13 @@ export function CatalogCreatePage() {
                       type={field.type ?? "text"}
                       required={field.required}
                       placeholder={field.placeholder}
+                      defaultValue={
+                        field.name === "product_id"
+                          ? (searchParams.get("product_id") ?? undefined)
+                          : field.name === "item_id"
+                            ? (searchParams.get("item_id") ?? undefined)
+                            : undefined
+                      }
                     />
                   )}
                   {field.description && (
@@ -392,176 +403,51 @@ async function createEntry(kind: CatalogKind, form: FormData): Promise<string> {
   }
 }
 
-interface TierDraft {
-  from: string;
-  to: string;
-  block: string;
-  credits: string;
-}
-
 function PriceConversionFields() {
   const [model, setModel] = useState<"unit" | "tiered">("unit");
-  const [tiers, setTiers] = useState<TierDraft[]>([
+  const [tiers, setTiers] = useState([
     { from: "0", to: "", block: "1", credits: "1" },
   ]);
-  const updateTier = (index: number, field: keyof TierDraft, value: string) =>
-    setTiers((previous) =>
-      previous.map((tier, current) =>
-        current === index ? { ...tier, [field]: value } : tier,
-      ),
-    );
   return (
     <FieldGroup className="flex flex-col gap-4">
       <Field>
         <FieldLabel htmlFor="pricing_model_select">Modelo de preço</FieldLabel>
-        <Select
-          value={model}
-          onValueChange={(value) =>
-            setModel(value === "tiered" ? "tiered" : "unit")
-          }
-        >
-          <SelectTrigger id="pricing_model_select" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="unit">Por bloco</SelectItem>
-              <SelectItem value="tiered">Por faixa</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <PriceModelSelect id="pricing_model_select" value={model} onChange={setModel} />
         <input type="hidden" name="pricing_model" value={model} />
       </Field>
       {model === "unit" ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="unit_block_size">Tamanho do bloco</FieldLabel>
-            <Input
-              id="unit_block_size"
-              name="unit_block_size"
-              required
-              inputMode="numeric"
-            />
+            <Input id="unit_block_size" name="unit_block_size" required inputMode="numeric" />
           </Field>
           <Field>
             <FieldLabel htmlFor="credit_units">Créditos por bloco</FieldLabel>
-            <Input
-              id="credit_units"
-              name="credit_units"
-              required
-              inputMode="numeric"
-            />
+            <Input id="credit_units" name="credit_units" required inputMode="numeric" />
           </Field>
         </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="accumulation_anchor_at">
-                Âncora do ciclo (opcional)
-              </FieldLabel>
-              <Input
-                id="accumulation_anchor_at"
-                name="accumulation_anchor_at"
-                type="datetime-local"
-              />
+              <FieldLabel htmlFor="accumulation_anchor_at">Âncora do ciclo (opcional)</FieldLabel>
+              <Input id="accumulation_anchor_at" name="accumulation_anchor_at" type="datetime-local" />
             </Field>
             <Field>
-              <FieldLabel htmlFor="accumulation_recurrence_rule">
-                Regra de recorrência
-              </FieldLabel>
-              <Input
-                id="accumulation_recurrence_rule"
-                name="accumulation_recurrence_rule"
-                placeholder="FREQ=MONTHLY;INTERVAL=1"
-              />
+              <FieldLabel htmlFor="accumulation_recurrence_rule">Regra de recorrência</FieldLabel>
+              <Input id="accumulation_recurrence_rule" name="accumulation_recurrence_rule" placeholder="FREQ=MONTHLY;INTERVAL=1" />
             </Field>
           </div>
-          {tiers.map((tier, index) => (
-            <div key={index} className="grid gap-3 md:grid-cols-5">
-              <Field>
-                <FieldLabel>Início da faixa {index + 1}</FieldLabel>
-                <Input
-                  value={tier.from}
-                  onChange={(event) =>
-                    updateTier(index, "from", event.target.value)
-                  }
-                  required
-                  inputMode="numeric"
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Fim (vazio na última)</FieldLabel>
-                <Input
-                  value={tier.to}
-                  onChange={(event) =>
-                    updateTier(index, "to", event.target.value)
-                  }
-                  inputMode="numeric"
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Bloco</FieldLabel>
-                <Input
-                  value={tier.block}
-                  onChange={(event) =>
-                    updateTier(index, "block", event.target.value)
-                  }
-                  required
-                  inputMode="numeric"
-                />
-              </Field>
-              <Field>
-                <FieldLabel>Créditos</FieldLabel>
-                <Input
-                  value={tier.credits}
-                  onChange={(event) =>
-                    updateTier(index, "credits", event.target.value)
-                  }
-                  required
-                  inputMode="numeric"
-                />
-              </Field>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={tiers.length === 1}
-                onClick={() =>
-                  setTiers(tiers.filter((_, current) => current !== index))
-                }
-              >
-                Remover
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              setTiers([
-                ...tiers,
-                {
-                  from: tiers.at(-1)?.to ?? "",
-                  to: "",
-                  block: "1",
-                  credits: "1",
-                },
-              ])
-            }
-          >
-            Adicionar faixa
-          </Button>
+          <CatalogTierEditor id="catalog-price" tiers={tiers} onChange={setTiers} />
           <input
             type="hidden"
             name="tiers"
-            value={JSON.stringify(
-              tiers.map((tier) => ({
-                from_accumulated_units: tier.from,
-                to_accumulated_units: tier.to || null,
-                unit_block_size: tier.block,
-                credit_units: tier.credits,
-              })),
-            )}
+            value={JSON.stringify(tiers.map((tier) => ({
+              from_accumulated_units: tier.from,
+              to_accumulated_units: tier.to || null,
+              unit_block_size: tier.block,
+              credit_units: tier.credits,
+            })))}
           />
         </>
       )}

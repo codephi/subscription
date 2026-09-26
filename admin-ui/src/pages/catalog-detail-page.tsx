@@ -32,6 +32,7 @@ import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { catalogKinds, parseCatalogKind } from "@/lib/catalog-kinds";
+import { CatalogProductDetailPage } from "@/pages/catalog-product-detail-page";
 
 export function CatalogDetailPage() {
   const { kind: rawKind, id } = useParams();
@@ -72,6 +73,7 @@ export function CatalogDetailPage() {
     ["plans", "on-demand", "policies"].includes(kind) ||
     (kind === "prices" &&
       fields.some(([key, value]) => key === "state" && value !== "DRAFT"));
+  if (kind === "products") return <CatalogProductDetailPage />;
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-3">

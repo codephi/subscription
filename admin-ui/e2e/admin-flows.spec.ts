@@ -4,6 +4,8 @@ import { expect, test } from "@playwright/test";
 const workspaceId = "00000000-0000-4000-8000-000000000001";
 const collectionId = "00000000-0000-4000-8000-000000000002";
 const productId = "00000000-0000-4000-8000-000000000003";
+const itemId = "00000000-0000-4000-8000-000000000005";
+const priceId = "00000000-0000-4000-8000-000000000006";
 
 test("operator follows a pending collection from the overview to its evidence", async ({
   page,
@@ -88,68 +90,147 @@ test("operator follows a pending collection from the overview to its evidence", 
 
 test("operator creates and checks a catalog product", async ({ page }) => {
   let submittedUsageModel = "";
+  let submittedItemName = "";
+  let published = false;
+  let itemStatus = "INACTIVE";
+  let productStatus = "INACTIVE";
   await page.route("**/v1/admin/catalog/products?*", async (route) =>
     route.fulfill({ json: { items: [], next_cursor: null } }),
   );
   await page.route("**/v1/products", async (route) => {
-    const requestBody = route.request().postDataJSON() as {
-      usage_model: string;
-    };
-    submittedUsageModel = requestBody.usage_model;
-    await route.fulfill({
-      status: 201,
-      json: {
-        product_id: productId,
-        name: "Test Product",
-        description: null,
-        usage_model: "CREDIT_METERED",
-        status: "INACTIVE",
-        version: 1,
-        created_at: "2026-09-24T12:00:00Z",
-        updated_at: "2026-09-24T12:00:00Z",
-      },
-    });
+    if (route.request().method() === "POST") {
+      const requestBody = route.request().postDataJSON() as { usage_model: string };
+      submittedUsageModel = requestBody.usage_model;
+      return route.fulfill({ status: 201, json: productResponse() });
+    }
+    if (route.request().method() === "PATCH") {
+      productStatus = "ACTIVE";
+      return route.fulfill({ json: { ...productResponse(), status: productStatus, version: 2 } });
+    }
+    await route.fulfill({ json: { ...productResponse(), status: productStatus } });
   });
-  await page.route(`**/v1/products/${productId}`, async (route) =>
-    route.fulfill({
-      json: {
-        product_id: productId,
-        name: "Test Product",
-        description: null,
-        usage_model: "CREDIT_METERED",
-        status: "INACTIVE",
-        version: 1,
-        created_at: "2026-09-24T12:00:00Z",
-        updated_at: "2026-09-24T12:00:00Z",
-      },
-    }),
+  await page.route(`**/v1/products/${productId}`, async (route) => {
+    if (route.request().method() === "PATCH") productStatus = "ACTIVE";
+    await route.fulfill({ json: { ...productResponse(), status: productStatus, version: productStatus === "ACTIVE" ? 2 : 1 } });
+  });
+  await page.route(`**/v1/products/${productId}/items`, async (route) => {
+    const item = route.request().postDataJSON() as { name: string };
+    submittedItemName = item.name;
+    await route.fulfill({ status: 201, json: itemResponse() });
+  });
+  await page.route(`**/v1/items/${itemId}/price-versions`, async (route) =>
+    route.fulfill({ status: 201, json: priceResponse() }),
+  );
+  await page.route("**/v1/price-versions/*/publish", async (route) => {
+    published = true;
+    await route.fulfill({ json: { ...priceResponse(), state: "ACTIVE" } });
+  });
+  await page.route(`**/v1/items/${itemId}`, async (route) => {
+    if (route.request().method() === "PATCH") itemStatus = "ACTIVE";
+    await route.fulfill({ json: { ...itemResponse(), status: itemStatus, version: itemStatus === "ACTIVE" ? 2 : 1 } });
+  });
+  await page.route("**/v1/admin/catalog/items?*", async (route) =>
+    route.fulfill({ json: { items: [{ id: itemId, kind: "items", parent_id: productId, name: "Requests", status: itemStatus, created_at: "2026-09-24T12:00:00Z" }], next_cursor: null } }),
+  );
+  await page.route("**/v1/admin/catalog/prices?*", async (route) =>
+    route.fulfill({ json: { items: [{ id: priceId, kind: "prices", parent_id: itemId, name: "unit", status: published ? "ACTIVE" : "DRAFT", created_at: "2026-09-24T12:00:00Z" }], next_cursor: null } }),
+  );
+  await page.route(`**/v1/price-versions/${priceId}`, async (route) =>
+    route.fulfill({ json: { ...priceResponse(), state: published ? "ACTIVE" : "DRAFT" } }),
   );
   await page.goto("/catalog/products");
   await page.getByRole("button", { name: "Criar" }).click();
-  await expect(
-    page.getByRole("combobox", { name: "Como este produto será usado?" }),
-  ).toContainText("Consumo cobrado em créditos");
-  await page
-    .getByRole("combobox", { name: "Como este produto será usado?" })
-    .click();
-  await expect(
-    page.getByRole("option", {
-      name: "Acesso por assinatura, sem cobrança por consumo",
-    }),
-  ).toBeVisible();
-  await page
-    .getByRole("option", { name: "Consumo cobrado em créditos" })
-    .click();
-  await expect(
-    page.getByText(
-      "Na versão atual, somente produtos com consumo cobrado em créditos podem ser publicados.",
+  const formAccessibility = await new AxeBuilder({ page }).analyze();
+  expect(
+    formAccessibility.violations.filter((violation) =>
+      ["critical", "serious"].includes(violation.impact ?? ""),
     ),
-  ).toBeVisible();
+  ).toEqual([]);
   await page.getByRole("textbox", { name: "Nome" }).fill("Test Product");
-  await page.getByRole("button", { name: "Criar e conferir" }).click();
+  await page.getByRole("textbox", { name: "O que será consumido?" }).fill("Requests");
+  await page.getByRole("textbox", { name: "Créditos por bloco" }).fill("5");
+  await page.getByRole("button", { name: "Revisar e publicar" }).click();
+  await page.getByRole("button", { name: "Confirmar publicação" }).click();
   await expect(page).toHaveURL(`/catalog/products/${productId}`);
-  await expect(page.getByText("Test Product")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Test Product" })).toBeVisible();
+  await expect(page.getByText("ACTIVE").first()).toBeVisible();
   expect(submittedUsageModel).toBe("CREDIT_METERED");
+  expect(submittedItemName).toBe("Requests");
+  expect(published).toBe(true);
+});
+
+function productResponse() {
+  return {
+    product_id: productId,
+    name: "Test Product",
+    description: null,
+    usage_model: "CREDIT_METERED",
+    status: "INACTIVE",
+    version: 1,
+    created_at: "2026-09-24T12:00:00Z",
+    updated_at: "2026-09-24T12:00:00Z",
+  };
+}
+
+function itemResponse() {
+  return {
+    item_id: itemId,
+    product_id: productId,
+    parent_item_id: null,
+    name: "Requests",
+    unit_name: "unidade",
+    quantity_scale: "1",
+    status: "INACTIVE",
+    version: 1,
+    created_at: "2026-09-24T12:00:00Z",
+    updated_at: "2026-09-24T12:00:00Z",
+  };
+}
+
+function priceResponse() {
+  return {
+    price_version_id: priceId,
+    item_id: itemId,
+    pricing_model: "unit",
+    unit_block_size: "1",
+    credit_units: "5",
+    effective_from: "2026-09-24T12:00:00Z",
+    effective_until: null,
+    accumulation_cycle: null,
+    tiers: [],
+    state: "DRAFT",
+    version: 1,
+    created_at: "2026-09-24T12:00:00Z",
+  };
+}
+
+test("operator saves a product without items and can continue its setup", async ({ page }) => {
+  await page.route("**/v1/admin/catalog/products?*", async (route) =>
+    route.fulfill({ json: { items: [], next_cursor: null } }),
+  );
+  await page.route("**/v1/products", async (route) =>
+    route.fulfill({ status: 201, json: productResponse() }),
+  );
+  await page.route(`**/v1/products/${productId}`, async (route) =>
+    route.fulfill({ json: productResponse() }),
+  );
+  await page.route("**/v1/admin/catalog/items?*", async (route) =>
+    route.fulfill({ json: { items: [], next_cursor: null } }),
+  );
+
+  await page.goto("/catalog/products");
+  await page.getByRole("button", { name: "Criar" }).click();
+  await page.getByRole("textbox", { name: "Nome" }).fill("Test Product");
+  await page.getByRole("button", { name: "Remover" }).click();
+  await page.getByRole("button", { name: "Salvar sem publicar" }).click();
+
+  await expect(page).toHaveURL(`/catalog/products/${productId}`);
+  await expect(page.getByRole("button", { name: "Adicionar item de consumo" })).toHaveAttribute(
+    "href",
+    `/catalog/items/new?product_id=${productId}`,
+  );
+  await page.getByRole("button", { name: "Adicionar item de consumo" }).click();
+  await expect(page.getByRole("textbox", { name: "Produto ID" })).toHaveValue(productId);
 });
 
 test("theme toggle applies and remembers the dark theme", async ({ page }) => {
