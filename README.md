@@ -38,6 +38,9 @@ entregue e os limites operacionais atuais. Para o inventário detalhado de telas
 ações, contratos, arquitetura, configuração e testes, consulte a
 [documentação funcional do frontend](docs/frontend-administrativo.md).
 
+O [modelo de dados da API](docs/modelo-de-dados.md) documenta as tabelas do
+PostgreSQL e seus relacionamentos, organizados por domínio.
+
 Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
 - `/health` as a liveness endpoint that returns `200 OK` with a JSON status payload.
