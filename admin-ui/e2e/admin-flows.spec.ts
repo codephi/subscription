@@ -153,6 +153,7 @@ test("operator creates and checks a catalog product", async ({ page }) => {
 });
 
 test("theme toggle applies and remembers the dark theme", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/catalog/products/new");
   await page.getByRole("button", { name: "Ativar modo escuro" }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
@@ -170,6 +171,27 @@ test("theme toggle applies and remembers the dark theme", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Ativar modo claro" }),
   ).toBeVisible();
+});
+
+test("theme follows system changes until the operator chooses a theme", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/catalog/products/new");
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("button", { name: "Ativar modo claro" }).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("subscription-admin-theme")),
+    )
+    .toBe("light");
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
 });
 
 test("overview has no serious accessibility violations", async ({ page }) => {

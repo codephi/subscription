@@ -6,10 +6,17 @@
     <title>Subscription · Administração</title>
     <script>
       try {
-        const theme = localStorage.getItem("subscription-admin-theme");
+        const preference = localStorage.getItem("subscription-admin-theme");
+        const usesSystem = preference !== "light" && preference !== "dark";
+        const systemIsDark = window.matchMedia(
+          "(prefers-color-scheme: dark)",
+        ).matches;
+        const theme =
+          preference === "dark" || (usesSystem && systemIsDark)
+            ? "dark"
+            : "light";
         document.documentElement.classList.toggle("dark", theme === "dark");
-        document.documentElement.style.colorScheme =
-          theme === "dark" ? "dark" : "light";
+        document.documentElement.style.colorScheme = theme;
       } catch {
         document.documentElement.style.colorScheme = "light";
       }

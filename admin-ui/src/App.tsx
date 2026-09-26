@@ -118,7 +118,19 @@ function Navigation() {
 }
 
 function Shell() {
-  const theme = useThemeStore((state) => state.theme);
+  const preference = useThemeStore((state) => state.preference);
+  const systemTheme = useThemeStore((state) => state.systemTheme);
+  const setSystemTheme = useThemeStore((state) => state.setSystemTheme);
+  const theme = preference === "system" ? systemTheme : preference;
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateSystemTheme = () =>
+      setSystemTheme(media.matches ? "dark" : "light");
+    updateSystemTheme();
+    media.addEventListener("change", updateSystemTheme);
+    return () => media.removeEventListener("change", updateSystemTheme);
+  }, [setSystemTheme]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");

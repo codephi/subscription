@@ -3,8 +3,10 @@ import { Button } from "@/components/ui/button";
 import { useThemeStore } from "@/store/theme-store";
 
 export function ThemeToggle() {
-  const theme = useThemeStore((state) => state.theme);
-  const toggleTheme = useThemeStore((state) => state.toggleTheme);
+  const preference = useThemeStore((state) => state.preference);
+  const systemTheme = useThemeStore((state) => state.systemTheme);
+  const setPreference = useThemeStore((state) => state.setPreference);
+  const theme = preference === "system" ? systemTheme : preference;
   const isDark = theme === "dark";
   const label = isDark ? "Ativar modo claro" : "Ativar modo escuro";
   const Icon = isDark ? Sun : Moon;
@@ -16,7 +18,7 @@ export function ThemeToggle() {
       aria-label={label}
       aria-pressed={isDark}
       title={label}
-      onClick={toggleTheme}
+      onClick={() => setPreference(isDark ? "light" : "dark")}
     >
       <Icon aria-hidden="true" />
     </Button>

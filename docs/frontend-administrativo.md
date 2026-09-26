@@ -168,10 +168,13 @@ componentes de interface locais incluem Alert, AlertDialog, Badge, Button, Card,
 Checkbox, Empty, Field, Input, Label, Select, Separator, Skeleton e Table. A
 navegação e os formulários usam cores semânticas do tema shadcn.
 
-O botão compacto de tema no canto superior direito da área principal alterna
-entre claro e escuro, aplica a classe `dark` na raiz do documento e guarda a
-escolha em `localStorage`. A preferência é aplicada antes de montar o React para
-evitar que a página pisque no tema errado ao abrir ou recarregar.
+O botão compacto de tema no canto superior direito da área principal segue a
+preferência do sistema (`prefers-color-scheme`) enquanto não houver escolha
+manual. Ele aplica a classe `dark` na raiz do documento e atualiza se o sistema
+mudar de tema. Ao clicar, o operador define claro ou escuro; essa preferência
+manual fica em `localStorage` até ser alterada. A escolha inicial é aplicada
+antes de montar o React para evitar que a página pisque no tema errado ao abrir
+ou recarregar.
 
 O Zustand guarda preferências de interface em memória: texto de busca de
 workspace, item selecionado e filtros compartilhados de workspace/estado de
