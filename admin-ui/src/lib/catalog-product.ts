@@ -46,6 +46,21 @@ export function newCatalogItemDraft(name = ""): CatalogProductItemDraft {
   };
 }
 
+export const catalogUnitOptions = [
+  "unidade",
+  "requisição",
+  "execução",
+  "mensagem",
+  "token",
+  "segundo",
+  "minuto",
+  "GB",
+] as const;
+
+export function knownCatalogUnit(value: string): boolean {
+  return catalogUnitOptions.some((unit) => unit === value);
+}
+
 export function newCatalogProductDraft(): CatalogProductDraft {
   return {
     name: "",
@@ -66,9 +81,7 @@ export function validateCatalogProductDraft(
   if (publish && draft.items.length === 0) {
     return "Adicione ao menos um item com preço para publicar.";
   }
-  if (draft.usageModel === "ENTITLEMENT_ONLY" && draft.items.length > 0) {
-    return "Para acesso por assinatura, remova os itens de consumo antes de salvar.";
-  }
+  if (draft.usageModel === "ENTITLEMENT_ONLY") return null;
   const hierarchyIssue = validateHierarchy(draft.items);
   if (hierarchyIssue) return hierarchyIssue;
   for (const [index, item] of draft.items.entries()) {
@@ -83,18 +96,24 @@ function validateItem(
   items: CatalogProductItemDraft[],
 ): string | null {
   if (!item.name.trim()) return "informe um nome.";
-  if (item.parentDraftId && !items.some((candidate) => candidate.draftId === item.parentDraftId)) {
+  if (
+    item.parentDraftId &&
+    !items.some((candidate) => candidate.draftId === item.parentDraftId)
+  ) {
     return "selecione um item pai válido.";
   }
-  if (item.parentDraftId === item.draftId) return "um item não pode ser seu próprio pai.";
-  if (!positiveInteger(item.quantityScale)) return "a escala deve ser um inteiro positivo.";
+  if (item.parentDraftId === item.draftId)
+    return "um item não pode ser seu próprio pai.";
+  if (!positiveInteger(item.quantityScale))
+    return "a escala deve ser um inteiro positivo.";
   if (!positiveInteger(item.unitBlockSize) && item.pricingModel === "unit") {
     return "o tamanho do bloco deve ser um inteiro positivo.";
   }
   const dates = priceDates(item);
   if (dates.error) return dates.error;
   if (item.pricingModel === "unit") {
-    if (!positiveInteger(item.creditUnits)) return "informe créditos inteiros positivos por bloco.";
+    if (!positiveInteger(item.creditUnits))
+      return "informe créditos inteiros positivos por bloco.";
     return null;
   }
   const tierIssue = validateTiers(item);
@@ -107,20 +126,33 @@ function validateTiers(item: CatalogProductItemDraft): string | null {
   if (item.accumulationAnchorAt && !item.accumulationRecurrenceRule.trim()) {
     return "informe a recorrência do ciclo de acumulação.";
   }
-  if (item.accumulationAnchorAt && !validCycleRule(item.accumulationRecurrenceRule)) {
+  if (
+    item.accumulationAnchorAt &&
+    !validCycleRule(item.accumulationRecurrenceRule)
+  ) {
     return "use uma recorrência FREQ e INTERVAL válida.";
   }
-  const effectiveFrom = item.effectiveFrom ? new Date(item.effectiveFrom) : new Date();
-  if (item.accumulationAnchorAt && new Date(item.accumulationAnchorAt) > effectiveFrom) {
+  const effectiveFrom = item.effectiveFrom
+    ? new Date(item.effectiveFrom)
+    : new Date();
+  if (
+    item.accumulationAnchorAt &&
+    new Date(item.accumulationAnchorAt) > effectiveFrom
+  ) {
     return "o ciclo de acumulação deve começar antes da vigência do preço.";
   }
   if (!item.tiers.length) return "adicione ao menos uma faixa.";
   let expectedStart = 0n;
   for (const [index, tier] of item.tiers.entries()) {
-    if (!nonNegativeInteger(tier.from) || !positiveInteger(tier.block) || !positiveInteger(tier.credits)) {
+    if (
+      !nonNegativeInteger(tier.from) ||
+      !positiveInteger(tier.block) ||
+      !positiveInteger(tier.credits)
+    ) {
       return `preencha os inteiros válidos da faixa ${index + 1}.`;
     }
-    if (tier.to && !nonNegativeInteger(tier.to)) return `informe um limite final válido na faixa ${index + 1}.`;
+    if (tier.to && !nonNegativeInteger(tier.to))
+      return `informe um limite final válido na faixa ${index + 1}.`;
     const start = BigInt(tier.from);
     const end = tier.to ? BigInt(tier.to) : null;
     if (start !== expectedStart || (end !== null && end <= start)) {
@@ -138,12 +170,15 @@ function validateTiers(item: CatalogProductItemDraft): string | null {
 }
 
 function validateHierarchy(items: CatalogProductItemDraft[]): string | null {
-  const parents = new Map(items.map((item) => [item.draftId, item.parentDraftId]));
+  const parents = new Map(
+    items.map((item) => [item.draftId, item.parentDraftId]),
+  );
   for (const item of items) {
     const visited = new Set<string>();
     let current: string | undefined = item.draftId;
     while (current) {
-      if (visited.has(current)) return "a hierarquia dos itens não pode conter ciclos.";
+      if (visited.has(current))
+        return "a hierarquia dos itens não pode conter ciclos.";
       visited.add(current);
       current = parents.get(current) || undefined;
     }
@@ -152,12 +187,15 @@ function validateHierarchy(items: CatalogProductItemDraft[]): string | null {
 }
 
 function validCycleRule(value: string): boolean {
-  return /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY);INTERVAL=[1-9]\d*$/.test(value.trim());
+  return /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY);INTERVAL=[1-9]\d*$/.test(
+    value.trim(),
+  );
 }
 
 function priceDates(item: CatalogProductItemDraft): { error: string | null } {
   const start = item.effectiveFrom ? new Date(item.effectiveFrom) : new Date();
-  if (Number.isNaN(start.valueOf())) return { error: "informe uma vigência inicial válida." };
+  if (Number.isNaN(start.valueOf()))
+    return { error: "informe uma vigência inicial válida." };
   if (!item.effectiveUntil) return { error: null };
   const end = new Date(item.effectiveUntil);
   return Number.isNaN(end.valueOf()) || end <= start
@@ -166,7 +204,11 @@ function priceDates(item: CatalogProductItemDraft): { error: string | null } {
 }
 
 function positiveInteger(value: string): boolean {
-  return /^\d+$/.test(value) && BigInt(value) > 0n && BigInt(value) <= 9223372036854775807n;
+  return (
+    /^\d+$/.test(value) &&
+    BigInt(value) > 0n &&
+    BigInt(value) <= 9223372036854775807n
+  );
 }
 
 function nonNegativeInteger(value: string): boolean {

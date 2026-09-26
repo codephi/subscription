@@ -92,20 +92,25 @@ retornados pela API e identifica versões imutáveis.
 
 Os formulários de criação cobrem:
 
-- **Produto:** nome, descrição, itens e preços em um único fluxo, sem entrada
-  manual de IDs. O caminho rápido começa com um item, unidade “unidade”, escala
-  1, bloco 1 e cobrança por créditos. Opções avançadas incluem escala,
-  hierarquia, faixas e ciclos de acumulação. “Salvar sem publicar” cria produto
+- **Produto:** nome, unidade e créditos por cobrança, com itens e preços no
+  mesmo fluxo e sem entrada manual de IDs. Unidades comuns são selecionáveis e
+  outra unidade pode ser informada quando necessário. O caminho rápido começa
+  com um item, quantidade por cobrança 1, escala 1 e vigência imediata. Opções
+  avançadas incluem descrição, modelo de acesso, quantidade por cobrança,
+  hierarquia, faixas, escala e ciclos de acumulação. “Salvar sem publicar” cria produto
   e itens inativos com preços em rascunho; é possível salvar somente o produto.
   “Revisar e publicar” publica os preços, ativa os itens e ativa o produto por
   último. Publicar não cria assinaturas nem concede acesso; preços publicados
   são imutáveis. `ENTITLEMENT_ONLY` pode ser salvo sem itens, mas não publicado.
   Etapas confirmadas ficam na sessão para retomar falhas conhecidas. Uma criação
   sem resposta confirmada exige conferência manual antes de iniciar outra.
-- **Item e preço individuais:** continuam disponíveis para cadastro avulso.
-- **Item:** produto pai, nome, item pai opcional, unidade e escala de quantidade.
-- **Preço:** item, período de vigência e conversão; suporta preço unitário e
-  faixas de preço com blocos e créditos.
+- **Item e preço individuais:** continuam disponíveis para cadastro avulso com
+  produto e item selecionados pelo nome, incluindo suporte aos vínculos da URL.
+- **Item:** produto pai, nome e unidade; item pai e escala ficam em opções
+  avançadas. Itens de produtos de acesso não recebem unidade nem escala.
+- **Preço:** produto, item e créditos por cobrança; suporta preço unitário e
+  faixas, frequência guiada e período de vigência. Produtos de acesso não aceitam
+  preços de consumo.
 - **Assinatura:** nome e modelo de assinatura.
 - **Plano:** assinatura, modelo comercial, valor em unidade menor, moeda,
   recorrência, política de admissão, créditos concedidos e produtos associados.

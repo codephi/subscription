@@ -34,10 +34,14 @@ resolução da tentativa. O painel usa apenas referências de ator digitadas pel
 operador; isso não representa autenticação.
 
 O cadastro de produtos conecta produto, itens e preços sem exigir cópia de IDs.
-É possível salvar preços como rascunho e publicar depois, ou revisar e publicar
-o conjunto, ativando itens e produto em sequência. A sessão guarda o progresso
-confirmado para retomar falhas conhecidas; criações sem resposta confirmada
-exigem conferir o catálogo antes de uma nova tentativa.
+O caminho comum pede nome, unidade de consumo e créditos por cobrança; unidade,
+quantidade por cobrança e vigência começam com padrões úteis, e opções como
+faixas, hierarquia e escala ficam em configurações avançadas. Os cadastros
+avulsos de itens e preços selecionam produto e item pelo nome. É possível salvar
+preços como rascunho e publicar depois, ou revisar e publicar o conjunto,
+ativando itens e produto em sequência. A sessão guarda o progresso confirmado
+para retomar falhas conhecidas; criações sem resposta confirmada exigem conferir
+o catálogo antes de uma nova tentativa.
 
 O [plano do frontend](docs/plano-frontend-administrativo.md) registra o escopo
 entregue e os limites operacionais atuais. Para o inventário detalhado de telas,

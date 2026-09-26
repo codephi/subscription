@@ -1,5 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   createAdmissionPolicy,
   createItem,
@@ -11,8 +16,9 @@ import {
   createUnitPrice,
 } from "@/api/catalog-api";
 import { QueryError } from "@/components/query-feedback";
-import { CatalogTierEditor, PriceModelSelect } from "@/components/catalog-price-fields";
 import { CatalogProductCreatePage } from "@/pages/catalog-product-create-page";
+import { CatalogItemCreateForm } from "@/pages/catalog-item-create-page";
+import { CatalogPriceCreateForm } from "@/pages/catalog-price-create-page";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -179,6 +185,8 @@ export function CatalogCreatePage() {
   const [error, setError] = useState<Error | null>(null);
   if (!kind) return <p>Tipo de catálogo desconhecido.</p>;
   if (kind === "products") return <CatalogProductCreatePage />;
+  if (kind === "items") return <CatalogItemCreateForm />;
+  if (kind === "prices") return <CatalogPriceCreateForm />;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -274,7 +282,6 @@ export function CatalogCreatePage() {
               ))}
             </FieldGroup>
             {error && <QueryError error={error} />}
-            {kind === "prices" && <PriceConversionFields />}
             <Button type="submit" disabled={pending}>
               {pending ? "Enviando…" : "Criar e conferir"}
             </Button>
@@ -401,56 +408,4 @@ async function createEntry(kind: CatalogKind, form: FormData): Promise<string> {
         })
       ).policy_version_id;
   }
-}
-
-function PriceConversionFields() {
-  const [model, setModel] = useState<"unit" | "tiered">("unit");
-  const [tiers, setTiers] = useState([
-    { from: "0", to: "", block: "1", credits: "1" },
-  ]);
-  return (
-    <FieldGroup className="flex flex-col gap-4">
-      <Field>
-        <FieldLabel htmlFor="pricing_model_select">Modelo de preço</FieldLabel>
-        <PriceModelSelect id="pricing_model_select" value={model} onChange={setModel} />
-        <input type="hidden" name="pricing_model" value={model} />
-      </Field>
-      {model === "unit" ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor="unit_block_size">Tamanho do bloco</FieldLabel>
-            <Input id="unit_block_size" name="unit_block_size" required inputMode="numeric" />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="credit_units">Créditos por bloco</FieldLabel>
-            <Input id="credit_units" name="credit_units" required inputMode="numeric" />
-          </Field>
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="accumulation_anchor_at">Âncora do ciclo (opcional)</FieldLabel>
-              <Input id="accumulation_anchor_at" name="accumulation_anchor_at" type="datetime-local" />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="accumulation_recurrence_rule">Regra de recorrência</FieldLabel>
-              <Input id="accumulation_recurrence_rule" name="accumulation_recurrence_rule" placeholder="FREQ=MONTHLY;INTERVAL=1" />
-            </Field>
-          </div>
-          <CatalogTierEditor id="catalog-price" tiers={tiers} onChange={setTiers} />
-          <input
-            type="hidden"
-            name="tiers"
-            value={JSON.stringify(tiers.map((tier) => ({
-              from_accumulated_units: tier.from,
-              to_accumulated_units: tier.to || null,
-              unit_block_size: tier.block,
-              credit_units: tier.credits,
-            })))}
-          />
-        </>
-      )}
-    </FieldGroup>
-  );
 }

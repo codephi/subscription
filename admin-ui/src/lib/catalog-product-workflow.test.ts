@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemResponse, PriceVersionResponse, ProductResponse } from "@/api/catalog-api";
+import type {
+  ItemResponse,
+  PriceVersionResponse,
+  ProductResponse,
+} from "@/api/catalog-api";
 import {
   runProductCreation,
   type ProductCreationProgress,
@@ -28,12 +32,14 @@ class FakeProductWorkflowClient implements ProductWorkflowClient {
     this.operations.push("create-price");
     return price();
   };
-  createTieredPrice: ProductWorkflowClient["createTieredPrice"] = async () => price();
-  publishPriceVersion: ProductWorkflowClient["publishPriceVersion"] = async () => {
-    this.operations.push("publish-price");
-    this.priceState = "ACTIVE";
-    return price({ state: "ACTIVE" });
-  };
+  createTieredPrice: ProductWorkflowClient["createTieredPrice"] = async () =>
+    price();
+  publishPriceVersion: ProductWorkflowClient["publishPriceVersion"] =
+    async () => {
+      this.operations.push("publish-price");
+      this.priceState = "ACTIVE";
+      return price({ state: "ACTIVE" });
+    };
   getProduct: ProductWorkflowClient["getProduct"] = async () => {
     this.operations.push("read-product");
     return product({ status: this.productStatus });
@@ -69,12 +75,21 @@ describe("runProductCreation", () => {
 
   it("creates and publishes the product graph in dependency order", async () => {
     const initial = progress();
-    const id = await runProductCreation(initial, true, client, (state) => saved.push(state));
+    const id = await runProductCreation(initial, true, client, (state) =>
+      saved.push(state),
+    );
 
     expect(id).toBe(productId);
     expect(client.operations).toEqual([
-      "create-product", "create-item", "create-price", "read-price", "publish-price",
-      "read-item", "activate-item", "read-product", "activate-product",
+      "create-product",
+      "create-item",
+      "create-price",
+      "read-price",
+      "publish-price",
+      "read-item",
+      "activate-item",
+      "read-product",
+      "activate-product",
     ]);
     expect(saved.at(-1)?.productId).toBe(productId);
     expect(saved.at(-1)?.step).toBeNull();
@@ -83,8 +98,25 @@ describe("runProductCreation", () => {
   it("does not retry a creation whose response was lost", async () => {
     const initial = { ...progress(), step: "create:product", uncertain: true };
 
-    await expect(runProductCreation(initial, false, client, vi.fn())).rejects.toThrow("Confira a lista");
+    await expect(
+      runProductCreation(initial, false, client, vi.fn()),
+    ).rejects.toThrow("Confira a lista");
     expect(client.operations).toEqual([]);
+  });
+
+  it("saves entitlement access products without creating metered items", async () => {
+    const draft = newCatalogProductDraft();
+    draft.name = "Feature access";
+    draft.usageModel = "ENTITLEMENT_ONLY";
+    const result = await runProductCreation(
+      { ...progress(), draft },
+      false,
+      client,
+      vi.fn(),
+    );
+
+    expect(result).toBe(productId);
+    expect(client.operations).toEqual(["create-product"]);
   });
 
   it("checks a price after a lost publish response before continuing", async () => {
@@ -100,7 +132,9 @@ describe("runProductCreation", () => {
       uncertain: true,
     };
 
-    await runProductCreation(initial, true, client, (state) => saved.push(state));
+    await runProductCreation(initial, true, client, (state) =>
+      saved.push(state),
+    );
 
     expect(client.operations).toContain("read-price");
     expect(client.operations).not.toContain("publish-price");
@@ -153,7 +187,9 @@ function item(overrides: Partial<ItemResponse> = {}): ItemResponse {
   };
 }
 
-function price(overrides: Partial<PriceVersionResponse> = {}): PriceVersionResponse {
+function price(
+  overrides: Partial<PriceVersionResponse> = {},
+): PriceVersionResponse {
   return {
     price_version_id: priceId,
     item_id: itemId,

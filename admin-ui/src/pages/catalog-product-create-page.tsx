@@ -54,8 +54,12 @@ const SESSION_KEY = "catalog-product-creation-v1";
 
 export function CatalogProductCreatePage() {
   const navigate = useNavigate();
-  const [progress, setProgress] = useState<ProductCreationProgress | null>(readProgress);
-  const [draft, setDraft] = useState(progress?.draft ?? newCatalogProductDraft());
+  const [progress, setProgress] = useState<ProductCreationProgress | null>(
+    readProgress,
+  );
+  const [draft, setDraft] = useState(
+    progress?.draft ?? newCatalogProductDraft(),
+  );
   const [pending, setPending] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -65,7 +69,8 @@ export function CatalogProductCreatePage() {
 
   function updateDraft(next: CatalogProductDraft) {
     setDraft(next);
-    if (progress && !progress.productId) saveProgress({ ...progress, draft: next });
+    if (progress && !progress.productId)
+      saveProgress({ ...progress, draft: next });
   }
 
   function persistProgress(next: ProductCreationProgress) {
@@ -73,7 +78,10 @@ export function CatalogProductCreatePage() {
     setProgress(next);
   }
 
-  function updateItem(itemId: string, update: Partial<CatalogProductItemDraft>) {
+  function updateItem(
+    itemId: string,
+    update: Partial<CatalogProductItemDraft>,
+  ) {
     updateDraft({
       ...draft,
       items: draft.items.map((item) =>
@@ -142,7 +150,10 @@ export function CatalogProductCreatePage() {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <Link className="text-sm text-primary hover:underline" to="/catalog/products">
+        <Link
+          className="text-sm text-primary hover:underline"
+          to="/catalog/products"
+        >
           ← Produtos
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight">Criar produto</h1>
@@ -154,7 +165,11 @@ export function CatalogProductCreatePage() {
       {progress && (
         <Card>
           <CardHeader>
-            <CardTitle>{progress.uncertain ? "Confira o catálogo" : "Cadastro em andamento"}</CardTitle>
+            <CardTitle>
+              {progress.uncertain
+                ? "Confira o catálogo"
+                : "Cadastro em andamento"}
+            </CardTitle>
             <CardDescription>
               {progress.uncertain
                 ? "A última chamada não confirmou o resultado. Não repetimos a etapa automaticamente."
@@ -163,13 +178,20 @@ export function CatalogProductCreatePage() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-3">
             {progress.productId && (
-              <Button nativeButton={false} render={<Link to={`/catalog/products/${progress.productId}`} />}>
+              <Button
+                nativeButton={false}
+                render={<Link to={`/catalog/products/${progress.productId}`} />}
+              >
                 Conferir produto criado
               </Button>
             )}
             {progress.uncertain && !canResumeProductCreation(progress) ? (
               <>
-                <Button variant="outline" nativeButton={false} render={<Link to="/catalog/products" />}>
+                <Button
+                  variant="outline"
+                  nativeButton={false}
+                  render={<Link to="/catalog/products" />}
+                >
                   Abrir lista de produtos
                 </Button>
                 <Button variant="destructive" onClick={releaseUncertainAttempt}>
@@ -177,19 +199,31 @@ export function CatalogProductCreatePage() {
                 </Button>
               </>
             ) : (
-              <Button disabled={pending} onClick={() => void submit(progress.draft, progress.publishing)}>
-                {pending ? "Conferindo e continuando…" : progress.uncertain ? "Conferir resultado e continuar" : "Continuar cadastro"}
+              <Button
+                disabled={pending}
+                onClick={() => void submit(progress.draft, progress.publishing)}
+              >
+                {pending
+                  ? "Conferindo e continuando…"
+                  : progress.uncertain
+                    ? "Conferir resultado e continuar"
+                    : "Continuar cadastro"}
               </Button>
             )}
           </CardContent>
         </Card>
       )}
 
-      <form className="flex flex-col gap-5" onSubmit={(event) => event.preventDefault()}>
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(event) => event.preventDefault()}
+      >
         <Card>
           <CardHeader>
             <CardTitle>Produto</CardTitle>
-            <CardDescription>Identificação e forma de acesso.</CardDescription>
+            <CardDescription>
+              Comece pelo nome; depois informe a unidade e o custo do consumo.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <FieldGroup className="grid gap-4 md:grid-cols-2">
@@ -198,49 +232,90 @@ export function CatalogProductCreatePage() {
                 <Input
                   id="product-name"
                   value={draft.name}
-                  onChange={(event) => updateDraft({ ...draft, name: event.target.value })}
+                  onChange={(event) =>
+                    updateDraft({ ...draft, name: event.target.value })
+                  }
                   placeholder="Ex.: API de inteligência"
                   disabled={locked}
                   required
                 />
               </Field>
-              <Field>
-                <FieldLabel htmlFor="product-description">Descrição (opcional)</FieldLabel>
-                <Input
-                  id="product-description"
-                  value={draft.description}
-                  onChange={(event) => updateDraft({ ...draft, description: event.target.value })}
-                  disabled={locked}
-                />
+              <Field className="md:col-span-2">
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Adicionar descrição
+                  </summary>
+                  <Input
+                    id="product-description"
+                    className="mt-3"
+                    value={draft.description}
+                    onChange={(event) =>
+                      updateDraft({ ...draft, description: event.target.value })
+                    }
+                    disabled={locked}
+                    placeholder="Descreva este produto"
+                  />
+                </details>
               </Field>
               <Field className="md:col-span-2">
-                <FieldLabel htmlFor="product-usage-model">Como este produto será usado?</FieldLabel>
-                <Select
-                  items={[
-                    { label: "Consumo cobrado em créditos", value: "CREDIT_METERED" },
-                    { label: "Acesso por assinatura, sem cobrança por consumo", value: "ENTITLEMENT_ONLY" },
-                  ]}
-                  value={draft.usageModel}
-                  onValueChange={(value) => updateDraft({
-                    ...draft,
-                    usageModel: value === "ENTITLEMENT_ONLY" ? value : "CREDIT_METERED",
-                    items: value === "ENTITLEMENT_ONLY" ? draft.items : draft.items.length ? draft.items : [newCatalogItemDraft(draft.name)],
-                  })}
-                  disabled={locked}
-                >
-                  <SelectTrigger id="product-usage-model" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="CREDIT_METERED">Consumo cobrado em créditos</SelectItem>
-                      <SelectItem value="ENTITLEMENT_ONLY">Acesso por assinatura, sem cobrança por consumo</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <FieldDescription>
-                  Acesso por assinatura pode ser salvo inativo. A publicação desse modelo ainda não está disponível.
-                </FieldDescription>
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Configurações avançadas
+                  </summary>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <FieldLabel htmlFor="product-usage-model">
+                      Modelo de produto
+                    </FieldLabel>
+                    <Select
+                      items={[
+                        {
+                          label: "Consumo cobrado em créditos",
+                          value: "CREDIT_METERED",
+                        },
+                        {
+                          label:
+                            "Acesso por assinatura, sem cobrança por consumo",
+                          value: "ENTITLEMENT_ONLY",
+                        },
+                      ]}
+                      value={draft.usageModel}
+                      onValueChange={(value) =>
+                        updateDraft({
+                          ...draft,
+                          usageModel:
+                            value === "ENTITLEMENT_ONLY"
+                              ? value
+                              : "CREDIT_METERED",
+                          items: draft.items.length
+                            ? draft.items
+                            : [newCatalogItemDraft(draft.name)],
+                        })
+                      }
+                      disabled={locked}
+                    >
+                      <SelectTrigger
+                        id="product-usage-model"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="CREDIT_METERED">
+                            Consumo cobrado em créditos
+                          </SelectItem>
+                          <SelectItem value="ENTITLEMENT_ONLY">
+                            Acesso por assinatura, sem cobrança por consumo
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      Acesso por assinatura pode ser salvo como inativo; a
+                      publicação desse modelo ainda não está disponível.
+                    </FieldDescription>
+                  </div>
+                </details>
               </Field>
             </FieldGroup>
           </CardContent>
@@ -252,13 +327,21 @@ export function CatalogProductCreatePage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-col gap-1">
                   <CardTitle>Consumo e preço</CardTitle>
-                  <CardDescription>Sem IDs: os itens e preços serão ligados ao produto automaticamente.</CardDescription>
+                  <CardDescription>
+                    Sem IDs: os itens e preços serão ligados ao produto
+                    automaticamente.
+                  </CardDescription>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
                   disabled={locked}
-                  onClick={() => updateDraft({ ...draft, items: [...draft.items, newCatalogItemDraft()] })}
+                  onClick={() =>
+                    updateDraft({
+                      ...draft,
+                      items: [...draft.items, newCatalogItemDraft()],
+                    })
+                  }
                 >
                   <Plus data-icon="inline-start" /> Adicionar item
                 </Button>
@@ -266,27 +349,37 @@ export function CatalogProductCreatePage() {
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               {draft.usageModel === "ENTITLEMENT_ONLY" ? (
-                <div className="flex flex-col gap-3 rounded-md border p-4">
-                  <p className="text-sm text-muted-foreground">Acesso por assinatura não aceita itens de consumo. Remova-os para salvar este modelo.</p>
-                  <Button type="button" variant="outline" disabled={locked} onClick={() => updateDraft({ ...draft, items: [] })}>Remover itens de consumo</Button>
-                </div>
-              ) : draft.items.map((item, index) => (
-                <ProductItemCard
-                  key={item.draftId}
-                  index={index}
-                  item={item}
-                  items={draft.items}
-                  suggestedName={draft.name}
-                  locked={locked}
-                  onChange={(update) => updateItem(item.draftId, update)}
-                  onRemove={() => updateDraft({
-                    ...draft,
-                    items: draft.items.filter((candidate) => candidate.draftId !== item.draftId),
-                  })}
-                />
-              ))}
+                <p className="rounded-md border p-4 text-sm text-muted-foreground">
+                  Acesso por assinatura não possui preço de consumo. Os valores
+                  preenchidos ficam guardados caso você volte para cobrança por
+                  créditos.
+                </p>
+              ) : (
+                draft.items.map((item, index) => (
+                  <ProductItemCard
+                    key={item.draftId}
+                    index={index}
+                    item={item}
+                    items={draft.items}
+                    suggestedName={draft.name}
+                    locked={locked}
+                    onChange={(update) => updateItem(item.draftId, update)}
+                    onRemove={() =>
+                      updateDraft({
+                        ...draft,
+                        items: draft.items.filter(
+                          (candidate) => candidate.draftId !== item.draftId,
+                        ),
+                      })
+                    }
+                  />
+                ))
+              )}
               {draft.items.length === 0 && (
-                <p className="text-sm text-muted-foreground">Você pode salvar somente o produto e configurar o consumo depois.</p>
+                <p className="text-sm text-muted-foreground">
+                  Você pode salvar somente o produto e configurar o consumo
+                  depois.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -296,38 +389,65 @@ export function CatalogProductCreatePage() {
           <CardHeader>
             <CardTitle>Resumo</CardTitle>
             <CardDescription>
-              {draft.items.length
-                ? `${draft.items.length} item(ns) de consumo · preços ficam em rascunho até publicar.`
-                : "Somente o produto será salvo como inativo."}
+              {draft.usageModel === "ENTITLEMENT_ONLY"
+                ? "Acesso por assinatura será salvo inativo."
+                : draft.items.length
+                  ? `${draft.items.length} item(ns) de consumo · preços ficam em rascunho até publicar.`
+                  : "Somente o produto será salvo como inativo."}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {completeDraft.items.map((item) => (
-              <p key={item.draftId} className="text-sm">
-                <strong>{item.name || "Novo item"}</strong>: {describeDraftPrice(item)}
-              </p>
-            ))}
+            {draft.usageModel === "CREDIT_METERED" &&
+              completeDraft.items.map((item) => (
+                <p key={item.draftId} className="text-sm">
+                  <strong>{item.name || "Novo item"}</strong>:{" "}
+                  {describeDraftPrice(item)}
+                </p>
+              ))}
             <p className="text-sm text-muted-foreground">
-              Publicar o catálogo não cria assinaturas nem concede acesso a clientes. Preços publicados são imutáveis.
+              Publicar o catálogo não cria assinaturas nem concede acesso a
+              clientes. Preços publicados são imutáveis.
             </p>
           </CardContent>
         </Card>
 
-        {validationError && <p role="alert" className="text-sm text-destructive">{validationError}</p>}
+        {validationError && (
+          <p role="alert" className="text-sm text-destructive">
+            {validationError}
+          </p>
+        )}
         {error && <QueryError error={error} />}
         {progress?.uncertain && (
-          <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
-            <AlertTriangle data-icon="inline-start" /> Confira a etapa em andamento antes de liberar uma nova tentativa.
+          <p
+            role="alert"
+            className="flex items-center gap-2 text-sm text-destructive"
+          >
+            <AlertTriangle data-icon="inline-start" /> Confira a etapa em
+            andamento antes de liberar uma nova tentativa.
           </p>
         )}
         {!locked && (
           <div className="flex flex-wrap justify-end gap-3">
-            <Button type="button" variant="outline" disabled={pending} onClick={() => start(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() => start(false)}
+            >
               {pending ? "Salvando…" : "Salvar sem publicar"}
             </Button>
-            <Button type="button" disabled={pending} onClick={() => start(true)}>
+            <Button
+              type="button"
+              disabled={pending || draft.usageModel === "ENTITLEMENT_ONLY"}
+              onClick={() => start(true)}
+            >
               Revisar e publicar
             </Button>
+            {draft.usageModel === "ENTITLEMENT_ONLY" && (
+              <p className="w-full text-right text-sm text-muted-foreground">
+                Acesso por assinatura só pode ser salvo inativo.
+              </p>
+            )}
           </div>
         )}
       </form>
@@ -335,19 +455,26 @@ export function CatalogProductCreatePage() {
       <AlertDialog open={reviewOpen} onOpenChange={setReviewOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revisar e publicar “{draft.name.trim()}”?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Revisar e publicar “{draft.name.trim()}”?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {completeDraft.items.map((item) => (
                 <span key={item.draftId} className="block">
-                  {item.name}: {describeDraftPrice(item)} {describeDraftValidity(item)}
+                  {item.name}: {describeDraftPrice(item)}{" "}
+                  {describeDraftValidity(item)}
                 </span>
               ))}
-              Preços publicados são imutáveis. Isso não cria assinatura nem concede acesso a clientes.
+              Preços publicados são imutáveis. Isso não cria assinatura nem
+              concede acesso a clientes.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Voltar</AlertDialogCancel>
-            <AlertDialogAction disabled={pending} onClick={() => void submit(completeDraft, true)}>
+            <AlertDialogAction
+              disabled={pending}
+              onClick={() => void submit(completeDraft, true)}
+            >
               {pending ? "Publicando…" : "Confirmar publicação"}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -357,10 +484,15 @@ export function CatalogProductCreatePage() {
   );
 }
 
-function withSuggestedItemNames(draft: CatalogProductDraft): CatalogProductDraft {
+function withSuggestedItemNames(
+  draft: CatalogProductDraft,
+): CatalogProductDraft {
   return {
     ...draft,
-    items: draft.items.map((item) => ({ ...item, name: item.name.trim() || draft.name.trim() })),
+    items: draft.items.map((item) => ({
+      ...item,
+      name: item.name.trim() || draft.name.trim(),
+    })),
   };
 }
 
@@ -373,10 +505,14 @@ function describeDraftPrice(item: CatalogProductItemDraft): string {
   if (item.pricingModel === "unit") {
     return `a cada ${displayUnits(item.unitBlockSize)} ${item.unitName || "unidade"} consumida(s), cobrar ${displayUnits(item.creditUnits)} créditos.`;
   }
-  return `preço por faixas: ${item.tiers.map((tier) => {
-    const range = tier.to ? `${displayUnits(tier.from)}–${displayUnits(tier.to)}` : `a partir de ${displayUnits(tier.from)}`;
-    return `${range} unidades, bloco de ${displayUnits(tier.block)} por ${displayUnits(tier.credits)} créditos`;
-  }).join("; ")}.`;
+  return `preço por faixas: ${item.tiers
+    .map((tier) => {
+      const range = tier.to
+        ? `${displayUnits(tier.from)}–${displayUnits(tier.to)}`
+        : `a partir de ${displayUnits(tier.from)}`;
+      return `${range} unidades, bloco de ${displayUnits(tier.block)} por ${displayUnits(tier.credits)} créditos`;
+    })
+    .join("; ")}.`;
 }
 
 function describeDraftValidity(item: CatalogProductItemDraft): string {
