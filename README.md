@@ -47,6 +47,13 @@ ações, contratos, arquitetura, configuração e testes, consulte a
 O [modelo de dados da API](docs/modelo-de-dados.md) documenta as tabelas do
 PostgreSQL e seus relacionamentos, organizados por domínio.
 
+Para integrar um SaaS de infraestrutura, consulte os guias de
+[créditos por execução](docs/integracao-saas/credito.md),
+[assinatura recorrente](docs/integracao-saas/assinatura.md) e o
+[plano para operar tudo pelo admin-ui](docs/integracao-saas/admin-ui-futuro.md).
+O [índice da integração](docs/integracao-saas/README.md) reúne o mapeamento de
+identidades, pré-requisitos e bloqueios atuais antes de cobrar clientes reais.
+
 Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
 - `/health` as a liveness endpoint that returns `200 OK` with a JSON status payload.
