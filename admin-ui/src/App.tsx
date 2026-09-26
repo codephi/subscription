@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
   QueryCache,
   QueryClient,
@@ -17,7 +17,9 @@ import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { AppErrorBoundary } from "@/components/app-error-boundary";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { logFrontendError } from "@/lib/telemetry";
+import { useThemeStore } from "@/store/theme-store";
 
 const OverviewPage = lazy(() =>
   import("@/pages/overview-page").then((module) => ({
@@ -116,6 +118,13 @@ function Navigation() {
 }
 
 function Shell() {
+  const theme = useThemeStore((state) => state.theme);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.style.colorScheme = theme;
+  }, [theme]);
+
   return (
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[240px_1fr]">
       <aside className="border-b bg-card p-5 lg:sticky lg:top-0 lg:h-screen lg:border-r lg:border-b-0">
@@ -133,7 +142,8 @@ function Shell() {
         </Link>
         <Separator className="my-5" />
         <Navigation />
-        <div className="mt-6">
+        <div className="mt-6 flex flex-col gap-3">
+          <ThemeToggle />
           <Badge variant="outline">Ambiente interno</Badge>
         </div>
       </aside>

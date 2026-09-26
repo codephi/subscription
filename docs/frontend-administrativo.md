@@ -168,6 +168,11 @@ componentes de interface locais incluem Alert, AlertDialog, Badge, Button, Card,
 Checkbox, Empty, Field, Input, Label, Select, Separator, Skeleton e Table. A
 navegação e os formulários usam cores semânticas do tema shadcn.
 
+O botão de tema no menu lateral alterna entre claro e escuro, aplica a classe
+`dark` na raiz do documento e guarda a escolha em `localStorage`. A preferência
+é aplicada antes de montar o React para evitar que a página pisque no tema
+errado ao abrir ou recarregar.
+
 O Zustand guarda preferências de interface em memória: texto de busca de
 workspace, item selecionado e filtros compartilhados de workspace/estado de
 Billing. Não guarda respostas remotas. Consultas e mutações usam TanStack Query,

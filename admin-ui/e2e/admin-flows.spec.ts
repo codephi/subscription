@@ -152,6 +152,26 @@ test("operator creates and checks a catalog product", async ({ page }) => {
   expect(submittedUsageModel).toBe("CREDIT_METERED");
 });
 
+test("theme toggle applies and remembers the dark theme", async ({ page }) => {
+  await page.goto("/catalog/products/new");
+  await page.getByRole("button", { name: "Ativar modo escuro" }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(
+    page.getByRole("button", { name: "Ativar modo claro" }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("subscription-admin-theme")),
+    )
+    .toBe("dark");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(
+    page.getByRole("button", { name: "Ativar modo claro" }),
+  ).toBeVisible();
+});
+
 test("overview has no serious accessibility violations", async ({ page }) => {
   await page.route("**/v1/admin/billing/operations", async (route) =>
     route.fulfill({
