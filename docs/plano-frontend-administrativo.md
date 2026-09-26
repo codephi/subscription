@@ -1,5 +1,8 @@
 # Plano do painel administrativo
 
+Para a descrição detalhada das páginas, fluxos, contratos, decisões técnicas e
+comandos, consulte [Frontend administrativo: funcionalidades e operação](frontend-administrativo.md).
+
 ## Decisões
 
 O painel fica em `admin-ui/` e usa Vite, React, TypeScript, shadcn/ui, Tailwind,
@@ -15,15 +18,15 @@ exige autenticação e autorização antes de ocorrer.
 
 ## Fases
 
-| Fase | Entrega | Critério de aceite | Estado |
-| --- | --- | --- | --- |
-| 0 — Base | Skill shadcn, frontend Vite, navegação, OpenAPI tipado, documentação | Frontend inicia e compila; tipos podem ser regenerados | Concluída |
-| 1 — Consultas | Listagem/detalhe de projeções de workspace e listagem de planos por workspace, paginadas por cursor | Consulta sem SQL manual, sem dados de identidade inventados | Concluída |
-| 2 — Painel de leitura | Contadores globais, abertura por UUID, estado do workspace, planos/ciclos, carteira, extrato e consumo por item sob demanda | Operador consegue explicar estado comercial, saldo e consumo; consultas têm carregamento, vazio e erro | Concluída |
-| 3 — Billing | Listas e detalhes de cobranças, tentativas, pagamentos, webhooks, outbox e pagamentos não conciliados | Cada contador abre seus registros; IDs e horários permitem seguir o runbook | Concluída |
-| 4 — Catálogo | Listas e formulários de produtos, itens, preços, assinaturas, planos, ofertas avulsas e políticas | Nova oferta publicada é conferível; versões publicadas aparecem imutáveis | Concluída |
-| 5 — Ações | Cancelamento, transição, revogação, crédito direto, configuração, reconciliação e replay | Repetições preservam idempotência; conflito mostra `existing_operation` quando presente | Concluída |
-| 6 — Operação | Auditoria consultável, testes ponta a ponta, acessibilidade e observabilidade | Fluxos críticos executáveis e investigáveis sem SQL manual | Concluída: fluxos críticos testados no navegador com API simulada, axe nas telas de operação e erros registrados em JSON no console |
+| Fase                  | Entrega                                                                                                                     | Critério de aceite                                                                                     | Estado                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Base              | Skill shadcn, frontend Vite, navegação, OpenAPI tipado, documentação                                                        | Frontend inicia e compila; tipos podem ser regenerados                                                 | Concluída                                                                                                                           |
+| 1 — Consultas         | Listagem/detalhe de projeções de workspace e listagem de planos por workspace, paginadas por cursor                         | Consulta sem SQL manual, sem dados de identidade inventados                                            | Concluída                                                                                                                           |
+| 2 — Painel de leitura | Contadores globais, abertura por UUID, estado do workspace, planos/ciclos, carteira, extrato e consumo por item sob demanda | Operador consegue explicar estado comercial, saldo e consumo; consultas têm carregamento, vazio e erro | Concluída                                                                                                                           |
+| 3 — Billing           | Listas e detalhes de cobranças, tentativas, pagamentos, webhooks, outbox e pagamentos não conciliados                       | Cada contador abre seus registros; IDs e horários permitem seguir o runbook                            | Concluída                                                                                                                           |
+| 4 — Catálogo          | Listas e formulários de produtos, itens, preços, assinaturas, planos, ofertas avulsas e políticas                           | Nova oferta publicada é conferível; versões publicadas aparecem imutáveis                              | Concluída                                                                                                                           |
+| 5 — Ações             | Cancelamento, transição, revogação, crédito direto, configuração, reconciliação e replay                                    | Repetições preservam idempotência; conflito mostra `existing_operation` quando presente                | Concluída                                                                                                                           |
+| 6 — Operação          | Auditoria consultável, testes ponta a ponta, acessibilidade e observabilidade                                               | Fluxos críticos executáveis e investigáveis sem SQL manual                                             | Concluída: fluxos críticos testados no navegador com API simulada, axe nas telas de operação e erros registrados em JSON no console |
 
 ## Contratos de consulta da primeira entrega
 

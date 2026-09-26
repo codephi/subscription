@@ -34,7 +34,9 @@ resolução da tentativa. O painel usa apenas referências de ator digitadas pel
 operador; isso não representa autenticação.
 
 O [plano do frontend](docs/plano-frontend-administrativo.md) registra o escopo
-entregue e os limites operacionais atuais.
+entregue e os limites operacionais atuais. Para o inventário detalhado de telas,
+ações, contratos, arquitetura, configuração e testes, consulte a
+[documentação funcional do frontend](docs/frontend-administrativo.md).
 
 Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
