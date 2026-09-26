@@ -12,13 +12,13 @@ export function ThemeToggle() {
   return (
     <Button
       variant="outline"
-      className="w-full justify-start"
+      size="icon-sm"
       aria-label={label}
       aria-pressed={isDark}
+      title={label}
       onClick={toggleTheme}
     >
-      <Icon data-icon="inline-start" />
-      {label}
+      <Icon aria-hidden="true" />
     </Button>
   );
 }

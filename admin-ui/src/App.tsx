@@ -142,12 +142,14 @@ function Shell() {
         </Link>
         <Separator className="my-5" />
         <Navigation />
-        <div className="mt-6 flex flex-col gap-3">
-          <ThemeToggle />
+        <div className="mt-6">
           <Badge variant="outline">Ambiente interno</Badge>
         </div>
       </aside>
       <main className="mx-auto w-full max-w-7xl p-5 md:p-8 lg:p-10">
+        <div className="mb-5 flex justify-end">
+          <ThemeToggle />
+        </div>
         <Suspense fallback={<p role="status">Carregando página…</p>}>
           <Routes>
             <Route path="/" element={<OverviewPage />} />
