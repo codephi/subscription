@@ -92,7 +92,11 @@ retornados pela API e identifica versões imutáveis.
 
 Os formulários de criação cobrem:
 
-- **Produto:** nome, descrição e modelo de uso.
+- **Produto:** nome, descrição e uma escolha em linguagem simples entre
+  “Consumo cobrado em créditos” e “Acesso por assinatura, sem cobrança por
+  consumo”. A tela informa que, na versão atual, somente produtos com consumo
+  medido podem ser publicados. Os valores do contrato (`CREDIT_METERED` e
+  `ENTITLEMENT_ONLY`) continuam iguais no envio à API.
 - **Item:** produto pai, nome, item pai opcional, unidade e escala de quantidade.
 - **Preço:** item, período de vigência e conversão; suporta preço unitário e
   faixas de preço com blocos e créditos.

@@ -87,11 +87,16 @@ test("operator follows a pending collection from the overview to its evidence", 
 });
 
 test("operator creates and checks a catalog product", async ({ page }) => {
+  let submittedUsageModel = "";
   await page.route("**/v1/admin/catalog/products?*", async (route) =>
     route.fulfill({ json: { items: [], next_cursor: null } }),
   );
-  await page.route("**/v1/products", async (route) =>
-    route.fulfill({
+  await page.route("**/v1/products", async (route) => {
+    const requestBody = route.request().postDataJSON() as {
+      usage_model: string;
+    };
+    submittedUsageModel = requestBody.usage_model;
+    await route.fulfill({
       status: 201,
       json: {
         product_id: productId,
@@ -103,8 +108,8 @@ test("operator creates and checks a catalog product", async ({ page }) => {
         created_at: "2026-09-24T12:00:00Z",
         updated_at: "2026-09-24T12:00:00Z",
       },
-    }),
-  );
+    });
+  });
   await page.route(`**/v1/products/${productId}`, async (route) =>
     route.fulfill({
       json: {
@@ -121,10 +126,30 @@ test("operator creates and checks a catalog product", async ({ page }) => {
   );
   await page.goto("/catalog/products");
   await page.getByRole("button", { name: "Criar" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Como este produto será usado?" }),
+  ).toContainText("Consumo cobrado em créditos");
+  await page
+    .getByRole("combobox", { name: "Como este produto será usado?" })
+    .click();
+  await expect(
+    page.getByRole("option", {
+      name: "Acesso por assinatura, sem cobrança por consumo",
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("option", { name: "Consumo cobrado em créditos" })
+    .click();
+  await expect(
+    page.getByText(
+      "Na versão atual, somente produtos com consumo cobrado em créditos podem ser publicados.",
+    ),
+  ).toBeVisible();
   await page.getByRole("textbox", { name: "Nome" }).fill("Test Product");
   await page.getByRole("button", { name: "Criar e conferir" }).click();
   await expect(page).toHaveURL(`/catalog/products/${productId}`);
   await expect(page.getByText("Test Product")).toBeVisible();
+  expect(submittedUsageModel).toBe("CREDIT_METERED");
 });
 
 test("overview has no serious accessibility violations", async ({ page }) => {

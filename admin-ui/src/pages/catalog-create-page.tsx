@@ -19,7 +19,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -38,10 +43,12 @@ import {
 interface FieldSpec {
   name: string;
   label: string;
+  description?: string;
   required?: boolean;
   type?: string;
   placeholder?: string;
   options?: string[];
+  optionLabels?: Record<string, string>;
 }
 
 const fields: Record<CatalogKind, FieldSpec[]> = {
@@ -50,9 +57,15 @@ const fields: Record<CatalogKind, FieldSpec[]> = {
     { name: "description", label: "Descrição" },
     {
       name: "usage_model",
-      label: "Modelo de uso",
+      label: "Como este produto será usado?",
+      description:
+        "Na versão atual, somente produtos com consumo cobrado em créditos podem ser publicados.",
       required: true,
       options: ["CREDIT_METERED", "ENTITLEMENT_ONLY"],
+      optionLabels: {
+        CREDIT_METERED: "Consumo cobrado em créditos",
+        ENTITLEMENT_ONLY: "Acesso por assinatura, sem cobrança por consumo",
+      },
     },
   ],
   items: [
@@ -213,6 +226,10 @@ export function CatalogCreatePage() {
                   <FieldLabel htmlFor={field.name}>{field.label}</FieldLabel>
                   {field.options ? (
                     <Select
+                      items={field.options.map((option) => ({
+                        label: field.optionLabels?.[option] ?? option,
+                        value: option,
+                      }))}
                       name={field.name}
                       required={field.required}
                       defaultValue={field.options[0]}
@@ -224,7 +241,7 @@ export function CatalogCreatePage() {
                         <SelectGroup>
                           {field.options.map((option) => (
                             <SelectItem key={option} value={option}>
-                              {option}
+                              {field.optionLabels?.[option] ?? option}
                             </SelectItem>
                           ))}
                         </SelectGroup>
@@ -238,6 +255,9 @@ export function CatalogCreatePage() {
                       required={field.required}
                       placeholder={field.placeholder}
                     />
+                  )}
+                  {field.description && (
+                    <FieldDescription>{field.description}</FieldDescription>
                   )}
                 </Field>
               ))}
