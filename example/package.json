@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "setup": "cargo run --manifest-path backend/Cargo.toml -- setup",
-    "dev": "concurrently -k -n api,web -c blue,green \"cargo run --manifest-path backend/Cargo.toml\" \"vite --config web/vite.config.ts\"",
+    "dev": "concurrently -k -n api,web -c blue,green \"cargo run --manifest-path backend/Cargo.toml\" \"bash scripts/wait-for-api.sh && vite --config web/vite.config.ts\"",
     "test": "cargo test --manifest-path backend/Cargo.toml && vitest run --config web/vite.config.ts && playwright test --config web/playwright.config.ts",
     "test:e2e": "playwright test --config web/playwright.config.ts",
     "build": "tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
