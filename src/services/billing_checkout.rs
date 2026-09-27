@@ -177,7 +177,7 @@ async fn ensure_integration(
         Some(integration) => integration,
         None => create_integration(repository, workspace_id, account_id, config).await?,
     };
-    if integration.status == "ACTIVE" {
+    if integration_is_ready(&integration) {
         return Ok(integration);
     }
     configure_integration(repository, workspace_id, &integration, config).await
@@ -211,6 +211,9 @@ async fn configure_integration(
         },
     )
     .await?;
+    if integration_is_ready(&configured) {
+        return Ok(configured);
+    }
     repository
         .activate_stripe_integration(
             workspace_id,
@@ -218,6 +221,11 @@ async fn configure_integration(
             configured.configuration_version,
         )
         .await
+}
+
+fn integration_is_ready(integration: &crate::dto::billing::WorkspaceIntegrationResponse) -> bool {
+    let active = integration.status == "ACTIVE";
+    active && integration.webhook_secret_configured
 }
 
 async fn find_or_create_binding(
@@ -363,8 +371,11 @@ fn stripe_error(error: impl std::fmt::Display) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_request;
-    use crate::dto::checkouts::{CheckoutKind, CreateCheckoutRequest};
+    use super::{integration_is_ready, validate_request};
+    use crate::dto::{
+        billing::WorkspaceIntegrationResponse,
+        checkouts::{CheckoutKind, CreateCheckoutRequest},
+    };
     use uuid::Uuid;
 
     #[test]
@@ -382,5 +393,26 @@ mod tests {
         assert!(validate_request(&request, "key-1").is_ok());
         request.transaction_id = "ação".to_string();
         assert!(validate_request(&request, "key-1").is_err());
+    }
+
+    #[test]
+    fn configured_checkout_integration_is_not_activated_twice() {
+        let mut integration = WorkspaceIntegrationResponse {
+            billing_connection_id: Uuid::new_v4(),
+            provider: "STRIPE".into(),
+            account_reference: "acct_test".into(),
+            environment: "TEST".into(),
+            status: "PENDING_SETUP".into(),
+            api_secret_configured: true,
+            webhook_secret_configured: false,
+            customer_reference: None,
+            webhook_path: "/v1/billing/webhooks/test".into(),
+            webhook_url: None,
+            configuration_version: 1,
+        };
+        assert!(!integration_is_ready(&integration));
+        integration.status = "ACTIVE".into();
+        integration.webhook_secret_configured = true;
+        assert!(integration_is_ready(&integration));
     }
 }
