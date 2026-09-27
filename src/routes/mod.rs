@@ -13,6 +13,7 @@ pub mod billing;
 pub mod billing_investigation;
 pub mod catalog;
 pub mod catalog_admin;
+pub mod checkouts;
 mod cors;
 pub mod credits;
 pub mod inbox_admin;
@@ -42,7 +43,8 @@ pub mod wallets;
         (name = "Subscriptions", description = "Commercial plans, customer plans, and cycles"),
         (name = "Usage", description = "Metered usage, eligibility, and item statements"),
         (name = "Operations", description = "Administrative replay and reconciliation operations"),
-        (name = "Billing", description = "Provider-neutral collection and payment workflows")
+        (name = "Billing", description = "Provider-neutral collection and payment workflows"),
+        (name = "Checkouts", description = "Provider-neutral checkout workflows")
     )
 )]
 struct ApiDoc;
@@ -92,6 +94,7 @@ fn api_router() -> utoipa_axum::router::OpenApiRouter<AppState> {
         .merge(audit_admin::router())
         .merge(admin_queries::router())
         .merge(billing::router())
+        .merge(checkouts::router())
         .merge(integrations::router())
         .merge(billing_investigation::router())
         .merge(usage::router())

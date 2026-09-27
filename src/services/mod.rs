@@ -2,6 +2,7 @@ pub mod admin_queries;
 pub mod admission;
 pub mod audit_admin;
 pub mod billing;
+pub mod billing_checkout;
 pub mod billing_dispatcher;
 pub mod billing_integrations;
 pub mod billing_investigation;

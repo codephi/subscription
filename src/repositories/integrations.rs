@@ -22,7 +22,54 @@ pub struct IntegrationSecrets {
     pub configuration_version: i32,
 }
 
+pub struct CheckoutWebhookScope {
+    pub workspace_id: Uuid,
+    pub billing_connection_id: Uuid,
+    pub provider: String,
+    pub environment: Option<String>,
+    pub provider_account_reference: Option<String>,
+    pub provider_customer_reference: Option<String>,
+}
+
 impl DatabaseRepository {
+    pub async fn checkout_webhook_scope(
+        &self,
+        collection_request_id: Uuid,
+    ) -> ApiResult<CheckoutWebhookScope> {
+        let row = sqlx::query("SELECT bc.workspace_id,bc.billing_connection_id,bc.provider,bc.environment, \
+            bc.provider_account_reference,bc.provider_customer_reference FROM collection_requests cr \
+            JOIN payment_method_bindings pmb ON pmb.payment_method_binding_id=cr.payment_method_binding_id \
+            JOIN billing_connections bc ON bc.billing_connection_id=pmb.billing_connection_id \
+            WHERE cr.collection_request_id=$1")
+            .bind(collection_request_id).fetch_optional(&self.pool()).await?
+            .ok_or_else(|| ApiError::not_found("collection_request_not_found", format!(
+                "collection request {collection_request_id} does not exist")))?;
+        Ok(CheckoutWebhookScope {
+            workspace_id: row.get("workspace_id"),
+            billing_connection_id: row.get("billing_connection_id"),
+            provider: row.get("provider"),
+            environment: row.try_get("environment").unwrap_or(None),
+            provider_account_reference: row.try_get("provider_account_reference").unwrap_or(None),
+            provider_customer_reference: row.try_get("provider_customer_reference").unwrap_or(None),
+        })
+    }
+
+    pub async fn find_test_stripe_integration(
+        &self,
+        workspace_id: Uuid,
+        account_id: &str,
+    ) -> ApiResult<Option<WorkspaceIntegrationResponse>> {
+        let row = sqlx::query(
+            "SELECT * FROM billing_connections WHERE workspace_id=$1 AND provider='STRIPE' \
+             AND environment='TEST' AND provider_account_reference=$2",
+        )
+        .bind(workspace_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool())
+        .await?;
+        Ok(row.as_ref().map(integration_from_row))
+    }
+
     pub async fn get_integration(
         &self,
         workspace_id: Uuid,

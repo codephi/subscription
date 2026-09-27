@@ -4,6 +4,7 @@ pub mod admission;
 pub mod audit_admin;
 
 pub mod billing_attempts;
+pub mod billing_checkouts;
 pub mod billing_confirmation;
 pub mod billing_connections;
 pub mod billing_connector;

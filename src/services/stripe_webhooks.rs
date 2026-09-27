@@ -23,6 +23,10 @@ struct StripeEvent {
     #[serde(rename = "type")]
     event_type: String,
     created: i64,
+    #[serde(default)]
+    livemode: Option<bool>,
+    #[serde(default)]
+    account: Option<String>,
     data: StripeEventData,
 }
 
@@ -36,6 +40,8 @@ struct StripePaymentIntent {
     id: String,
     amount: i64,
     currency: String,
+    #[serde(default)]
+    customer: Option<String>,
     #[serde(default)]
     amount_refunded: Option<i64>,
     #[serde(default)]
@@ -132,6 +138,81 @@ pub async fn process_stripe_webhook(
             })
         }
         Err(error) => Err(error),
+    }
+}
+
+pub async fn process_shared_stripe_webhook(
+    repository: &DatabaseRepository,
+    signature: &str,
+    payload: &[u8],
+    shared_secret: &str,
+) -> ApiResult<BillingWebhookResponse> {
+    verify_stripe_signature(signature, payload, shared_secret, Utc::now())?;
+    let event: StripeEvent = serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
+    if !is_payment_event(&event.event_type) {
+        return Ok(webhook_result("IGNORED"));
+    }
+    let Some(collection_id) = event.data.object.metadata.collection_request_id else {
+        return Ok(webhook_result("IGNORED"));
+    };
+    let Some(scope) = find_webhook_scope(repository, collection_id).await? else {
+        return Ok(webhook_result("IGNORED"));
+    };
+    validate_webhook_scope(&event, &scope)?;
+    process_stripe_webhook(repository, scope.billing_connection_id, signature, payload).await
+}
+
+async fn find_webhook_scope(
+    repository: &DatabaseRepository,
+    collection_id: Uuid,
+) -> ApiResult<Option<crate::repositories::integrations::CheckoutWebhookScope>> {
+    match repository.checkout_webhook_scope(collection_id).await {
+        Ok(scope) => Ok(Some(scope)),
+        Err(error) if error.code() == "collection_request_not_found" => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn validate_webhook_scope(
+    event: &StripeEvent,
+    scope: &crate::repositories::integrations::CheckoutWebhookScope,
+) -> ApiResult<()> {
+    let customer_matches =
+        scope.provider_customer_reference.as_deref() == event.data.object.customer.as_deref();
+    let account_matches = event
+        .account
+        .as_ref()
+        .is_none_or(|account| scope.provider_account_reference.as_deref() == Some(account));
+    if scope.provider == "STRIPE"
+        && scope.environment.as_deref() == Some("TEST")
+        && event.livemode == Some(false)
+        && customer_matches
+        && account_matches
+    {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "billing_webhook_scope_mismatch",
+        format!(
+            "Stripe event {} does not match its test checkout customer and account",
+            event.id
+        ),
+    ))
+}
+
+fn is_payment_event(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "payment_intent.succeeded"
+            | "payment_intent.payment_failed"
+            | "payment_intent.canceled"
+            | "payment_intent.requires_action"
+    )
+}
+
+fn webhook_result(result: &str) -> BillingWebhookResponse {
+    BillingWebhookResponse {
+        result: result.to_string(),
     }
 }
 

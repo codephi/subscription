@@ -6,9 +6,10 @@ use axum::{body::Body, http::Request};
 use serde_json::Value;
 use tower::ServiceExt;
 
-const EXPECTED_TAGS: [&str; 9] = [
+const EXPECTED_TAGS: [&str; 10] = [
     "Billing",
     "Catalog",
+    "Checkouts",
     "Credits",
     "Integrations",
     "Operations",

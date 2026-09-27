@@ -29,7 +29,10 @@ async fn main() -> Result<()> {
     );
     let state = AppState::new(repository.clone())
         .with_accounts_webhook_secret(config.accounts_webhook_secret.clone())
-        .with_public_api_base_url(config.public_api_base_url.clone());
+        .with_public_api_base_url(config.public_api_base_url.clone())
+        .with_billing_checkout_config(
+            subscription::services::billing_checkout::BillingCheckoutConfig::from_environment()?,
+        );
 
     if let Some(webhook) = &config.outbound_event_webhook {
         tokio::spawn(outbox::run_dispatcher(

@@ -6,6 +6,13 @@ use crate::repositories::billing_connector::{
     SetupSessionCommand, SetupSessionFuture, SetupSessionResult,
 };
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedStripePaymentMethod {
+    pub setup_intent_id: String,
+    pub payment_method_id: String,
+    pub customer_id: String,
+}
+
 pub struct StripeConnector {
     client: reqwest::Client,
     secret_key: String,
@@ -90,6 +97,30 @@ impl StripeConnector {
         required_string(&value, "id")
     }
 
+    pub async fn prepare_test_payment_method(
+        &self,
+        customer_id: &str,
+        idempotency_key: &str,
+        declines_charge: bool,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let payment_method = if declines_charge {
+            "pm_card_chargeCustomerFail"
+        } else {
+            "pm_card_visa"
+        };
+        let fields = vec![
+            ("customer", customer_id.to_string()),
+            ("payment_method_types[]", "card".to_string()),
+            ("usage", "off_session".to_string()),
+            ("payment_method", payment_method.to_string()),
+            ("confirm", "true".to_string()),
+        ];
+        let value = self
+            .post_form("/v1/setup_intents", &fields, Some(idempotency_key))
+            .await?;
+        prepared_payment_method(&value, customer_id)
+    }
+
     async fn post_form(
         &self,
         path: &str,
@@ -115,6 +146,22 @@ impl StripeConnector {
         }
         Err(api_error(status.as_u16(), &body))
     }
+}
+
+fn prepared_payment_method(
+    value: &Value,
+    expected_customer: &str,
+) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+    let status = required_string(value, "status")?;
+    let customer_id = required_string(value, "customer")?;
+    if status != "succeeded" || customer_id != expected_customer {
+        return Err(invalid_response("SetupIntent", &value.to_string()));
+    }
+    Ok(PreparedStripePaymentMethod {
+        setup_intent_id: required_string(value, "id")?,
+        payment_method_id: required_string(value, "payment_method")?,
+        customer_id,
+    })
 }
 
 impl BillingConnector for StripeConnector {

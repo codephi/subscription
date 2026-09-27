@@ -67,6 +67,51 @@ async fn stripe_provider_is_advertised_without_database_access() {
     assert_eq!(providers[0]["available"], true);
 }
 
+#[tokio::test]
+async fn transparent_checkout_is_documented_and_disabled_without_sandbox_config() {
+    let router = test_router();
+    let workspace_id = Uuid::new_v4();
+    let response = router
+        .clone()
+        .oneshot(
+            Request::post(format!("/v1/workspaces/{workspace_id}/checkouts"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "checkout-route-test")
+                .body(Body::from(
+                    json!({
+                        "customer_plan_id": Uuid::new_v4(),
+                        "checkout_kind": "INITIAL",
+                        "on_demand_plan_id": null,
+                        "transaction_id": "checkout-route-test"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 503);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "billing_checkout_disabled"
+    );
+
+    let openapi = router
+        .oneshot(Request::get("/openapi.json").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let document = response_json(openapi).await;
+    assert!(document["paths"]
+        .get("/v1/workspaces/{workspace_id}/checkouts")
+        .is_some());
+    assert!(document["paths"]
+        .get("/v1/workspaces/{workspace_id}/checkouts/{checkout_id}")
+        .is_some());
+    assert!(document["paths"]
+        .get("/v1/billing/webhooks/stripe")
+        .is_some());
+}
+
 fn test_router() -> axum::Router {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .connect_lazy("postgres://postgres:postgres@127.0.0.1:1/postgres")

@@ -28,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_billing_connection))
         .routes(routes!(get_billing_capabilities))
         .routes(routes!(create_payment_method_setup_session))
+        .routes(routes!(receive_shared_stripe_webhook))
         .routes(routes!(create_payment_method_binding))
         .routes(routes!(list_payment_method_bindings))
         .routes(routes!(create_on_demand_purchase))
@@ -138,6 +139,44 @@ async fn receive_stripe_webhook(
         stripe_webhooks::process_stripe_webhook(&state.database(), connection_id, signature, &body)
             .await?,
     ))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/billing/webhooks/stripe",
+    tag = "Billing",
+    request_body(content = String, content_type = "application/json"),
+    responses((status = 200, body = BillingWebhookResponse),
+        (status = 401, body = ErrorResponse), (status = 409, body = ErrorResponse))
+)]
+async fn receive_shared_stripe_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: bytes::Bytes,
+) -> ApiResult<Json<BillingWebhookResponse>> {
+    let signature = headers
+        .get("stripe-signature")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::unauthorized(
+                "stripe_signature_missing",
+                "Stripe-Signature header is required",
+            )
+        })?;
+    let config = state.billing_checkout_config().ok_or_else(|| {
+        ApiError::service_unavailable(
+            "billing_checkout_disabled",
+            "shared Stripe webhook is not configured",
+        )
+    })?;
+    let result = crate::services::stripe_webhooks::process_shared_stripe_webhook(
+        &state.database(),
+        signature,
+        &body,
+        &config.webhook_secret,
+    )
+    .await?;
+    Ok(Json(result))
 }
 
 #[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/billing-connections/{connection_id}/payment-method-setup-sessions", tag = "Billing",

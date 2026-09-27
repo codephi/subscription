@@ -1,0 +1,10 @@
+.env
+backend/.env
+backend/tasklab.sqlite3
+backend/tasklab.sqlite3-shm
+backend/tasklab.sqlite3-wal
+node_modules
+web/dist
+web/playwright-report
+web/test-results
+test-results

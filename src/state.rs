@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::repositories::database::DatabaseRepository;
+use crate::services::billing_checkout::BillingCheckoutConfig;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -12,6 +13,7 @@ struct SharedState {
     pub database: DatabaseRepository,
     pub accounts_webhook_secret: Option<String>,
     pub public_api_base_url: Option<String>,
+    pub billing_checkout: Option<BillingCheckoutConfig>,
 }
 
 impl AppState {
@@ -20,6 +22,7 @@ impl AppState {
             database,
             accounts_webhook_secret: None,
             public_api_base_url: None,
+            billing_checkout: None,
         };
         Self {
             inner: Arc::new(inner),
@@ -46,6 +49,15 @@ impl AppState {
 
     pub fn public_api_base_url(&self) -> Option<String> {
         self.inner.public_api_base_url.clone()
+    }
+
+    pub fn with_billing_checkout_config(mut self, config: Option<BillingCheckoutConfig>) -> Self {
+        Arc::make_mut(&mut self.inner).billing_checkout = config;
+        self
+    }
+
+    pub fn billing_checkout_config(&self) -> Option<BillingCheckoutConfig> {
+        self.inner.billing_checkout.clone()
     }
 }
 

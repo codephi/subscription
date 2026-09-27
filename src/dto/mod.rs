@@ -5,6 +5,7 @@ pub mod billing;
 pub mod billing_investigation;
 pub mod catalog;
 pub mod catalog_admin;
+pub mod checkouts;
 pub mod credits;
 pub mod echo;
 pub mod events;

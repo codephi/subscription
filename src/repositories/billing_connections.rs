@@ -26,6 +26,24 @@ pub struct BillingConnectorConfiguration {
 }
 
 impl DatabaseRepository {
+    pub async fn find_payment_method_binding(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        provider_reference: &str,
+    ) -> ApiResult<Option<PaymentMethodBindingResponse>> {
+        let row = sqlx::query(
+            "SELECT * FROM payment_method_bindings WHERE workspace_id=$1 \
+            AND billing_connection_id=$2 AND provider_payment_method_reference=$3",
+        )
+        .bind(workspace_id)
+        .bind(connection_id)
+        .bind(provider_reference)
+        .fetch_optional(&self.pool())
+        .await?;
+        Ok(row.as_ref().map(binding_from_row))
+    }
+
     pub async fn billing_connector_configuration(
         &self,
         connection_id: Uuid,

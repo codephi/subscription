@@ -470,6 +470,40 @@ async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sandbox_payment_method_is_selected_inside_billing_and_bound_to_customer() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"seti_sandbox","status":"succeeded","customer":"cus_sandbox","payment_method":"pm_card_visa"}"#,
+    ).await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let setup = connector
+        .prepare_test_payment_method("cus_sandbox", "checkout:demo:payment-method:v1", false)
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert_eq!(setup.payment_method_id, "pm_card_visa");
+    assert_eq!(setup.customer_id, "cus_sandbox");
+    assert!(request.contains("payment_method=pm_card_visa"));
+    assert!(request.contains("confirm=true"));
+    assert!(request.contains("usage=off_session"));
+    assert!(request.contains("idempotency-key: checkout:demo:payment-method:v1"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn declined_sandbox_scenario_selects_a_failure_method_without_client_input() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"seti_declined","status":"succeeded","customer":"cus_sandbox","payment_method":"pm_card_chargeCustomerFail"}"#,
+    ).await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let setup = connector
+        .prepare_test_payment_method("cus_sandbox", "checkout:demo:declined:v1", true)
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert_eq!(setup.payment_method_id, "pm_card_chargeCustomerFail");
+    assert!(request.contains("payment_method=pm_card_chargeCustomerFail"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn external_refund_is_observed_once_without_automatic_credit_effect() {
     let fixture = setup_usage(1, 1, 25).await;
     let connection = billing::create_billing_connection(
