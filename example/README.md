@@ -10,7 +10,7 @@ O produto de demonstração é uma tarefa nomeada que custa 1 crédito. O modo p
 2. Para exercitar pagamentos, habilite o sandbox **somente no ambiente da Subscription** com `BILLING_SANDBOX_ENABLED=true`, credenciais de teste do provedor, o segredo de assinatura de webhook e `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED`. A Subscription escolhe o meio de pagamento de teste; a TaskLab nunca recebe esses segredos nem envia dados de cartão.
 3. Copie `.env.example` para `.env` e defina `ACCOUNTS_WEBHOOK_SECRET` com o mesmo segredo configurado na Subscription. `DATABASE_URL` já aponta para um arquivo SQLite local.
 4. Execute `npm install` e depois `npm run setup`. O setup cria o catálogo e as ofertas por HTTP e grava os identificadores em `catalog_settings`; repeti-lo reutiliza os identificadores já persistidos.
-5. Rode `npm run dev` e abra [http://localhost:5174](http://localhost:5174). O backend Rust usa a porta `3001`.
+5. Na raiz do repositório, rode `make run` e abra [http://localhost:5174](http://localhost:5174). O comando inicia o backend Rust na porta `3001` e o frontend na `5174`. A Subscription permanece na `3000`; o admin-ui usa a porta padrão do Vite (`5173`).
 
 O ingresso de webhook de pagamento deve apontar diretamente para a Subscription em `/v1/billing/webhooks/stripe`. Não configure webhook nem credencial de pagamento na TaskLab.
 
@@ -20,6 +20,7 @@ O ingresso de webhook de pagamento deve apontar diretamente para a Subscription 
 - `npm run dev`: inicia o backend Axum e o frontend Vite.
 - `npm test`: executa testes do backend Rust, Vitest e Playwright.
 - `npm run build`: verifica TypeScript e gera a build web.
+- `make run` (na raiz): inicia backend e frontend da TaskLab juntos.
 
 O saldo, extrato, elegibilidade, medidor e consumo são consultados na Subscription. O SQLite local guarda usuários com hash de senha, sessões, referências de checkout e histórico das execuções. Se uma resposta de consumo se perder, a repetição reutiliza a mesma transação e chave de idempotência.
 
