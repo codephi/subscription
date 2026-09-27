@@ -2,6 +2,8 @@
 
 TaskLab é uma POC para testar uma aplicação cliente da Subscription. A aplicação local conhece somente a API da Subscription: o checkout envia o plano, o tipo da compra, o pacote quando aplicável, uma transação e uma chave de idempotência. Credenciais, cartão de pagamento, conexão do provedor, decisão de aprovação ou recusa e webhook ficam na Subscription.
 
+O frontend usa shadcn/ui com preset Base Nova e Base UI. Os controles visuais vêm dos componentes em `web/src/components/ui`; para consultar a configuração e adicionar novos componentes, use `npm run ui:info` e `npm run ui:add -- <componente>`.
+
 O produto de demonstração é uma tarefa nomeada que custa 1 crédito. O modo pré-pago oferece uma recarga de R$ 10,00 por 10 créditos. O modo de assinatura custa R$ 29,90 por mês e concede 50 créditos depois que o ciclo é confirmado. Cada conta escolhe uma modalidade no primeiro acesso; a conta `admin` / `admin` é semeada como uma conta de demonstração comum.
 
 ## Preparar
@@ -20,6 +22,8 @@ O ingresso de webhook de pagamento deve apontar diretamente para a Subscription 
 - `npm run dev`: inicia o backend Axum e o frontend Vite.
 - `npm test`: executa testes do backend Rust, Vitest e Playwright.
 - `npm run build`: verifica TypeScript e gera a build web.
+- `npm run ui:info`: exibe a configuração shadcn do frontend.
+- `npm run ui:add -- <componente>`: adiciona um componente shadcn a `web/src/components/ui`.
 - `make run` (na raiz): inicia Subscription (`3000`), admin-ui (`5173`), backend TaskLab (`3001`) e frontend TaskLab (`5174`).
 - `make monitoring` (na raiz): acompanha memória RSS e uso de CPU dos dois backends Rust; encerre com `Ctrl+C`.
 
