@@ -21,6 +21,7 @@ O ingresso de webhook de pagamento deve apontar diretamente para a Subscription 
 - `npm test`: executa testes do backend Rust, Vitest e Playwright.
 - `npm run build`: verifica TypeScript e gera a build web.
 - `make run` (na raiz): inicia Subscription (`3000`), admin-ui (`5173`), backend TaskLab (`3001`) e frontend TaskLab (`5174`).
+- `make monitoring` (na raiz): acompanha memória RSS e uso de CPU dos dois backends Rust; encerre com `Ctrl+C`.
 
 O saldo, extrato, elegibilidade, medidor e consumo são consultados na Subscription. O SQLite local guarda usuários com hash de senha, sessões, referências de checkout e histórico das execuções. Se uma resposta de consumo se perder, a repetição reutiliza a mesma transação e chave de idempotência.
 

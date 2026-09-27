@@ -1,4 +1,4 @@
-.PHONY: run setup test build
+.PHONY: run monitoring setup test build
 
 run:
 	@if [ ! -x admin-ui/node_modules/.bin/vite ]; then npm --prefix admin-ui install; fi
@@ -7,6 +7,9 @@ run:
 		"APP_PORT=3000 cargo run" \
 		"npm --prefix admin-ui run dev -- --host 127.0.0.1 --port 5173 --strictPort" \
 		"npm --prefix example run dev"
+
+monitoring:
+	./scripts/monitor-backends.sh
 
 setup:
 	npm --prefix example run setup
