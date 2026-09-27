@@ -14,6 +14,8 @@ O produto de demonstração é uma tarefa nomeada que custa 1 crédito. O modo p
 4. Execute `npm install` e depois `npm run setup`. O setup cria o catálogo e as ofertas por HTTP e grava os identificadores em `catalog_settings`; repeti-lo reutiliza os identificadores já persistidos.
 5. Na raiz do repositório, rode `make run`. O comando inicia os backends da Subscription e TaskLab e os frontends admin-ui e TaskLab juntos. Abra o admin em [http://localhost:5173](http://localhost:5173) e a TaskLab em [http://localhost:5174](http://localhost:5174).
 
+Quando `BILLING_SANDBOX_ENABLED=true`, `make run` também inicia o Stripe CLI para encaminhar webhooks à Subscription. Instale-o com `brew install stripe-cli`; configure `STRIPE_SECRET_KEY` e o segredo exibido por `stripe listen --print-secret` no `.env` da raiz. O script valida se o segredo corresponde ao listener antes de iniciar.
+
 O ingresso de webhook de pagamento deve apontar diretamente para a Subscription em `/v1/billing/webhooks/stripe`. Não configure webhook nem credencial de pagamento na TaskLab.
 
 ## Comandos
@@ -24,7 +26,7 @@ O ingresso de webhook de pagamento deve apontar diretamente para a Subscription 
 - `npm run build`: verifica TypeScript e gera a build web.
 - `npm run ui:info`: exibe a configuração shadcn do frontend.
 - `npm run ui:add -- <componente>`: adiciona um componente shadcn a `web/src/components/ui`.
-- `make run` (na raiz): inicia Subscription (`3000`), admin-ui (`5173`), backend TaskLab (`3001`) e frontend TaskLab (`5174`).
+- `make run` (na raiz): inicia Subscription (`3000`), admin-ui (`5173`), backend TaskLab (`3001`), frontend TaskLab (`5174`) e, com o sandbox ativo, encaminhamento Stripe CLI para webhooks.
 - `make monitoring` (na raiz): acompanha memória RSS e uso de CPU dos dois backends Rust; encerre com `Ctrl+C`.
 
 O saldo, extrato, elegibilidade, medidor e consumo são consultados na Subscription. O SQLite local guarda usuários com hash de senha, sessões, referências de checkout e histórico das execuções. Se uma resposta de consumo se perder, a repetição reutiliza a mesma transação e chave de idempotência.

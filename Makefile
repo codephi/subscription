@@ -3,10 +3,11 @@
 run:
 	@if [ ! -x admin-ui/node_modules/.bin/vite ]; then npm --prefix admin-ui install; fi
 	@if [ ! -d example/node_modules ]; then npm --prefix example install; fi
-	./example/node_modules/.bin/concurrently -k -n subscription,admin,tasklab -c cyan,green,blue \
+	./example/node_modules/.bin/concurrently -k -n subscription,admin,tasklab,stripe-webhooks -c cyan,green,blue,yellow \
 		"APP_PORT=3000 cargo run" \
 		"npm --prefix admin-ui run dev -- --host 127.0.0.1 --port 5173 --strictPort" \
-		"npm --prefix example run dev"
+		"npm --prefix example run dev" \
+		"./scripts/run-stripe-webhooks.sh"
 
 monitoring:
 	./scripts/monitor-backends.sh
