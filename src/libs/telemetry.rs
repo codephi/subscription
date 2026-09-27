@@ -1,6 +1,11 @@
-use anyhow::Result;
+use std::time::Duration;
+
+use anyhow::{anyhow, Result};
 use opentelemetry::{global, trace::TracerProvider as _};
-use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_otlp::{
+    HttpExporterBuilderSet, Protocol, SpanExporter, SpanExporterBuilder, WithExportConfig,
+    WithHttpConfig, OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT,
+};
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator, resource::Resource, trace::SdkTracerProvider,
 };
@@ -51,10 +56,10 @@ pub fn init_tracing(enabled: bool) -> Result<TelemetryGuard> {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     let resource = build_resource();
-    let exporter = build_exporter()?;
     let use_simple = std::env::var("OTEL_USE_SIMPLE_EXPORTER")
         .map(|value| value.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    let exporter = build_exporter(use_simple)?;
 
     let builder = SdkTracerProvider::builder().with_resource(resource);
     let tracer_provider = if use_simple {
@@ -81,14 +86,14 @@ pub fn init_tracing(enabled: bool) -> Result<TelemetryGuard> {
     })
 }
 
-fn build_exporter() -> Result<SpanExporter> {
+fn build_exporter(use_simple: bool) -> Result<SpanExporter> {
     let protocol = std::env::var("OTEL_EXPORTER_OTLP_PROTOCOL")
         .unwrap_or_else(|_| "grpc".to_string())
         .to_ascii_lowercase();
 
     match protocol.as_str() {
-        "http/protobuf" => build_http_exporter(Protocol::HttpBinary),
-        "http/json" => build_http_exporter(Protocol::HttpJson),
+        "http/protobuf" => build_http_exporter(Protocol::HttpBinary, use_simple),
+        "http/json" => build_http_exporter(Protocol::HttpJson, use_simple),
         "grpc" => SpanExporter::builder()
             .with_tonic()
             .build()
@@ -100,12 +105,54 @@ fn build_exporter() -> Result<SpanExporter> {
     }
 }
 
-fn build_http_exporter(protocol: Protocol) -> Result<SpanExporter> {
-    SpanExporter::builder()
-        .with_http()
-        .with_protocol(protocol)
+fn build_http_exporter(protocol: Protocol, use_simple: bool) -> Result<SpanExporter> {
+    let timeout = http_export_timeout(
+        std::env::var("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT")
+            .ok()
+            .as_deref(),
+        std::env::var("OTEL_EXPORTER_OTLP_TIMEOUT").ok().as_deref(),
+    );
+    http_exporter_builder(protocol, use_simple, timeout)?
         .build()
         .map_err(Into::into)
+}
+
+fn http_exporter_builder(
+    protocol: Protocol,
+    use_simple: bool,
+    timeout: Duration,
+) -> Result<SpanExporterBuilder<HttpExporterBuilderSet>> {
+    let builder = SpanExporter::builder()
+        .with_http()
+        .with_protocol(protocol)
+        .with_timeout(timeout);
+    if use_simple {
+        let client = reqwest::Client::builder().timeout(timeout).build()?;
+        return Ok(builder.with_http_client(client));
+    }
+    Ok(builder.with_http_client(blocking_http_client(timeout)?))
+}
+
+fn blocking_http_client(timeout: Duration) -> Result<reqwest::blocking::Client> {
+    // BatchSpanProcessor has no Tokio runtime; construct the blocking client's
+    // internal runtime outside Tokio too, so initialization cannot panic.
+    std::thread::spawn(move || {
+        reqwest::blocking::Client::builder()
+            .timeout(timeout)
+            .build()
+    })
+    .join()
+    .map_err(|_| anyhow!("OTLP HTTP client thread panicked; expected a blocking client"))?
+    .map_err(Into::into)
+}
+
+fn http_export_timeout(trace_timeout: Option<&str>, global_timeout: Option<&str>) -> Duration {
+    [trace_timeout, global_timeout]
+        .into_iter()
+        .flatten()
+        .find_map(|value| value.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT)
 }
 
 fn build_resource() -> Resource {
@@ -115,3 +162,7 @@ fn build_resource() -> Resource {
     }
     builder.build()
 }
+
+#[cfg(test)]
+#[path = "telemetry/tests.rs"]
+mod tests;

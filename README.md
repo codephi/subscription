@@ -173,6 +173,15 @@ Swagger UI is available at `/docs` with the generated OpenAPI contract. Every
 new HTTP route is included in `/openapi.json`, assigned to one domain category,
 and covered by a contract check.
 
+HTTP OpenTelemetry export (`http/protobuf` or `http/json`) uses the blocking
+Reqwest client on the batch processor's dedicated thread. The client is selected
+explicitly because the SDK otherwise prefers the async client, which needs a
+Tokio runtime and can crash batch export, followed by repeated
+`BatchSpanProcessor.OnEnd.AfterShutdown` warnings and lost spans. The optional
+`OTEL_USE_SIMPLE_EXPORTER=true` mode retains its async HTTP client for exports
+inside Tokio. Both modes honor `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`, falling back
+to `OTEL_EXPORTER_OTLP_TIMEOUT` (milliseconds) and then the SDK default.
+
 Business and administrative routes intentionally have no general authentication
 middleware in the current delivery. Accounts and outgoing integration events
 still require HMAC signatures. Do not expose these routes outside a trusted

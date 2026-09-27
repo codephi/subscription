@@ -42,6 +42,8 @@ opentelemetry-otlp = { version = "0.32.0", default-features = false, features = 
     "grpc-tonic",
     "http-json",
     "http-proto",
+    # Batch export needs a blocking client; simple export runs inside Tokio.
+    "reqwest-blocking-client",
     "reqwest-client",
     "trace",
 ] }
