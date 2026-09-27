@@ -5,6 +5,7 @@ import { AuthScreen } from "@/components/auth-screen"
 import { OnboardingScreen } from "@/components/onboarding-screen"
 import { WorkspaceDashboard } from "@/components/workspace-dashboard"
 import { LoadingScreen } from "@/components/loading-screen"
+import { AppFrame } from "@/components/app-frame"
 
 type PlanModel = "PREPAID" | "SUBSCRIPTION"
 type CheckoutKind = "INITIAL" | "ON_DEMAND"
@@ -60,20 +61,20 @@ export default function App() {
     onError: reportError(setError),
   })
 
-  if (!authChecked) return <LoadingScreen />
-  if (!user) return <AuthScreen busy={authMutation.isPending} error={error} onErrorClear={() => setError("")} onSubmit={(mode, credentials) => authMutation.mutate({ mode, ...credentials })} />
+  if (!authChecked) return <AppFrame><LoadingScreen /></AppFrame>
+  if (!user) return <AppFrame><AuthScreen busy={authMutation.isPending} error={error} onErrorClear={() => setError("")} onSubmit={(mode, credentials) => authMutation.mutate({ mode, ...credentials })} /></AppFrame>
   if (!user.plan_model) {
-    return <OnboardingScreen
+    return <AppFrame><OnboardingScreen
       username={user.username}
       card={card}
       setCard={setCard}
       busy={planMutation.isPending || checkoutMutation.isPending}
       error={error}
       onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : startCheckout("INITIAL", user, checkoutKey, checkoutMutation.mutate)}
-    />
+    /></AppFrame>
   }
 
-  return <WorkspaceDashboard
+  return <AppFrame><WorkspaceDashboard
     user={user}
     view={dashboard.data}
     loading={dashboard.isPending}
@@ -92,7 +93,7 @@ export default function App() {
     onSignOut={() => signOut(user, queryClient, setUser, setCheckout, setError, checkoutKey, executionTransaction)}
     onCheckout={() => startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, checkoutKey, checkoutMutation.mutate)}
     onExecute={() => startExecution(user, taskName, setPendingExecution, executionTransaction, executeMutation.mutate)}
-  />
+  /></AppFrame>
 }
 
 function restoreSession(setUser: (user: User | null) => void, setChecked: (checked: boolean) => void) {
