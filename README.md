@@ -144,7 +144,7 @@ If you want to override the detected name, pass it explicitly:
 
 1. Start a database (optional example using Compose):
    - `docker compose up -d postgres jaeger pgadmin`
-   - Open pgAdmin at `http://localhost:8081` and sign in with `admin@localhost` / `admin`.
+   - Open pgAdmin at `http://localhost:8081` and sign in with `admin@example.com` / `admin`.
    - The `Subscription local` PostgreSQL server is registered automatically. Connect with username `postgres` and password `postgres`.
    - If you are upgrading from an older Postgres image and see a volume layout error, recreate the Postgres volume once:
    - `docker compose down -v`

@@ -15,7 +15,7 @@ services:
     depends_on:
       - postgres
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@localhost
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
       PGADMIN_DEFAULT_PASSWORD: admin
       PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
       PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
