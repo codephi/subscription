@@ -86,7 +86,7 @@ function DemoCardFields({ card, setCard }: { card: DemoCard; setCard: (card: Dem
   return <Card>
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><CreditCard />Cartão fictício</CardTitle>
-      <CardDescription>Os campos são apenas cenográficos e permanecem no navegador.</CardDescription>
+      <CardDescription>Preencha com qualquer valor. Eles ficam no navegador; a Subscription usa o cartão de teste configurado internamente.</CardDescription>
     </CardHeader>
     <CardContent>
       <FieldGroup className="demo-card-fields">

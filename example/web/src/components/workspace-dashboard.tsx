@@ -198,7 +198,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   return <Card>
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><Sparkles />Simular checkout</CardTitle>
-      <CardDescription>Estes campos fictícios ficam no navegador. A aprovação ou recusa é configurada na Subscription.</CardDescription>
+      <CardDescription>Preencha com qualquer valor. Os campos ficam no navegador; a Subscription usa o cartão de teste e define a aprovação ou recusa.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
       {prepaid && <Field>
