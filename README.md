@@ -143,11 +143,12 @@ If you want to override the detected name, pass it explicitly:
 ### Quick start
 
 1. Start a database (optional example using Compose):
-   - `docker compose up -d postgres jaeger adminer`
-   - Open Adminer at `http://localhost:8081`. Use `postgres` as the server, `postgres` as the username and database, and `postgres` as the password.
+   - `docker compose up -d postgres jaeger pgadmin`
+   - Open pgAdmin at `http://localhost:8081` and sign in with `admin@localhost` / `admin`.
+   - The `Subscription local` PostgreSQL server is registered automatically. Connect with username `postgres` and password `postgres`.
    - If you are upgrading from an older Postgres image and see a volume layout error, recreate the Postgres volume once:
    - `docker compose down -v`
-   - `docker compose up -d postgres jaeger adminer`
+   - `docker compose up -d postgres jaeger pgadmin`
 2. Create the local environment file (already ignored by Git):
    - `cp .env.example .env`
    - Its database and OTLP endpoints match the ports exposed by Docker Compose.
