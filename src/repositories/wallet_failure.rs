@@ -80,7 +80,10 @@ async fn record_failure(
         materialized,
     )
     .await?;
-    let detail = format!("workspace {workspace_id}: {error_code}; expected {} complete item wallets, materialized {materialized}", items.len());
+    let detail = format!(
+        "workspace {workspace_id}: {error_code}; expected {} complete item wallets, materialized {materialized}",
+        items.len()
+    );
     sqlx::query(
         "UPDATE wallet_provisioning SET error_detail=$3 WHERE customer_id=$1 AND scope_version=$2",
     )

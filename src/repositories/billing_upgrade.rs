@@ -184,9 +184,12 @@ fn validate_state(customer_plan_id: Uuid, row: &sqlx::postgres::PgRow) -> ApiRes
     if valid {
         return Ok(());
     }
-    Err(ApiError::conflict("customer_plan_not_upgradeable", format!(
-        "customer plan {customer_plan_id} must be active/current and target a paid version in the same subscription"
-    )))
+    Err(ApiError::conflict(
+        "customer_plan_not_upgradeable",
+        format!(
+            "customer plan {customer_plan_id} must be active/current and target a paid version in the same subscription"
+        ),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -209,7 +209,10 @@ pub async fn transition_customer_plan(
     if !target.response.accepted_payment_methods.is_empty() {
         return Err(ApiError::conflict(
             "plan_transition_card_validation_required",
-            format!("target plan {} requires validated CARD evidence before transition; expected a free target without a card requirement", request.new_plan_version_id),
+            format!(
+                "target plan {} requires validated CARD evidence before transition; expected a free target without a card requirement",
+                request.new_plan_version_id
+            ),
         ));
     }
     let effective_at = repository.current_time().await?;
@@ -350,7 +353,9 @@ fn validate_paid_terms(amount: i64, currency: &str, methods: &[String]) -> ApiRe
     }
     Err(ApiError::unprocessable(
         "invalid_plan_price",
-        format!("paid amount {amount}, currency {currency:?}, and methods {methods:?} must be positive, ISO uppercase, and CARD-only"),
+        format!(
+            "paid amount {amount}, currency {currency:?}, and methods {methods:?} must be positive, ISO uppercase, and CARD-only"
+        ),
     ))
 }
 

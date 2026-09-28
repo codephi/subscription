@@ -428,6 +428,9 @@ async fn create_metered_product(repository: &DatabaseRepository) -> Uuid {
         item.item_id,
         UpdateItemRequest {
             name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },
@@ -440,6 +443,7 @@ async fn create_metered_product(repository: &DatabaseRepository) -> Uuid {
         UpdateProductRequest {
             name: None,
             description: None,
+            usage_model: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },

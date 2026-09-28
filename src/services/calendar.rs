@@ -185,7 +185,9 @@ fn days_in_month(year: i32, month: u32) -> Option<u32> {
 fn calendar_overflow(anchor: DateTime<Utc>, recurrence: PlanRecurrence, ordinal: i64) -> ApiError {
     ApiError::unprocessable(
         "subscription_calendar_overflow",
-        format!("anchor {anchor}, recurrence {recurrence:?}, and ordinal {ordinal} must form a UTC boundary"),
+        format!(
+            "anchor {anchor}, recurrence {recurrence:?}, and ordinal {ordinal} must form a UTC boundary"
+        ),
     )
 }
 

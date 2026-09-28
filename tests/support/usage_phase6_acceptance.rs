@@ -379,6 +379,9 @@ async fn activate_unentitled_catalog(
         item_id,
         UpdateItemRequest {
             name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },
@@ -391,6 +394,7 @@ async fn activate_unentitled_catalog(
         UpdateProductRequest {
             name: None,
             description: None,
+            usage_model: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },

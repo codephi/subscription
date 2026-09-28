@@ -229,6 +229,9 @@ async fn create_billable_catalog(repository: &DatabaseRepository, item_count: us
             item.item_id,
             UpdateItemRequest {
                 name: None,
+                parent_item_id: None,
+                unit_name: None,
+                quantity_scale: None,
                 status: Some(CatalogStatus::Active),
                 expected_version: 1,
             },
@@ -242,6 +245,7 @@ async fn create_billable_catalog(repository: &DatabaseRepository, item_count: us
         UpdateProductRequest {
             name: None,
             description: None,
+            usage_model: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },
@@ -274,6 +278,7 @@ async fn deactivate_product(repository: &DatabaseRepository, product_id: Uuid) {
         UpdateProductRequest {
             name: None,
             description: None,
+            usage_model: None,
             status: Some(CatalogStatus::Inactive),
             expected_version: 2,
         },

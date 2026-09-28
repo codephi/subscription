@@ -88,6 +88,9 @@ async fn change_first_item(fixture: &MultiItemUsageFixture, status: CatalogStatu
         item.item_id,
         UpdateItemRequest {
             name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
             status: Some(status),
             expected_version: item.version,
         },

@@ -86,6 +86,15 @@ impl DatabaseRepository {
         item_from_row(&row)
     }
 
+    pub async fn list_items_for_product(&self, product_id: Uuid) -> ApiResult<Vec<ItemResponse>> {
+        let rows =
+            sqlx::query("SELECT * FROM items WHERE product_id=$1 ORDER BY created_at, item_id")
+                .bind(product_id)
+                .fetch_all(&self.pool())
+                .await?;
+        rows.iter().map(item_from_row).collect()
+    }
+
     pub async fn item_has_published_price(&self, item_id: Uuid) -> ApiResult<bool> {
         Ok(sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM price_versions WHERE item_id=$1 \
@@ -181,14 +190,17 @@ async fn update_product_row(
     request: &UpdateProductRequest,
 ) -> ApiResult<sqlx::postgres::PgRow> {
     sqlx::query(
-        "UPDATE products SET name=COALESCE($2,name),description=COALESCE($3,description), \
-         status=COALESCE($4,status),published_at=CASE WHEN $4='ACTIVE' AND published_at IS NULL \
-         THEN now() ELSE published_at END,version=version+1 WHERE product_id=$1 AND version=$5 \
+        "UPDATE products SET name=COALESCE($2,name),description=CASE WHEN $3 THEN $4 ELSE description END, \
+         usage_model=COALESCE($5,usage_model),status=COALESCE($6,status), \
+         published_at=CASE WHEN $6='ACTIVE' AND published_at IS NULL \
+         THEN now() ELSE published_at END,version=version+1 WHERE product_id=$1 AND version=$7 \
          RETURNING *",
     )
     .bind(product_id)
     .bind(&request.name)
-    .bind(&request.description)
+    .bind(request.description.is_some())
+    .bind(request.description.clone().flatten())
+    .bind(request.usage_model.map(|model| model.as_str()))
     .bind(request.status.map(CatalogStatus::as_str))
     .bind(request.expected_version)
     .fetch_optional(&mut **transaction)
@@ -202,11 +214,21 @@ async fn update_item_row(
     request: &UpdateItemRequest,
 ) -> ApiResult<sqlx::postgres::PgRow> {
     sqlx::query(
-        "UPDATE items SET name=COALESCE($2,name),status=COALESCE($3,status),version=version+1 \
-         WHERE item_id=$1 AND version=$4 RETURNING *",
+        "UPDATE items SET name=COALESCE($2,name), \
+         parent_item_id=CASE WHEN $3 THEN $4 ELSE parent_item_id END, \
+         unit_name=CASE WHEN $5 THEN $6 ELSE unit_name END, \
+         quantity_scale=CASE WHEN $7 THEN $8 ELSE quantity_scale END, \
+         status=COALESCE($9,status),version=version+1 \
+         WHERE item_id=$1 AND version=$10 RETURNING *",
     )
     .bind(item_id)
     .bind(&request.name)
+    .bind(request.parent_item_id.is_some())
+    .bind(request.parent_item_id.flatten())
+    .bind(request.unit_name.is_some())
+    .bind(request.unit_name.clone().flatten())
+    .bind(request.quantity_scale.is_some())
+    .bind(request.quantity_scale.flatten().map(ItemUnits::value))
     .bind(request.status.map(CatalogStatus::as_str))
     .bind(request.expected_version)
     .fetch_optional(&mut **transaction)

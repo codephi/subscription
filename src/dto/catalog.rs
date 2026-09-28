@@ -49,9 +49,19 @@ pub struct CreateProductRequest {
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct UpdateProductRequest {
     pub name: Option<String>,
-    pub description: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub description: Option<Option<String>>,
+    pub usage_model: Option<UsageModel>,
     pub status: Option<CatalogStatus>,
     pub expected_version: i64,
+}
+
+fn deserialize_optional_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -77,6 +87,12 @@ pub struct CreateItemRequest {
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct UpdateItemRequest {
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub parent_item_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub unit_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub quantity_scale: Option<Option<ItemUnits>>,
     pub status: Option<CatalogStatus>,
     pub expected_version: i64,
 }

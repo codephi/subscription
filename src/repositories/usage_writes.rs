@@ -165,7 +165,9 @@ async fn allocate_credit_lots(
     }
     Err(ApiError::conflict(
         "insufficient_credit",
-        format!("workspace {workspace_id} eligible credit lots are short by {remaining} for debit {required}"),
+        format!(
+            "workspace {workspace_id} eligible credit lots are short by {remaining} for debit {required}"
+        ),
     ))
 }
 

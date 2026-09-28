@@ -302,7 +302,9 @@ async fn lock_transition_source(
     if !matches!(status.as_str(), "ACTIVE" | "ACTIVE_PAID") || activation != "ACTIVATED" {
         return Err(ApiError::conflict(
             "customer_plan_not_active",
-            format!("customer plan {customer_plan_id} must be ACTIVE/ACTIVATED, found {status}/{activation}"),
+            format!(
+                "customer plan {customer_plan_id} must be ACTIVE/ACTIVATED, found {status}/{activation}"
+            ),
         ));
     }
     Ok(TransitionSource {
@@ -323,7 +325,10 @@ fn validate_transition_source(
     if current.subscription_id != target.response.subscription_id {
         return Err(ApiError::conflict(
             "plan_transition_crosses_subscription",
-            format!("customer plan {customer_plan_id} and target plan {} must belong to subscription {}", target.response.plan_version_id, current.subscription_id),
+            format!(
+                "customer plan {customer_plan_id} and target plan {} must belong to subscription {}",
+                target.response.plan_version_id, current.subscription_id
+            ),
         ));
     }
     if current.plan_version_id == target.response.plan_version_id {

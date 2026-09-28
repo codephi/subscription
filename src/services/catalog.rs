@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
         CreateProductRequest, ItemResponse, PriceTierInput, PriceVersionResponse, PricingModel,
         ProductResponse, UpdateItemRequest, UpdateProductRequest, UsageModel,
     },
+    dto::units::ItemUnits,
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
 };
@@ -34,7 +36,9 @@ pub async fn update_product(
         validate_name("product name", name)?;
     }
     let current = repository.find_product(product_id).await?;
-    reject_entitlement_publication(&current, request.status)?;
+    let usage_model = request.usage_model.unwrap_or(current.usage_model);
+    reject_entitlement_publication(usage_model, request.status.unwrap_or(current.status))?;
+    validate_product_model_change(repository, product_id, usage_model).await?;
     repository.update_product(product_id, &request).await
 }
 
@@ -63,6 +67,25 @@ pub async fn update_item(
         validate_name("item name", name)?;
     }
     let item = repository.find_item(item_id).await?;
+    let product = repository.find_product(item.product_id).await?;
+    let unit_name = request
+        .unit_name
+        .as_ref()
+        .map(|value| value.as_deref())
+        .unwrap_or(item.unit_name.as_deref());
+    let quantity_scale = request
+        .quantity_scale
+        .as_ref()
+        .map(|value| value.as_ref().copied())
+        .unwrap_or(item.quantity_scale);
+    validate_item_unit_values(product.usage_model, unit_name, quantity_scale)?;
+    validate_item_parent_update(
+        repository,
+        item.product_id,
+        item.item_id,
+        request.parent_item_id.unwrap_or(item.parent_item_id),
+    )
+    .await?;
     validate_item_activation(repository, &item, request.status).await?;
     repository.update_item(item_id, &request).await
 }
@@ -119,20 +142,38 @@ fn validate_name(label: &str, value: &str) -> ApiResult<()> {
     ))
 }
 
-fn reject_entitlement_publication(
-    product: &ProductResponse,
-    status: Option<CatalogStatus>,
-) -> ApiResult<()> {
-    if product.usage_model == UsageModel::EntitlementOnly && status == Some(CatalogStatus::Active) {
+fn reject_entitlement_publication(usage_model: UsageModel, status: CatalogStatus) -> ApiResult<()> {
+    if usage_model == UsageModel::EntitlementOnly && status == CatalogStatus::Active {
         return Err(ApiError::unprocessable(
             "usage_model_not_publishable",
             format!(
-                "product {} uses ENTITLEMENT_ONLY, which is unavailable in V1",
-                product.product_id
+                "usage model {} cannot be activated because it is unavailable in V1",
+                usage_model.as_str()
             ),
         ));
     }
     Ok(())
+}
+
+async fn validate_product_model_change(
+    repository: &DatabaseRepository,
+    product_id: Uuid,
+    usage_model: UsageModel,
+) -> ApiResult<()> {
+    let items = repository.list_items_for_product(product_id).await?;
+    if items.iter().all(|item| match usage_model {
+        UsageModel::CreditMetered => item.unit_name.is_some() && item.quantity_scale.is_some(),
+        UsageModel::EntitlementOnly => item.unit_name.is_none() && item.quantity_scale.is_none(),
+    }) {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_product_usage_model",
+        format!(
+            "product {product_id} has items incompatible with usage model {}",
+            usage_model.as_str()
+        ),
+    ))
 }
 
 fn validate_item_shape(model: UsageModel, request: &CreateItemRequest) -> ApiResult<()> {
@@ -149,6 +190,64 @@ fn validate_item_shape(model: UsageModel, request: &CreateItemRequest) -> ApiRes
             ),
         )),
     }
+}
+
+fn validate_item_unit_values(
+    model: UsageModel,
+    unit_name: Option<&str>,
+    quantity_scale: Option<ItemUnits>,
+) -> ApiResult<()> {
+    let valid = match model {
+        UsageModel::CreditMetered => unit_name.is_some() && quantity_scale.is_some(),
+        UsageModel::EntitlementOnly => unit_name.is_none() && quantity_scale.is_none(),
+    };
+    if valid {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_item_unit",
+        format!(
+            "item unit fields do not match usage model {}",
+            model.as_str()
+        ),
+    ))
+}
+
+async fn validate_item_parent_update(
+    repository: &DatabaseRepository,
+    product_id: Uuid,
+    item_id: Uuid,
+    parent_id: Option<Uuid>,
+) -> ApiResult<()> {
+    let Some(parent_id) = parent_id else {
+        return Ok(());
+    };
+    let items = repository.list_items_for_product(product_id).await?;
+    let parents = items
+        .iter()
+        .map(|item| (item.item_id, item.parent_item_id))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut visited = HashSet::new();
+    let mut ancestor = Some(parent_id);
+    while let Some(ancestor_id) = ancestor {
+        if ancestor_id == item_id || !visited.insert(ancestor_id) {
+            return invalid_item_parent(item_id, parent_id, product_id);
+        }
+        let Some((_, next)) = parents.get_key_value(&ancestor_id) else {
+            return invalid_item_parent(item_id, parent_id, product_id);
+        };
+        ancestor = *next;
+    }
+    Ok(())
+}
+
+fn invalid_item_parent(item_id: Uuid, parent_id: Uuid, product_id: Uuid) -> ApiResult<()> {
+    Err(ApiError::unprocessable(
+        "invalid_parent_item",
+        format!(
+            "parent item {parent_id} must be in product {product_id} and not create a cycle for item {item_id}"
+        ),
+    ))
 }
 
 async fn validate_parent(

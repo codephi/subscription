@@ -59,6 +59,9 @@ async fn change_catalog_item(repository: &DatabaseRepository, item: Uuid, status
         item,
         UpdateItemRequest {
             name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
             status: Some(status),
             expected_version: current.version,
         },

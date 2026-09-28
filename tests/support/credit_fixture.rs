@@ -91,7 +91,8 @@ impl CreditFixture {
         let mut snapshot = Vec::new();
         for table in CREDIT_TABLES {
             let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-                "SELECT COALESCE(jsonb_agg(r ORDER BY r::text),'[]') FROM (SELECT to_jsonb(t) r FROM ");
+                "SELECT COALESCE(jsonb_agg(r ORDER BY r::text),'[]') FROM (SELECT to_jsonb(t) r FROM ",
+            );
             query.push(*table).push(" t) snapshot");
             snapshot.push(
                 query

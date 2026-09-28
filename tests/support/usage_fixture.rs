@@ -283,6 +283,9 @@ async fn activate_item(repository: &DatabaseRepository, item_id: Uuid) {
         item_id,
         UpdateItemRequest {
             name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },
@@ -298,6 +301,7 @@ async fn activate_product(repository: &DatabaseRepository, product_id: Uuid) {
         UpdateProductRequest {
             name: None,
             description: None,
+            usage_model: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },

@@ -1,11 +1,11 @@
 mod support;
 
 use axum::{
+    Router,
     body::Body,
     http::{Method, Request, StatusCode},
-    Router,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use subscription::{repositories::database::DatabaseRepository, services::catalog};
 use tower::ServiceExt;
@@ -72,6 +72,90 @@ async fn price_version_validation_and_overflow() {
     assert_invalid_price(&router, item_id, overflowing_tier_price()).await;
     assert_invalid_cycle(&router, item_id).await;
     assert_decimal_contract_rejects_numbers(&router, item_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn product_fields_can_be_edited_and_description_cleared() {
+    let (router, _) = setup().await;
+    let response = request(
+        &router,
+        Method::POST,
+        "/v1/products",
+        json!({
+            "name":"Original product",
+            "description":"Remove this description",
+            "usage_model":"CREDIT_METERED"
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let product = response_json(response).await;
+    let product_id = uuid(&product, "product_id");
+    let response = request(
+        &router,
+        Method::PATCH,
+        &format!("/v1/products/{product_id}"),
+        json!({
+            "name":"Updated product",
+            "description":null,
+            "usage_model":"ENTITLEMENT_ONLY",
+            "status":"ARCHIVED",
+            "expected_version":1
+        }),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["name"], "Updated product");
+    assert!(updated["description"].is_null());
+    assert_eq!(updated["usage_model"], "ENTITLEMENT_ONLY");
+    assert_eq!(updated["status"], "ARCHIVED");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn item_fields_can_be_edited_without_creating_parent_cycles() {
+    let (router, _) = setup().await;
+    let product = create_product(&router, "CREDIT_METERED").await;
+    let product_id = uuid(&product, "product_id");
+    let parent = create_item(&router, product_id).await;
+    let child = create_item(&router, product_id).await;
+    let parent_id = uuid(&parent, "item_id");
+    let child_id = uuid(&child, "item_id");
+
+    let response = request(
+        &router,
+        Method::PATCH,
+        &format!("/v1/items/{child_id}"),
+        json!({
+            "name":"Updated item",
+            "parent_item_id":parent_id,
+            "unit_name":"tokens",
+            "quantity_scale":"1000",
+            "status":"INACTIVE",
+            "expected_version":1
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated = response_json(response).await;
+    assert_eq!(updated["name"], "Updated item");
+    assert_eq!(updated["parent_item_id"], parent_id.to_string());
+    assert_eq!(updated["unit_name"], "tokens");
+    assert_eq!(updated["quantity_scale"], "1000");
+
+    let response = request(
+        &router,
+        Method::PATCH,
+        &format!("/v1/items/{parent_id}"),
+        json!({ "parent_item_id":child_id, "expected_version":1 }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "invalid_parent_item"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -431,6 +431,9 @@ async fn create_active_item_without_wallet(
         item.item_id,
         UpdateItemRequest {
             name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
             status: Some(CatalogStatus::Active),
             expected_version: 1,
         },
