@@ -339,11 +339,20 @@ O gate acumulado `check-phase-gate.sh 8` está aprovado.
 
 Entregas:
 
-- `Voucher`, `Coupon`, limite por usuário e estoque concorrente;
+- `Voucher` de créditos persistentes e `Coupon` de desconto para compra inicial
+  de assinatura e/ou recarga avulsa; validade e limites total/por workspace,
+  reservas concorrentes, histórico e referências no extrato;
 - `Compensation` com criação, aprovação quando necessária e execução;
 - referências oficiais entre promoções, créditos, pagamentos e extratos;
 - autorização administrativa derivada do sistema externo, sem persistir
   membros ou permissões no Subscription.
+
+Voucher e Coupon têm implementação parcial na API e no admin-ui, incluindo
+cadastro, edição de limites/validade/estado, histórico, resgate de voucher,
+cotação, checkout pago com reserva e checkout integralmente descontado. O
+recorte ainda depende da validação completa dos fluxos concorrentes e da suíte
+Playwright para ser registrado como concluído. Compensation e autorização
+administrativa externa permanecem pendentes; por isso, a Fase 9 continua aberta.
 
 **Critério de saída:** vale, cupom ou Compensation nunca gera crédito duplicado,
 inclusive sob concorrência, reentrega e mudança do estado do workspace.

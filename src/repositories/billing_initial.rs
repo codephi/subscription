@@ -20,6 +20,24 @@ impl DatabaseRepository {
         key: &str,
         request: &CreateInitialCollectionRequest,
     ) -> ApiResult<CollectionRequestResponse> {
+        self.create_initial_collection_for_checkout(
+            workspace_id,
+            customer_plan_id,
+            key,
+            request,
+            None,
+        )
+        .await
+    }
+
+    pub async fn create_initial_collection_for_checkout(
+        &self,
+        workspace_id: Uuid,
+        customer_plan_id: Uuid,
+        key: &str,
+        request: &CreateInitialCollectionRequest,
+        checkout: Option<(Uuid, &str)>,
+    ) -> ApiResult<CollectionRequestResponse> {
         let mut transaction = self.pool().begin().await?;
         lock_active_customer_wallet(&mut transaction, workspace_id).await?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
@@ -40,15 +58,52 @@ impl DatabaseRepository {
             request.payment_method_binding_id,
         )
         .await?;
+        let collection_id = Uuid::new_v4();
+        let coupon = if let Some((_, code)) = checkout {
+            Some(
+                super::billing_checkouts::lock_coupon_discount(
+                    &mut transaction,
+                    workspace_id,
+                    crate::dto::checkouts::CheckoutKind::Initial,
+                    code,
+                    terms.amount_minor,
+                    &terms.currency,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let amount = coupon
+            .as_ref()
+            .map_or(terms.amount_minor, |value| value.final_amount_minor);
         let row = sqlx::query("INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id, \
              customer_plan_id,plan_version_id,payment_method_binding_id,request_kind,amount_minor,currency, \
-             granted_credit_units,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
-             VALUES ($1,$2,$2,$3,$4,$5,'INITIAL',$6,$7,$8,'SCHEDULED',$9,$10,$11,$12,$13) RETURNING *")
-            .bind(Uuid::new_v4()).bind(workspace_id).bind(customer_plan_id).bind(terms.plan_version_id)
-            .bind(request.payment_method_binding_id).bind(terms.amount_minor).bind(&terms.currency)
+             granted_credit_units,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at,
+             coupon_id,coupon_code,base_amount_minor,discount_amount_minor,coupon_version) \
+             VALUES ($1,$2,$2,$3,$4,$5,'INITIAL',$6,$7,$8,'SCHEDULED',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *")
+            .bind(collection_id).bind(workspace_id).bind(customer_plan_id).bind(terms.plan_version_id)
+            .bind(request.payment_method_binding_id).bind(amount).bind(&terms.currency)
             .bind(terms.credit_units).bind(&request.transaction_id).bind(key).bind(Uuid::new_v4())
-            .bind(terms.scheduled_at).bind(terms.payment_expires_at).fetch_one(&mut *transaction).await?;
+            .bind(terms.scheduled_at).bind(terms.payment_expires_at)
+            .bind(coupon.as_ref().map(|value| value.coupon_id))
+            .bind(coupon.as_ref().map(|value| value.code.as_str()))
+            .bind(coupon.as_ref().map(|value| value.base_amount_minor))
+            .bind(coupon.as_ref().map_or(0, |value| value.discount_amount_minor))
+            .bind(coupon.as_ref().map(|value| value.version))
+            .fetch_one(&mut *transaction).await?;
         let collection = collection_from_row(&row);
+        if let (Some((checkout_id, _)), Some(coupon)) = (checkout, coupon.as_ref()) {
+            super::billing_checkouts::store_coupon_reservation(
+                &mut transaction,
+                workspace_id,
+                checkout_id,
+                collection_id,
+                crate::dto::checkouts::CheckoutKind::Initial,
+                coupon,
+            )
+            .await?;
+        }
         insert_event(&mut transaction, workspace_id, &collection).await?;
         transaction.commit().await?;
         Ok(collection)

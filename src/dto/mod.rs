@@ -13,6 +13,7 @@ pub mod health;
 pub mod idempotency;
 pub mod inbox_admin;
 pub mod plans;
+pub mod promotions;
 pub mod units;
 pub mod usage;
 pub mod wallets;

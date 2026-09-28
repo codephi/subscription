@@ -20,6 +20,24 @@ impl DatabaseRepository {
         idempotency_key: &str,
         request: &CreateOnDemandPurchaseRequest,
     ) -> ApiResult<CollectionRequestResponse> {
+        self.create_on_demand_purchase_for_checkout(
+            workspace_id,
+            customer_plan_id,
+            idempotency_key,
+            request,
+            None,
+        )
+        .await
+    }
+
+    pub async fn create_on_demand_purchase_for_checkout(
+        &self,
+        workspace_id: Uuid,
+        customer_plan_id: Uuid,
+        idempotency_key: &str,
+        request: &CreateOnDemandPurchaseRequest,
+        checkout: Option<(Uuid, &str)>,
+    ) -> ApiResult<CollectionRequestResponse> {
         let mut transaction = self.pool().begin().await?;
         lock_active_customer_wallet(&mut transaction, workspace_id).await?;
         lock_key(&mut transaction, workspace_id, idempotency_key).await?;
@@ -32,15 +50,46 @@ impl DatabaseRepository {
         }
         let terms =
             lock_purchase_terms(&mut transaction, workspace_id, customer_plan_id, request).await?;
+        let collection_id = Uuid::new_v4();
+        let coupon = if let Some((_, code)) = checkout {
+            Some(
+                super::billing_checkouts::lock_coupon_discount(
+                    &mut transaction,
+                    workspace_id,
+                    crate::dto::checkouts::CheckoutKind::OnDemand,
+                    code,
+                    terms.amount_minor,
+                    &terms.currency,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let collection = insert_purchase(
             &mut transaction,
-            workspace_id,
-            customer_plan_id,
-            idempotency_key,
-            request,
-            &terms,
+            PurchaseInsert {
+                workspace_id,
+                customer_plan_id,
+                key: idempotency_key,
+                request,
+                terms: &terms,
+                collection_id,
+                coupon: coupon.as_ref(),
+            },
         )
         .await?;
+        if let (Some((checkout_id, _)), Some(coupon)) = (checkout, coupon.as_ref()) {
+            super::billing_checkouts::store_coupon_reservation(
+                &mut transaction,
+                workspace_id,
+                checkout_id,
+                collection_id,
+                crate::dto::checkouts::CheckoutKind::OnDemand,
+                coupon,
+            )
+            .await?;
+        }
         insert_purchase_event(&mut transaction, workspace_id, &collection).await?;
         transaction.commit().await?;
         Ok(collection)
@@ -173,23 +222,43 @@ fn validate_purchase_state(customer_plan_id: Uuid, row: &sqlx::postgres::PgRow) 
     ))
 }
 
-async fn insert_purchase(
-    transaction: &mut Transaction<'_, Postgres>,
+struct PurchaseInsert<'a> {
     workspace_id: Uuid,
     customer_plan_id: Uuid,
-    key: &str,
-    request: &CreateOnDemandPurchaseRequest,
-    terms: &PurchaseTerms,
+    key: &'a str,
+    request: &'a CreateOnDemandPurchaseRequest,
+    terms: &'a PurchaseTerms,
+    collection_id: Uuid,
+    coupon: Option<&'a super::billing_checkouts::CouponDiscount>,
+}
+
+async fn insert_purchase(
+    transaction: &mut Transaction<'_, Postgres>,
+    input: PurchaseInsert<'_>,
 ) -> ApiResult<CollectionRequestResponse> {
+    let PurchaseInsert {
+        workspace_id,
+        customer_plan_id,
+        key,
+        request,
+        terms,
+        collection_id,
+        coupon,
+    } = input;
     let row = sqlx::query(
         "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id,customer_plan_id, \
          plan_version_id,on_demand_plan_id,payment_method_binding_id,request_kind,amount_minor,currency, \
-         granted_credit_units,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
-         VALUES ($1,$2,$2,$3,$4,$5,$6,'ON_DEMAND',$7,$8,$9,'SCHEDULED',$10,$11,$12,$13,$14) RETURNING *",
-    ).bind(Uuid::new_v4()).bind(workspace_id).bind(customer_plan_id).bind(terms.plan_version_id)
-      .bind(request.on_demand_plan_id).bind(request.payment_method_binding_id).bind(terms.amount_minor)
+         granted_credit_units,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at,
+         coupon_id,coupon_code,base_amount_minor,discount_amount_minor,coupon_version) \
+         VALUES ($1,$2,$2,$3,$4,$5,$6,'ON_DEMAND',$7,$8,$9,'SCHEDULED',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *",
+    ).bind(collection_id).bind(workspace_id).bind(customer_plan_id).bind(terms.plan_version_id)
+      .bind(request.on_demand_plan_id).bind(request.payment_method_binding_id)
+      .bind(coupon.map_or(terms.amount_minor, |value| value.final_amount_minor))
       .bind(&terms.currency).bind(terms.credit_units).bind(&request.transaction_id).bind(key)
       .bind(Uuid::new_v4()).bind(terms.scheduled_at).bind(terms.payment_expires_at)
+      .bind(coupon.map(|value| value.coupon_id)).bind(coupon.map(|value| value.code.as_str()))
+      .bind(coupon.map(|value| value.base_amount_minor))
+      .bind(coupon.map_or(0, |value| value.discount_amount_minor)).bind(coupon.map(|value| value.version))
       .fetch_one(&mut **transaction).await?;
     Ok(collection_from_row(&row))
 }

@@ -397,6 +397,12 @@ async fn insert_billing_credit_reference(
     let Some(entry_id) = grant_entry_id.or(cycle_entry_id) else {
         return Ok(());
     };
+    let coupon_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT coupon_id FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(webhook.collection_request_id)
+    .fetch_one(&mut **transaction)
+    .await?;
     sqlx::query(
         "INSERT INTO billing_credit_grant_references (billing_credit_grant_reference_id, \
          customer_wallet_entry_id,collection_request_id,billing_payment_id) VALUES ($1,$2,$3,$4)",
@@ -407,6 +413,10 @@ async fn insert_billing_credit_reference(
     .bind(context.billing_payment_id)
     .execute(&mut **transaction)
     .await?;
+    if let Some(coupon_id) = coupon_id {
+        sqlx::query("INSERT INTO wallet_transaction_references (wallet_transaction_reference_id,customer_wallet_entry_id,reference_kind,coupon_id) VALUES ($1,$2,'COUPON',$3)")
+            .bind(Uuid::new_v4()).bind(entry_id).bind(coupon_id).execute(&mut **transaction).await?;
+    }
     Ok(())
 }
 

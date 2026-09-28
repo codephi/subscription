@@ -13,6 +13,7 @@ import {
   ScrollText,
   Inbox,
   Settings,
+  TicketPercent,
 } from "lucide-react";
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +93,18 @@ const StripeDefaultsPage = lazy(() =>
     default: module.StripeDefaultsPage,
   })),
 );
+const PromotionsPage = lazy(() =>
+  import("@/pages/promotions-page").then((module) => ({ default: module.PromotionsPage })),
+);
+const PromotionCreatePage = lazy(() =>
+  import("@/pages/promotion-create-page").then((module) => ({ default: module.PromotionCreatePage })),
+);
+const PromotionDetailPage = lazy(() =>
+  import("@/pages/promotion-detail-page").then((module) => ({ default: module.PromotionDetailPage })),
+);
+const PromotionCheckoutPage = lazy(() =>
+  import("@/pages/promotion-checkout-page").then((module) => ({ default: module.PromotionCheckoutPage })),
+);
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -106,6 +119,7 @@ function Navigation() {
     { to: "/workspaces", label: "Workspaces", icon: Boxes },
     { to: "/billing/collections", label: "Billing", icon: CreditCard },
     { to: "/catalog/products", label: "Catálogo", icon: Package },
+    { to: "/promotions", label: "Promoções", icon: TicketPercent },
     { to: "/audit", label: "Auditoria", icon: ScrollText },
     { to: "/inbox", label: "Inbox", icon: Inbox },
     { to: "/settings/stripe", label: "Credenciais padrão", icon: Settings },
@@ -199,6 +213,10 @@ function Shell() {
             <Route path="/catalog/:kind" element={<CatalogListPage />} />
             <Route path="/catalog/:kind/new" element={<CatalogCreatePage />} />
             <Route path="/catalog/:kind/:id" element={<CatalogDetailPage />} />
+            <Route path="/promotions" element={<PromotionsPage />} />
+            <Route path="/promotions/checkout" element={<PromotionCheckoutPage />} />
+            <Route path="/promotions/new/:kind" element={<PromotionCreatePage />} />
+            <Route path="/promotions/:kind/:id" element={<PromotionDetailPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/settings/stripe" element={<StripeDefaultsPage />} />

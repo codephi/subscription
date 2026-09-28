@@ -32,6 +32,11 @@ pub struct BillingRecordResponse {
     pub currency: Option<String>,
     pub failure_code: Option<String>,
     pub detail: Option<String>,
+    pub coupon_id: Option<Uuid>,
+    pub coupon_code: Option<String>,
+    pub base_amount_minor: Option<i64>,
+    pub discount_amount_minor: Option<i64>,
+    pub coupon_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]

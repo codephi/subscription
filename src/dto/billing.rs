@@ -170,6 +170,11 @@ pub struct CollectionRequestResponse {
     pub idempotency_key: String,
     pub scheduled_at: DateTime<Utc>,
     pub payment_expires_at: DateTime<Utc>,
+    pub coupon_id: Option<Uuid>,
+    pub coupon_code: Option<String>,
+    pub base_amount_minor: Option<i64>,
+    pub discount_amount_minor: i64,
+    pub coupon_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]

@@ -26,6 +26,24 @@ pub struct BillingConnectorConfiguration {
 }
 
 impl DatabaseRepository {
+    pub async fn find_payment_method_binding_by_id(
+        &self,
+        workspace_id: Uuid,
+        binding_id: Uuid,
+    ) -> ApiResult<PaymentMethodBindingResponse> {
+        let row = sqlx::query("SELECT * FROM payment_method_bindings WHERE workspace_id=$1 AND payment_method_binding_id=$2")
+            .bind(workspace_id).bind(binding_id).fetch_optional(&self.pool()).await?
+            .ok_or_else(|| ApiError::not_found("payment_method_binding_not_found", format!("payment method binding {binding_id} does not belong to workspace {workspace_id}")))?;
+        let binding = binding_from_row(&row);
+        if binding.status == "ACTIVE" {
+            return Ok(binding);
+        }
+        Err(ApiError::conflict(
+            "payment_method_binding_inactive",
+            format!("payment method binding {binding_id} is {}", binding.status),
+        ))
+    }
+
     pub async fn find_payment_method_binding(
         &self,
         workspace_id: Uuid,

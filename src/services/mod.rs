@@ -17,6 +17,7 @@ pub mod inbox_admin;
 pub mod integrations;
 pub mod outbox;
 pub mod plans;
+pub mod promotions;
 pub mod signatures;
 pub mod stripe_webhooks;
 pub mod subscription_calendar;

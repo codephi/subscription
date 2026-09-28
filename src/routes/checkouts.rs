@@ -7,7 +7,9 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::{
-    dto::checkouts::{CheckoutResponse, CreateCheckoutRequest},
+    dto::checkouts::{
+        CheckoutQuoteRequest, CheckoutQuoteResponse, CheckoutResponse, CreateCheckoutRequest,
+    },
     error::{ApiError, ApiResult, ErrorResponse},
     services::billing_checkout,
     state::AppState,
@@ -16,7 +18,21 @@ use crate::{
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(create_checkout))
+        .routes(routes!(quote_checkout))
         .routes(routes!(get_checkout))
+}
+
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/checkout-quotes", tag = "Checkouts",
+    params(("workspace_id" = Uuid, Path)), request_body = CheckoutQuoteRequest,
+    responses((status = 200, body = CheckoutQuoteResponse), (status = 409, body = ErrorResponse)))]
+async fn quote_checkout(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+    Json(request): Json<CheckoutQuoteRequest>,
+) -> ApiResult<Json<CheckoutQuoteResponse>> {
+    Ok(Json(
+        billing_checkout::quote(&state.database(), workspace_id, request).await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/checkouts", tag = "Checkouts",

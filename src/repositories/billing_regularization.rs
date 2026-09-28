@@ -257,5 +257,10 @@ pub(crate) fn collection_from_row(row: &sqlx::postgres::PgRow) -> CollectionRequ
         idempotency_key: row.get("idempotency_key"),
         scheduled_at: row.get("scheduled_at"),
         payment_expires_at: row.get("payment_expires_at"),
+        coupon_id: row.try_get("coupon_id").ok().flatten(),
+        coupon_code: row.try_get("coupon_code").ok().flatten(),
+        base_amount_minor: row.try_get("base_amount_minor").ok().flatten(),
+        discount_amount_minor: row.try_get("discount_amount_minor").unwrap_or(0),
+        coupon_version: row.try_get("coupon_version").ok().flatten(),
     }
 }

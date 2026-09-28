@@ -48,6 +48,8 @@ pub(super) fn reference_from_row(
     let product_id: Option<Uuid> = row.get("product_id");
     let item_id: Option<Uuid> = row.get("item_id");
     let item_wallet_id: Option<Uuid> = row.get("item_wallet_id");
+    let voucher_id: Option<Uuid> = row.try_get("voucher_id").unwrap_or(None);
+    let coupon_id: Option<Uuid> = row.try_get("coupon_id").unwrap_or(None);
     WalletTransactionReferenceResponse {
         reference_kind: row.get("reference_kind"),
         reference_id: direct_credit_id
@@ -59,7 +61,9 @@ pub(super) fn reference_from_row(
             .or(debit_id)
             .or(product_id)
             .or(item_id)
-            .or(item_wallet_id),
+            .or(item_wallet_id)
+            .or(voucher_id)
+            .or(coupon_id),
         external_reference: row.get("external_reference"),
     }
 }
@@ -89,7 +93,7 @@ pub(super) async fn load_references(
     entry_id: Uuid,
 ) -> ApiResult<Vec<WalletTransactionReferenceResponse>> {
     let rows = sqlx::query(
-        "SELECT reference_kind,direct_credit_id,credit_lot_id,external_reference, \
+        "SELECT reference_kind,direct_credit_id,credit_lot_id,external_reference,voucher_id,coupon_id, \
          customer_plan_id,customer_plan_cycle_id,plan_version_id,usage_event_id,debit_id, \
          product_id,item_id,item_wallet_id \
          FROM wallet_transaction_references WHERE customer_wallet_entry_id=$1 \

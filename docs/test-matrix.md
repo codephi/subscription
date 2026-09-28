@@ -61,7 +61,9 @@ concessões internas por ciclo foram concluídas na fase 5. A fase 6 segue abert
 | PH-06 | fases §6 | Consumos concorrentes não perdem unidades e rejeições são totalmente atômicas | `concurrent_partial_usage_forms_one_block`, `usage_overflow_and_insufficient_credit_roll_back_every_related_table`, `usage_metering_migrations_round_trip`, `one_usage_consolidates_debit_and_partitions_every_received_unit` | concorrência | 6 | passing |
 | PH-07 | fases §7 | Conector falso confirma uma cobrança e concede uma vez, sem inferir timeout | `concurrent_workers_start_exactly_one_provider_attempt`, `uncertain_connector_error_preserves_attempt_without_retry`, `billing_connector_state_machine_is_idempotent`, `on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_plan`, `paid_upgrade_changes_plan_and_cycle_only_after_full_confirmation` | integração | 7 | passing |
 | PH-08 | fases §8 | Stripe duplicado, atrasado ou fora de ordem não duplica efeito | `stripe_webhooks_converge_without_duplicate_effects`, `stripe_payment_intent_uses_stable_idempotency_and_domain_metadata` | contrato | 8 | passing |
-| PH-09 | fases §9 | Voucher, cupom e Compensation nunca duplicam crédito sob concorrência | `promotion_and_compensation_effects_are_unique` | concorrência | 9 | not_implemented |
+| PH-09-V | fases §9 | Resgates concorrentes de voucher respeitam limites por workspace e lançam créditos uma vez | `simultaneous_redemptions_respect_the_workspace_limit_and_credit_once` | concorrência | 9 | passing |
+| PH-09-C | fases §9 | Desconto integral conclui checkout inicial sem cobrança e sem concessão duplicada | `full_discount_completes_initial_checkout_without_a_payment_request` | integração | 9 | passing |
+| PH-09 | fases §9 | Voucher, cupom e Compensation nunca duplicam efeitos; Compensation é pendente | `promotion_and_compensation_effects_are_unique` | concorrência | 9 | not_implemented |
 | PH-10 | fases §10 | Restore, replay e reconciliação convergem sem editar histórico | `reconciliation_recovers_without_history_mutation` | recuperação | 10 | not_implemented |
 
 ## Concorrência, ordenação e consistência

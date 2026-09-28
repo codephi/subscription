@@ -82,6 +82,34 @@ async fn billing_foundation_migrations_round_trip() {
     assert!(webhook_secret_column);
     apply_migration(
         &mut connection,
+        include_str!("../migrations/202609270001_billing_checkout.up.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609280001_promotions.up.sql"),
+    )
+    .await;
+    let promotion_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() \
+         AND table_name IN ('vouchers','coupons','voucher_redemptions','coupon_checkout_reservations','promotion_history')",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .expect("promotion tables");
+    assert_eq!(promotion_tables, 5);
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609280001_promotions.down.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
+        include_str!("../migrations/202609270001_billing_checkout.down.sql"),
+    )
+    .await;
+    apply_migration(
+        &mut connection,
         include_str!("../migrations/202609130001_stripe_connector.down.sql"),
     )
     .await;

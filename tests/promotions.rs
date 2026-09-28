@@ -1,0 +1,297 @@
+#[path = "support/credit_fixture.rs"]
+mod credit_fixture;
+mod support;
+
+use chrono::{Duration, Utc};
+use credit_fixture::CreditFixture;
+use subscription::dto::{
+    catalog::{
+        CatalogStatus, CreateItemRequest, CreatePriceVersionRequest, CreateProductRequest,
+        PricingModel, UpdateItemRequest, UpdateProductRequest, UsageModel,
+    },
+    checkouts::{CheckoutKind, CreateCheckoutRequest},
+    credits::UpdateWorkspaceBillingConfigRequest,
+    events::WorkspaceEventEnvelope,
+    plans::{
+        AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest, CreateSubscriptionPlanRequest,
+        CreateSubscriptionRequest, PlanRecurrence, SubscriptionModel,
+    },
+    units::{CreditUnits, ItemUnits},
+};
+use subscription::{
+    dto::promotions::{CreateCouponRequest, CreateVoucherRequest, RedeemVoucherRequest},
+    repositories::database::DatabaseRepository,
+    services::{billing_checkout, catalog, credits, plans, promotions, workspace_events},
+};
+use uuid::Uuid;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn simultaneous_redemptions_respect_the_workspace_limit_and_credit_once() {
+    let fixture = CreditFixture::new().await;
+    let voucher = promotions::create_voucher(
+        &fixture.repository,
+        CreateVoucherRequest {
+            code: " first-use ".into(),
+            name: "First use voucher".into(),
+            description: None,
+            credit_units: CreditUnits::new(250),
+            valid_from: None,
+            valid_until: None,
+            max_total_uses: Some(20),
+            max_uses_per_workspace: Some(1),
+        },
+    )
+    .await
+    .expect("create voucher");
+    let voucher_id = voucher.promotion_id;
+    let first_repo = fixture.repository.clone();
+    let second_repo = fixture.repository.clone();
+    let workspace_id = fixture.workspace_id;
+    let (first, second) = tokio::join!(
+        promotions::redeem_voucher(
+            &first_repo,
+            workspace_id,
+            "redeem-first",
+            redemption(voucher_id, "transaction-first"),
+        ),
+        promotions::redeem_voucher(
+            &second_repo,
+            workspace_id,
+            "redeem-second",
+            redemption(voucher_id, "transaction-second"),
+        )
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    let balance: i64 = sqlx::query_scalar(
+        "SELECT cw.balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) WHERE w.customer_id=$1",
+    )
+    .bind(workspace_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("workspace balance");
+    assert_eq!(balance, 250);
+    let uses: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM voucher_redemptions WHERE voucher_id=$1 AND workspace_id=$2",
+    )
+    .bind(voucher_id)
+    .bind(workspace_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("voucher redemption count");
+    assert_eq!(uses, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn full_discount_completes_initial_checkout_without_a_payment_request() {
+    let (router, pool) = support::setup_router_with_options(false, None).await;
+    let repository = DatabaseRepository::new(pool.clone());
+    let product_id = create_active_product(&repository).await;
+    let workspace_id = Uuid::new_v4();
+    for (event, sequence) in [("workspace.created", 1), ("workspace.activated", 2)] {
+        let envelope: WorkspaceEventEnvelope = serde_json::from_value(serde_json::json!({
+            "event_id": Uuid::new_v4(), "event_type": event, "schema_version": 1,
+            "aggregate_id": workspace_id, "workspace_id": workspace_id, "sequence": sequence,
+            "occurred_at": Utc::now(), "correlation_id": Uuid::new_v4(),
+            "payload": {"workspace_id": workspace_id}
+        }))
+        .unwrap();
+        workspace_events::process_workspace_event(&repository, envelope)
+            .await
+            .unwrap();
+    }
+    credits::update_billing_config(
+        &repository,
+        workspace_id,
+        UpdateWorkspaceBillingConfigRequest {
+            direct_credit_enabled: false,
+            recurring_credit_enabled: true,
+            expected_version: 1,
+        },
+    )
+    .await
+    .expect("enable recurring cycle grants");
+    let subscription = plans::create_subscription(
+        &repository,
+        CreateSubscriptionRequest {
+            name: "Promotion initial checkout".into(),
+            subscription_model: SubscriptionModel::CreditStrict,
+        },
+    )
+    .await
+    .expect("subscription");
+    let plan = plans::create_plan(
+        &repository,
+        subscription.subscription_id,
+        CreateSubscriptionPlanRequest {
+            admission_policy_version_id: None,
+            name: "Annual membership".into(),
+            commercial_model: CommercialModel::Paid,
+            price_amount_minor: Some(2500),
+            currency: Some("USD".into()),
+            recurrence: PlanRecurrence::Monthly,
+            admission_policy: AdmissionPolicy::Open,
+            accepted_payment_methods: vec!["CARD".into()],
+            granted_credit_units: CreditUnits::new(120),
+            product_ids: vec![product_id],
+        },
+    )
+    .await
+    .expect("paid plan");
+    let customer_plan = plans::create_customer_plan(
+        &repository,
+        workspace_id,
+        "admission-1",
+        CreateCustomerPlanRequest {
+            plan_version_id: plan.plan_version_id,
+            transaction_id: "admission-transaction-1".into(),
+        },
+    )
+    .await
+    .expect("initial customer plan");
+    let coupon = promotions::create_coupon(
+        &repository,
+        CreateCouponRequest {
+            code: "FREE100".into(),
+            name: "Free first cycle".into(),
+            description: None,
+            discount_kind: "PERCENTAGE".into(),
+            discount_value: 10_000,
+            currency: None,
+            applies_to_initial: true,
+            applies_to_on_demand: false,
+            valid_from: None,
+            valid_until: None,
+            max_total_uses: Some(1),
+            max_uses_per_workspace: Some(1),
+        },
+    )
+    .await
+    .expect("full discount coupon");
+    let request = CreateCheckoutRequest {
+        customer_plan_id: customer_plan.customer_plan_id,
+        checkout_kind: CheckoutKind::Initial,
+        on_demand_plan_id: None,
+        transaction_id: "free-checkout-1".into(),
+        coupon_code: Some("FREE100".into()),
+        payment_method_binding_id: None,
+    };
+    let checkout = billing_checkout::create(
+        &repository,
+        None,
+        workspace_id,
+        "checkout-free-1",
+        request.clone(),
+    )
+    .await
+    .expect("free checkout");
+    assert_eq!(checkout.status, "COMPLETED");
+    assert!(!checkout.payment_required);
+    assert_eq!(checkout.amount_minor, Some(0));
+    assert_eq!(checkout.base_amount_minor, Some(2500));
+    assert_eq!(checkout.collection_request_id, None);
+    assert_eq!(checkout.granted_credit_units, Some(120));
+    let retry =
+        billing_checkout::create(&repository, None, workspace_id, "checkout-free-1", request)
+            .await
+            .expect("checkout retry");
+    assert_eq!(retry, checkout);
+    let uses: i64 = sqlx::query_scalar("SELECT count(*) FROM coupon_checkout_reservations WHERE coupon_id=$1 AND status='COMPLETED'")
+        .bind(coupon.promotion_id).fetch_one(&pool).await.expect("completed coupon use");
+    assert_eq!(uses, 1);
+    let cycles: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$1")
+            .bind(customer_plan.customer_plan_id)
+            .fetch_one(&pool)
+            .await
+            .expect("initial plan cycle");
+    assert_eq!(cycles, 1);
+    let balance: i64 = sqlx::query_scalar(
+        "SELECT cw.balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) WHERE w.customer_id=$1",
+    )
+    .bind(workspace_id)
+    .fetch_one(&pool)
+    .await
+    .expect("granted cycle credits");
+    assert_eq!(balance, 120);
+    drop(router);
+}
+
+fn redemption(voucher_id: uuid::Uuid, transaction_id: &str) -> RedeemVoucherRequest {
+    RedeemVoucherRequest {
+        voucher_id: Some(voucher_id),
+        code: None,
+        transaction_id: transaction_id.into(),
+        description: None,
+    }
+}
+
+async fn create_active_product(repository: &DatabaseRepository) -> Uuid {
+    let product = catalog::create_product(
+        repository,
+        CreateProductRequest {
+            name: format!("Coupon checkout product {}", Uuid::new_v4()),
+            description: None,
+            usage_model: UsageModel::CreditMetered,
+        },
+    )
+    .await
+    .expect("product");
+    let item = catalog::create_item(
+        repository,
+        product.product_id,
+        CreateItemRequest {
+            name: "Pipeline run".into(),
+            parent_item_id: None,
+            unit_name: Some("run".into()),
+            quantity_scale: Some(ItemUnits::positive(1).expect("unit scale")),
+        },
+    )
+    .await
+    .expect("item");
+    let price = catalog::create_price_version(
+        repository,
+        item.item_id,
+        CreatePriceVersionRequest {
+            pricing_model: PricingModel::Unit,
+            unit_block_size: Some(ItemUnits::positive(1).unwrap()),
+            credit_units: Some(CreditUnits::new(1)),
+            effective_from: Utc::now() - Duration::days(1),
+            effective_until: None,
+            accumulation_cycle: None,
+            tiers: vec![],
+        },
+    )
+    .await
+    .expect("price");
+    catalog::publish_price_version(repository, price.price_version_id)
+        .await
+        .expect("publish price");
+    catalog::update_item(
+        repository,
+        item.item_id,
+        UpdateItemRequest {
+            name: None,
+            parent_item_id: None,
+            unit_name: None,
+            quantity_scale: None,
+            status: Some(CatalogStatus::Active),
+            expected_version: 1,
+        },
+    )
+    .await
+    .expect("activate item");
+    catalog::update_product(
+        repository,
+        product.product_id,
+        UpdateProductRequest {
+            name: None,
+            description: None,
+            usage_model: None,
+            status: Some(CatalogStatus::Active),
+            expected_version: 1,
+        },
+    )
+    .await
+    .expect("activate product");
+    product.product_id
+}

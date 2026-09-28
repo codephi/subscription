@@ -136,6 +136,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/coupons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_coupons"];
+        put?: never;
+        post: operations["create_coupon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/coupons/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_coupon"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update_coupon"];
+        trace?: never;
+    };
+    "/v1/admin/coupons/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["coupon_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/integration-inbox": {
         parameters: {
             query?: never;
@@ -210,6 +258,54 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["run_subscription_cycles"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/vouchers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_vouchers"];
+        put?: never;
+        post: operations["create_voucher"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/vouchers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_voucher"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update_voucher"];
+        trace?: never;
+    };
+    "/v1/admin/vouchers/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["voucher_history"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -824,6 +920,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/checkout-quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["quote_checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/checkouts": {
         parameters: {
             query?: never;
@@ -1144,6 +1256,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/voucher-redemptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["redeem_voucher"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/wallet-provisioning": {
         parameters: {
             query?: never;
@@ -1305,6 +1433,8 @@ export interface components {
         BillingRecordResponse: {
             /** Format: int64 */
             amount_minor?: number | null;
+            /** Format: int64 */
+            base_amount_minor?: number | null;
             /** Format: uuid */
             billing_payment_id?: string | null;
             /** Format: uuid */
@@ -1313,8 +1443,15 @@ export interface components {
             collection_request_id?: string | null;
             /** Format: uuid */
             correlation_id?: string | null;
+            coupon_code?: string | null;
+            /** Format: uuid */
+            coupon_id?: string | null;
+            /** Format: int64 */
+            coupon_version?: number | null;
             currency?: string | null;
             detail?: string | null;
+            /** Format: int64 */
+            discount_amount_minor?: number | null;
             event_type?: string | null;
             failure_code?: string | null;
             /** Format: uuid */
@@ -1367,32 +1504,75 @@ export interface components {
         CatalogStatus: "ACTIVE" | "INACTIVE" | "ARCHIVED";
         /** @enum {string} */
         CheckoutKind: "INITIAL" | "ON_DEMAND";
+        CheckoutQuoteRequest: {
+            checkout_kind: components["schemas"]["CheckoutKind"];
+            coupon_code: string;
+            /** Format: uuid */
+            customer_plan_id: string;
+            /** Format: uuid */
+            on_demand_plan_id?: string | null;
+        };
+        CheckoutQuoteResponse: {
+            /** Format: int64 */
+            amount_minor: number;
+            /** Format: int64 */
+            base_amount_minor: number;
+            checkout_kind: components["schemas"]["CheckoutKind"];
+            coupon_code: string;
+            /** Format: uuid */
+            coupon_id: string;
+            /** Format: int64 */
+            coupon_version: number;
+            currency: string;
+            /** Format: uuid */
+            customer_plan_id: string;
+            /** Format: int64 */
+            discount_amount_minor: number;
+            /** Format: int64 */
+            granted_credit_units: number;
+            payment_required: boolean;
+        };
         CheckoutResponse: {
             /** Format: int64 */
             amount_minor?: number | null;
+            /** Format: int64 */
+            base_amount_minor?: number | null;
             /** Format: uuid */
             checkout_id: string;
             checkout_kind: components["schemas"]["CheckoutKind"];
             /** Format: uuid */
             collection_request_id?: string | null;
+            coupon_code?: string | null;
             /** Format: date-time */
             created_at: string;
             currency?: string | null;
             /** Format: uuid */
             customer_plan_id: string;
             /** Format: int64 */
+            discount_amount_minor: number;
+            /** Format: int64 */
             granted_credit_units?: number | null;
+            payment_required: boolean;
             status: string;
             transaction_id: string;
         };
         CollectionRequestResponse: {
             /** Format: int64 */
             amount_minor: number;
+            /** Format: int64 */
+            base_amount_minor?: number | null;
             /** Format: uuid */
             collection_request_id: string;
+            coupon_code?: string | null;
+            /** Format: uuid */
+            coupon_id?: string | null;
+            /** Format: int64 */
+            coupon_version?: number | null;
             currency: string;
             /** Format: uuid */
             customer_plan_id: string;
+            /** Format: int64 */
+            discount_amount_minor: number;
             /** Format: int64 */
             granted_credit_units: number;
             idempotency_key: string;
@@ -1423,11 +1603,33 @@ export interface components {
         };
         CreateCheckoutRequest: {
             checkout_kind: components["schemas"]["CheckoutKind"];
+            coupon_code?: string | null;
             /** Format: uuid */
             customer_plan_id: string;
             /** Format: uuid */
             on_demand_plan_id?: string | null;
+            /** Format: uuid */
+            payment_method_binding_id?: string | null;
             transaction_id: string;
+        };
+        CreateCouponRequest: {
+            applies_to_initial: boolean;
+            applies_to_on_demand: boolean;
+            code: string;
+            currency?: string | null;
+            description?: string | null;
+            discount_kind: string;
+            /** Format: int64 */
+            discount_value: number;
+            /** Format: int64 */
+            max_total_uses?: number | null;
+            /** Format: int64 */
+            max_uses_per_workspace?: number | null;
+            name: string;
+            /** Format: date-time */
+            valid_from?: string | null;
+            /** Format: date-time */
+            valid_until?: string | null;
         };
         CreateCustomerPlanRequest: {
             /** Format: uuid */
@@ -1535,6 +1737,20 @@ export interface components {
             /** Format: uuid */
             product_id: string;
             transaction_id: string;
+        };
+        CreateVoucherRequest: {
+            code: string;
+            credit_units: components["schemas"]["CreditUnits"];
+            description?: string | null;
+            /** Format: int64 */
+            max_total_uses?: number | null;
+            /** Format: int64 */
+            max_uses_per_workspace?: number | null;
+            name: string;
+            /** Format: date-time */
+            valid_from?: string | null;
+            /** Format: date-time */
+            valid_until?: string | null;
         };
         CreateWorkspaceRequest: {
             actor_reference: string;
@@ -1964,6 +2180,66 @@ export interface components {
             /** Format: int64 */
             version: number;
         };
+        PromotionHistoryEntry: {
+            action: string;
+            actor_reference?: string | null;
+            after_snapshot: unknown;
+            before_snapshot: unknown;
+            /** Format: date-time */
+            occurred_at: string;
+            /** Format: int64 */
+            version: number;
+        };
+        PromotionHistoryResponse: {
+            items: components["schemas"]["PromotionHistoryEntry"][];
+        };
+        PromotionPageResponse: {
+            items: components["schemas"]["PromotionResponse"][];
+            /** Format: uuid */
+            next_cursor?: string | null;
+        };
+        PromotionResponse: {
+            applies_to_initial?: boolean | null;
+            applies_to_on_demand?: boolean | null;
+            availability: string;
+            code: string;
+            /** Format: int64 */
+            completed_uses: number;
+            /** Format: date-time */
+            created_at: string;
+            credit_units?: null | components["schemas"]["CreditUnits"];
+            currency?: string | null;
+            description?: string | null;
+            discount_kind?: string | null;
+            /** Format: int64 */
+            discount_value?: number | null;
+            /** Format: int64 */
+            max_total_uses?: number | null;
+            /** Format: int64 */
+            max_uses_per_workspace?: number | null;
+            name: string;
+            /** Format: uuid */
+            promotion_id: string;
+            promotion_kind: string;
+            /** Format: int64 */
+            reserved_uses: number;
+            status: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            valid_from?: string | null;
+            /** Format: date-time */
+            valid_until?: string | null;
+            /** Format: int64 */
+            version: number;
+        };
+        RedeemVoucherRequest: {
+            code?: string | null;
+            description?: string | null;
+            transaction_id: string;
+            /** Format: uuid */
+            voucher_id?: string | null;
+        };
         RevokeCustomerPlanRequest: {
             actor_reference: string;
             reason: string;
@@ -2049,7 +2325,11 @@ export interface components {
             /** Format: int64 */
             expected_version: number;
             name?: string | null;
+            /** Format: uuid */
+            parent_item_id?: string | null;
+            quantity_scale?: null | components["schemas"]["ItemUnits"];
             status?: null | components["schemas"]["CatalogStatus"];
+            unit_name?: string | null;
         };
         UpdateProductRequest: {
             description?: string | null;
@@ -2057,6 +2337,21 @@ export interface components {
             expected_version: number;
             name?: string | null;
             status?: null | components["schemas"]["CatalogStatus"];
+            usage_model?: null | components["schemas"]["UsageModel"];
+        };
+        UpdatePromotionRequest: {
+            actor_reference?: string | null;
+            /** Format: int64 */
+            expected_version: number;
+            /** Format: int64 */
+            max_total_uses?: number | null;
+            /** Format: int64 */
+            max_uses_per_workspace?: number | null;
+            status?: string | null;
+            /** Format: date-time */
+            valid_from?: string | null;
+            /** Format: date-time */
+            valid_until?: string | null;
         };
         UpdateStripeIntegrationRequest: {
             /** Format: int32 */
@@ -2126,6 +2421,18 @@ export interface components {
             meter_pending_item_units: components["schemas"]["ItemUnitBoundary"];
             meter_received_item_units: components["schemas"]["ItemUnitBoundary"];
             statement_received_item_units: components["schemas"]["ItemUnitBoundary"];
+        };
+        VoucherRedemptionResponse: {
+            /** Format: date-time */
+            created_at: string;
+            credit_units: components["schemas"]["CreditUnits"];
+            entry: components["schemas"]["CustomerWalletEntryResponse"];
+            /** Format: uuid */
+            voucher_id: string;
+            /** Format: uuid */
+            voucher_redemption_id: string;
+            /** Format: uuid */
+            workspace_id: string;
         };
         WalletHierarchyResponse: {
             customer_wallet: components["schemas"]["CustomerWalletResponse"];
@@ -2643,6 +2950,136 @@ export interface operations {
             };
         };
     };
+    list_coupons: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                status?: string | null;
+                search?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionPageResponse"];
+                };
+            };
+        };
+    };
+    create_coupon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCouponRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_coupon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+        };
+    };
+    update_coupon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePromotionRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    coupon_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionHistoryResponse"];
+                };
+            };
+        };
+    };
     list_inbox: {
         parameters: {
             query?: {
@@ -2762,6 +3199,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_vouchers: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                status?: string | null;
+                search?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionPageResponse"];
+                };
+            };
+        };
+    };
+    create_voucher: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVoucherRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_voucher: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+        };
+    };
+    update_voucher: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePromotionRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    voucher_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionHistoryResponse"];
                 };
             };
         };
@@ -4158,6 +4725,39 @@ export interface operations {
             };
         };
     };
+    quote_checkout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutQuoteRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutQuoteResponse"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     create_checkout: {
         parameters: {
             query?: never;
@@ -4922,6 +5522,41 @@ export interface operations {
             };
             /** @description Wallet hierarchy is not ready */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    redeem_voucher: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RedeemVoucherRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoucherRedemptionResponse"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -17,6 +17,31 @@ pub struct CreateCheckoutRequest {
     pub checkout_kind: CheckoutKind,
     pub on_demand_plan_id: Option<Uuid>,
     pub transaction_id: String,
+    pub coupon_code: Option<String>,
+    pub payment_method_binding_id: Option<Uuid>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct CheckoutQuoteRequest {
+    pub customer_plan_id: Uuid,
+    pub checkout_kind: CheckoutKind,
+    pub on_demand_plan_id: Option<Uuid>,
+    pub coupon_code: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct CheckoutQuoteResponse {
+    pub customer_plan_id: Uuid,
+    pub checkout_kind: CheckoutKind,
+    pub base_amount_minor: i64,
+    pub discount_amount_minor: i64,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub granted_credit_units: i64,
+    pub coupon_id: Uuid,
+    pub coupon_code: String,
+    pub coupon_version: i64,
+    pub payment_required: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
@@ -31,6 +56,10 @@ pub struct CheckoutResponse {
     pub granted_credit_units: Option<i64>,
     pub transaction_id: String,
     pub created_at: DateTime<Utc>,
+    pub base_amount_minor: Option<i64>,
+    pub discount_amount_minor: i64,
+    pub coupon_code: Option<String>,
+    pub payment_required: bool,
 }
 
 pub fn checkout_request_hash(request: &CreateCheckoutRequest) -> String {
@@ -58,6 +87,8 @@ mod tests {
             checkout_kind: CheckoutKind::OnDemand,
             on_demand_plan_id: Some(Uuid::from_u128(1)),
             transaction_id: "operation-1".to_string(),
+            coupon_code: None,
+            payment_method_binding_id: None,
         };
         assert_eq!(
             checkout_request_hash(&checkout),

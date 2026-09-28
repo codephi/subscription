@@ -162,6 +162,9 @@ export function BillingDetailPage() {
                     value={record.data.amount_minor?.toString()}
                   />
                   <DetailRow label="Moeda" value={record.data.currency} />
+                  <DetailRow label="Cupom" value={record.data.coupon_code} />
+                  <DetailRow label="Preço original (unidades menores)" value={record.data.base_amount_minor?.toString()} />
+                  <DetailRow label="Desconto (unidades menores)" value={record.data.discount_amount_minor?.toString()} />
                   <DetailRow
                     label="Código de falha"
                     value={record.data.failure_code}

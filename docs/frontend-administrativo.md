@@ -356,9 +356,9 @@ Rust de integração cobrem os contratos e a persistência da API contra Postgre
   internet sem implementar autenticação e autorização.
 - Referências operacionais/`actor_reference` são textos digitados pelo operador;
   não provam identidade autenticada.
-- Cupons, vouchers, compensações, estornos iniciados pelo produto e pausa de
-  planos não aparecem como operações do painel, pois seus fluxos de backend não
-  estão implementados.
+- Promoções no painel permitem cadastrar/editar vouchers e cupons, consultar
+  histórico, resgatar voucher e iniciar checkout com cotação. Compensation,
+  estornos iniciados pelo produto e pausa de planos continuam fora do painel.
 - Telemetria é local ao console; não existe agregador remoto ou painel de erros.
 - Os testes e2e usam API simulada. Ainda não há uma suíte de navegador de ponta a
   ponta contra uma instância real do serviço.

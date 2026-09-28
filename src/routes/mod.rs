@@ -23,6 +23,7 @@ pub mod internal;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod plans;
+pub mod promotions;
 pub mod system;
 pub mod usage;
 pub mod wallets;
@@ -45,7 +46,8 @@ pub mod wallets;
         (name = "Usage", description = "Metered usage, eligibility, and item statements"),
         (name = "Operations", description = "Administrative replay and reconciliation operations"),
         (name = "Billing", description = "Provider-neutral collection and payment workflows"),
-        (name = "Checkouts", description = "Provider-neutral checkout workflows")
+        (name = "Checkouts", description = "Provider-neutral checkout workflows"),
+        (name = "Promotions", description = "Voucher redemptions, discount coupons, and administrative lifecycle")
     )
 )]
 struct ApiDoc;
@@ -92,6 +94,7 @@ fn api_router() -> utoipa_axum::router::OpenApiRouter<AppState> {
         .merge(catalog_admin::router())
         .merge(credits::router())
         .merge(plans::router())
+        .merge(promotions::router())
         .merge(admission::router())
         .merge(audit_admin::router())
         .merge(admin_queries::router())

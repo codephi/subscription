@@ -7,7 +7,10 @@ use crate::{
             CreateInitialCollectionRequest, CreateOnDemandPurchaseRequest,
             CreatePaymentMethodBindingRequest, UpdateStripeIntegrationRequest,
         },
-        checkouts::{checkout_request_hash, CheckoutResponse, CreateCheckoutRequest},
+        checkouts::{
+            checkout_request_hash, CheckoutQuoteRequest, CheckoutQuoteResponse, CheckoutResponse,
+            CreateCheckoutRequest,
+        },
     },
     error::{ApiError, ApiResult},
     repositories::{
@@ -15,7 +18,7 @@ use crate::{
         database::DatabaseRepository,
         stripe::StripeConnector,
     },
-    services::{billing, billing_integrations},
+    services::billing_integrations,
 };
 
 #[derive(Clone)]
@@ -52,8 +55,10 @@ pub async fn create(
     idempotency_key: &str,
     request: CreateCheckoutRequest,
 ) -> ApiResult<CheckoutResponse> {
-    let config = required_config(config)?;
     validate_request(&request, idempotency_key)?;
+    if request.payment_method_binding_id.is_none() && request.coupon_code.is_none() {
+        required_config(config)?;
+    }
     let request_hash = checkout_request_hash(&request);
     let claim = repository
         .claim_checkout(workspace_id, idempotency_key, &request, &request_hash)
@@ -70,9 +75,26 @@ pub async fn get(
     response_for_record(repository, record).await
 }
 
+pub async fn quote(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+    request: CheckoutQuoteRequest,
+) -> ApiResult<CheckoutQuoteResponse> {
+    if request.coupon_code.trim().is_empty() || request.coupon_code.len() > 64 {
+        return Err(ApiError::unprocessable(
+            "invalid_coupon_code",
+            format!(
+                "coupon code {:?} must contain 1 to 64 characters",
+                request.coupon_code
+            ),
+        ));
+    }
+    repository.quote_checkout(workspace_id, &request).await
+}
+
 async fn create_or_resume(
     repository: &DatabaseRepository,
-    config: &BillingCheckoutConfig,
+    config: Option<&BillingCheckoutConfig>,
     claim: CheckoutClaim,
     request: CreateCheckoutRequest,
 ) -> ApiResult<CheckoutResponse> {
@@ -85,10 +107,47 @@ async fn create_or_resume(
 
 async fn process_claim(
     repository: &DatabaseRepository,
-    config: &BillingCheckoutConfig,
+    config: Option<&BillingCheckoutConfig>,
     record: CheckoutRecord,
     request: CreateCheckoutRequest,
 ) -> ApiResult<CheckoutResponse> {
+    let checkout_id = record.checkout_id;
+    let result = process_claim_inner(repository, config, record, request).await;
+    if result.is_err() {
+        let _ = repository.release_checkout(checkout_id).await;
+    }
+    result
+}
+
+async fn process_claim_inner(
+    repository: &DatabaseRepository,
+    config: Option<&BillingCheckoutConfig>,
+    record: CheckoutRecord,
+    request: CreateCheckoutRequest,
+) -> ApiResult<CheckoutResponse> {
+    if request.coupon_code.is_some() {
+        let quote = repository
+            .quote_checkout(
+                record.workspace_id,
+                &CheckoutQuoteRequest {
+                    customer_plan_id: request.customer_plan_id,
+                    checkout_kind: request.checkout_kind,
+                    on_demand_plan_id: request.on_demand_plan_id,
+                    coupon_code: request.coupon_code.clone().unwrap_or_default(),
+                },
+            )
+            .await?;
+        if !quote.payment_required {
+            repository.complete_free_checkout(&record, &request).await?;
+            return response_for_record(
+                repository,
+                repository
+                    .checkout(record.checkout_id, Some(record.workspace_id))
+                    .await?,
+            )
+            .await;
+        }
+    }
     match begin_collection(repository, config, &record, &request).await {
         Ok(collection) => {
             repository
@@ -102,16 +161,13 @@ async fn process_claim(
             )
             .await
         }
-        Err(error) => {
-            let _ = repository.release_checkout(record.checkout_id).await;
-            Err(error)
-        }
+        Err(error) => Err(error),
     }
 }
 
 async fn begin_collection(
     repository: &DatabaseRepository,
-    config: &BillingCheckoutConfig,
+    config: Option<&BillingCheckoutConfig>,
     record: &CheckoutRecord,
     request: &CreateCheckoutRequest,
 ) -> ApiResult<crate::dto::billing::CollectionRequestResponse> {
@@ -127,9 +183,15 @@ async fn begin_collection(
 
 async fn prepare_payment_method(
     repository: &DatabaseRepository,
-    config: &BillingCheckoutConfig,
+    config: Option<&BillingCheckoutConfig>,
     record: &CheckoutRecord,
 ) -> ApiResult<crate::dto::billing::PaymentMethodBindingResponse> {
+    if let Some(binding_id) = record.payment_method_binding_id {
+        return repository
+            .find_payment_method_binding_by_id(record.workspace_id, binding_id)
+            .await;
+    }
+    let config = required_config(config)?;
     let connector = StripeConnector::new(config.api_secret.clone(), None);
     let account_id = connector.identify_account().await.map_err(stripe_error)?;
     let integration =
@@ -258,33 +320,39 @@ async fn create_collection(
     request: &CreateCheckoutRequest,
     binding_id: Uuid,
 ) -> ApiResult<crate::dto::billing::CollectionRequestResponse> {
+    let coupon = request
+        .coupon_code
+        .as_deref()
+        .map(|code| (checkout.checkout_id, code));
     match request.checkout_kind {
         crate::dto::checkouts::CheckoutKind::Initial => {
-            billing::create_initial_collection(
-                repository,
-                checkout.workspace_id,
-                checkout.customer_plan_id,
-                &checkout.idempotency_key,
-                &CreateInitialCollectionRequest {
-                    payment_method_binding_id: binding_id,
-                    transaction_id: checkout.transaction_id.clone(),
-                },
-            )
-            .await
+            repository
+                .create_initial_collection_for_checkout(
+                    checkout.workspace_id,
+                    checkout.customer_plan_id,
+                    &checkout.idempotency_key,
+                    &CreateInitialCollectionRequest {
+                        payment_method_binding_id: binding_id,
+                        transaction_id: checkout.transaction_id.clone(),
+                    },
+                    coupon,
+                )
+                .await
         }
         crate::dto::checkouts::CheckoutKind::OnDemand => {
-            billing::create_on_demand_purchase(
-                repository,
-                checkout.workspace_id,
-                checkout.customer_plan_id,
-                &checkout.idempotency_key,
-                &CreateOnDemandPurchaseRequest {
-                    on_demand_plan_id: request.on_demand_plan_id.expect("validated offer"),
-                    payment_method_binding_id: binding_id,
-                    transaction_id: checkout.transaction_id.clone(),
-                },
-            )
-            .await
+            repository
+                .create_on_demand_purchase_for_checkout(
+                    checkout.workspace_id,
+                    checkout.customer_plan_id,
+                    &checkout.idempotency_key,
+                    &CreateOnDemandPurchaseRequest {
+                        on_demand_plan_id: request.on_demand_plan_id.expect("validated offer"),
+                        payment_method_binding_id: binding_id,
+                        transaction_id: checkout.transaction_id.clone(),
+                    },
+                    coupon,
+                )
+                .await
         }
     }
 }
@@ -293,6 +361,25 @@ async fn response_for_record(
     repository: &DatabaseRepository,
     record: CheckoutRecord,
 ) -> ApiResult<CheckoutResponse> {
+    if record.completed_without_payment {
+        let credits = repository.checkout_credit_units(&record).await?;
+        return Ok(CheckoutResponse {
+            checkout_id: record.checkout_id,
+            customer_plan_id: record.customer_plan_id,
+            checkout_kind: record.checkout_kind,
+            status: "COMPLETED".to_string(),
+            collection_request_id: None,
+            amount_minor: Some(0),
+            currency: record.checkout_currency,
+            granted_credit_units: Some(credits),
+            transaction_id: record.transaction_id,
+            created_at: record.created_at,
+            base_amount_minor: record.base_amount_minor,
+            discount_amount_minor: record.discount_amount_minor,
+            coupon_code: record.coupon_code,
+            payment_required: false,
+        });
+    }
     if let Some(collection_id) = record.collection_request_id {
         let collection = repository
             .find_collection_request(record.workspace_id, collection_id)
@@ -314,6 +401,10 @@ fn pending_response(record: CheckoutRecord) -> CheckoutResponse {
         granted_credit_units: None,
         transaction_id: record.transaction_id,
         created_at: record.created_at,
+        base_amount_minor: record.base_amount_minor,
+        discount_amount_minor: record.discount_amount_minor,
+        coupon_code: record.coupon_code,
+        payment_required: true,
     }
 }
 
@@ -326,7 +417,11 @@ fn validate_request(request: &CreateCheckoutRequest, key: &str) -> ApiResult<()>
         && request.transaction_id.is_ascii()
         && !request.transaction_id.trim().is_empty();
     let valid_key = (1..=255).contains(&key.len()) && key.is_ascii();
-    if valid && valid_transaction && valid_key {
+    if valid
+        && valid_transaction
+        && valid_key
+        && request.coupon_code.as_deref().is_none_or(valid_coupon_code)
+    {
         return Ok(());
     }
     Err(ApiError::unprocessable(
@@ -336,6 +431,15 @@ fn validate_request(request: &CreateCheckoutRequest, key: &str) -> ApiResult<()>
             request.transaction_id, request.checkout_kind, request.on_demand_plan_id
         ),
     ))
+}
+
+fn valid_coupon_code(code: &str) -> bool {
+    let value = code.trim().to_ascii_uppercase();
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, b'-' | b'_'))
 }
 
 fn required_config(config: Option<&BillingCheckoutConfig>) -> ApiResult<&BillingCheckoutConfig> {
@@ -385,6 +489,8 @@ mod tests {
             checkout_kind: CheckoutKind::Initial,
             on_demand_plan_id: None,
             transaction_id: "operation-1".to_string(),
+            coupon_code: None,
+            payment_method_binding_id: None,
         };
         assert!(validate_request(&request, "key-1").is_ok());
         request.on_demand_plan_id = Some(Uuid::new_v4());

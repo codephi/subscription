@@ -38,6 +38,7 @@ mod plan_rows;
 mod plan_transitions;
 mod plan_writes;
 pub mod plans;
+pub mod promotions;
 pub mod stripe;
 pub(crate) mod subscription_calendar_jobs;
 pub mod usage;
