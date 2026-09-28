@@ -27,7 +27,6 @@ use testcontainers::{
 use tokio::sync::OnceCell;
 
 static TELEMETRY_GUARD: OnceCell<telemetry::TelemetryGuard> = OnceCell::const_new();
-static OTEL_ENDPOINT: OnceCell<String> = OnceCell::const_new();
 static ENV_LOADED: OnceCell<()> = OnceCell::const_new();
 static DOCKER_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -109,7 +108,7 @@ fn test_config(
         port: 0,
         cors: CorsConfig::Permissive,
         body_limit_bytes: DEFAULT_BODY_LIMIT_BYTES,
-        otel_enabled: otel_enabled_from_env(),
+        otel_enabled: test_otel_enabled(otel_enabled_from_env(), external_otel_is_configured()),
         mcp: McpConfig {
             enabled: mcp_enabled,
             path: DEFAULT_MCP_PATH.to_string(),
@@ -164,23 +163,19 @@ fn docker_runtime() -> &'static tokio::runtime::Runtime {
 
 async fn init_telemetry() {
     load_env().await;
-    if !otel_enabled_from_env() {
+    if !test_otel_enabled(otel_enabled_from_env(), external_otel_is_configured()) {
         TELEMETRY_GUARD
             .get_or_init(|| async { telemetry::init_tracing(false).expect("init tracing") })
             .await;
         return;
     }
-    configure_test_otel().await;
+    configure_test_otel();
     TELEMETRY_GUARD
         .get_or_init(|| async { telemetry::init_tracing(true).expect("init tracing") })
         .await;
 }
 
-async fn configure_test_otel() {
-    if let Some(endpoint) = otel_endpoint().await {
-        set_env_if_missing("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc");
-        set_env_if_missing("OTEL_EXPORTER_OTLP_ENDPOINT", &endpoint);
-    }
+fn configure_test_otel() {
     set_env_if_missing("OTEL_EXPORTER_OTLP_TIMEOUT", "2000");
     set_env_if_missing("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "2000");
     set_env_if_missing("OTEL_TRACES_SAMPLER", "always_on");
@@ -189,34 +184,15 @@ async fn configure_test_otel() {
     set_env_if_missing("OTEL_SERVICE_NAME", "subscription-tests");
 }
 
-async fn otel_endpoint() -> Option<String> {
-    if external_otel_is_configured() {
-        return None;
-    }
-    Some(OTEL_ENDPOINT.get_or_init(start_jaeger).await.clone())
-}
-
 fn external_otel_is_configured() -> bool {
     std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").is_ok()
         || std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok()
 }
 
-async fn start_jaeger() -> String {
-    let image = GenericImage::new("jaegertracing/jaeger", "latest")
-        .with_exposed_port(4317.tcp())
-        .with_wait_for(WaitFor::seconds(3))
-        .with_env_var("COLLECTOR_OTLP_ENABLED", "true")
-        .with_env_var("COLLECTOR_OTLP_GRPC_HOST_PORT", "0.0.0.0:4317");
-    let container = image
-        .start()
-        .await
-        .expect("failed to start jaeger container");
-    let container = Box::leak(Box::new(container));
-    let port = container
-        .get_host_port_ipv4(4317)
-        .await
-        .expect("failed to resolve jaeger mapped port");
-    format!("http://127.0.0.1:{port}")
+fn test_otel_enabled(otel_enabled: bool, collector_configured: bool) -> bool {
+    // Integration tests must not leak a process-wide Jaeger container. Use an
+    // explicitly configured collector when tracing is enabled.
+    otel_enabled && collector_configured
 }
 
 async fn load_env() {
@@ -250,4 +226,16 @@ async fn init_pool_with_retry(database_url: &str, container: TestPostgres) -> Pg
         }
     }
     unreachable!("retry loop always returns or panics")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_otel_enabled;
+
+    #[test]
+    fn telemetry_requires_an_explicit_collector() {
+        assert!(test_otel_enabled(true, true));
+        assert!(!test_otel_enabled(true, false));
+        assert!(!test_otel_enabled(false, true));
+    }
 }
