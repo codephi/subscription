@@ -11,6 +11,9 @@ use opentelemetry_sdk::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+pub(crate) mod ecs;
+mod ecs_fields;
+
 pub struct TelemetryGuard {
     tracer_provider: Option<SdkTracerProvider>,
 }
@@ -33,29 +36,30 @@ impl TelemetryGuard {
     }
 }
 
+/// Install ECS stdout logs and optional OTLP traces; e.g. `init_tracing(false)?`.
 pub fn init_tracing(enabled: bool) -> Result<TelemetryGuard> {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"))
         .add_directive("otel::tracing=info".parse().expect("valid directive"));
-
-    if !enabled {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_target(false)
-                    .compact(),
-            )
-            .init();
-
-        return Ok(TelemetryGuard {
-            tracer_provider: None,
-        });
-    }
-
-    global::set_text_map_propagator(TraceContextPropagator::new());
-
     let resource = build_resource();
+    let ecs_logs = ecs::EcsLayer::new(&resource, std::io::stdout);
+
+    let tracer_provider = enabled
+        .then(|| build_tracer_provider(resource))
+        .transpose()?;
+    let otel_layer = tracer_provider.as_ref().map(|provider| {
+        tracing_opentelemetry::layer().with_tracer(provider.tracer(env!("CARGO_PKG_NAME")))
+    });
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(ecs_logs)
+        .with(otel_layer)
+        .init();
+    Ok(TelemetryGuard { tracer_provider })
+}
+
+fn build_tracer_provider(resource: Resource) -> Result<SdkTracerProvider> {
+    global::set_text_map_propagator(TraceContextPropagator::new());
     let use_simple = std::env::var("OTEL_USE_SIMPLE_EXPORTER")
         .map(|value| value.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
@@ -69,21 +73,7 @@ pub fn init_tracing(enabled: bool) -> Result<TelemetryGuard> {
     };
     global::set_tracer_provider(tracer_provider.clone());
 
-    let tracer = tracer_provider.tracer(env!("CARGO_PKG_NAME"));
-
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .compact(),
-        )
-        .with(tracing_opentelemetry::layer().with_tracer(tracer))
-        .init();
-
-    Ok(TelemetryGuard {
-        tracer_provider: Some(tracer_provider),
-    })
+    Ok(tracer_provider)
 }
 
 fn build_exporter(use_simple: bool) -> Result<SpanExporter> {
@@ -166,3 +156,11 @@ fn build_resource() -> Resource {
 #[cfg(test)]
 #[path = "telemetry/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "telemetry/ecs_tests.rs"]
+mod ecs_tests;
+
+#[cfg(test)]
+#[path = "telemetry/access_log_tests.rs"]
+mod access_log_tests;

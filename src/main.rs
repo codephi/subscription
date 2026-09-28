@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let pool = init_pool(&config.database_url).await?;
 
     if let Err(error) = run_migrations(&pool).await {
-        tracing::error!("failed to run database migrations: {error}");
+        tracing::error!(error = %error, "failed to run database migrations");
         return Err(error);
     }
 

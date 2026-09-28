@@ -174,6 +174,35 @@ Swagger UI is available at `/docs` with the generated OpenAPI contract. Every
 new HTTP route is included in `/openapi.json`, assigned to one domain category,
 and covered by a contract check.
 
+API logs are newline-delimited JSON on stdout, following
+[Elastic Common Schema (ECS) 9.5](https://www.elastic.co/docs/reference/ecs).
+Every event includes `@timestamp` (UTC), `ecs.version`, `log.level`, `log.logger`,
+`message`, and `service.name`/`service.version`. The service identity uses the
+OpenTelemetry resource (`OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES`),
+falling back to the Cargo package name and version. Set
+`deployment.environment.name` (or the legacy `deployment.environment`) in
+`OTEL_RESOURCE_ATTRIBUTES` to populate `service.environment`.
+
+HTTP completion logs include `http.request.method`, `url.path`,
+`http.response.status_code`, `event.duration` in nanoseconds, and `event.outcome`
+(`failure` for 5xx; `success` otherwise, from the server's perspective). Duration
+measures response creation, excluding streaming body delivery. These logs cover
+health checks, missing routes, body-limit rejections, CORS preflights, and MCP
+when enabled. Query strings, request bodies, authorization, and cookie headers
+are omitted from access logs.
+When an OpenTelemetry span exists, `trace.id` and `span.id` correlate the log
+with its trace. Existing `error`/`error_code` fields map to
+`error.message`/`error.code`; other contextual fields appear under `labels`.
+
+`RUST_LOG` controls verbosity (default `info`), for example
+`RUST_LOG=subscription=debug,info`. `OTEL_ENABLED=false` disables trace export
+and trace middleware while retaining the same ECS logs and HTTP completion
+events. No collector is required to consume stdout logs.
+
+```json
+{"@timestamp":"2026-09-27T12:00:00.000Z","ecs":{"version":"9.5.0"},"log":{"level":"info","logger":"subscription::routes::access_log"},"service":{"name":"subscription","version":"0.1.0"},"message":"HTTP request completed","event":{"kind":"event","action":"http_request","duration":1200000,"outcome":"success"},"http":{"request":{"method":"GET"},"response":{"status_code":200}},"url":{"path":"/health"}}
+```
+
 HTTP OpenTelemetry export (`http/protobuf` or `http/json`) uses the blocking
 Reqwest client on the batch processor's dedicated thread. The client is selected
 explicitly because the SDK otherwise prefers the async client, which needs a

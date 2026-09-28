@@ -1,4 +1,4 @@
-use axum::Router;
+use axum::{middleware, Router};
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use utoipa::OpenApi;
@@ -6,6 +6,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::{config::AppConfig, state::AppState};
 
+mod access_log;
 pub mod admin_queries;
 pub mod admission;
 pub mod audit_admin;
@@ -54,14 +55,6 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
 
     let api_router = api_router.merge(SwaggerUi::new("/docs").url("/openapi.json", api));
 
-    let api_router = if config.otel_enabled {
-        api_router
-            .layer(OtelInResponseLayer)
-            .layer(OtelAxumLayer::default().filter(|path| path != "/health"))
-    } else {
-        api_router
-    };
-
     let api_router = api_router
         .layer(cors::build_cors_layer(&config.cors, None))
         .layer(RequestBodyLimitLayer::new(config.body_limit_bytes));
@@ -69,6 +62,15 @@ pub fn create_router(state: AppState, config: &AppConfig) -> Router {
     #[cfg(feature = "mcp")]
     let api_router = if config.mcp.enabled {
         api_router.merge(mcp::router(&config.mcp))
+    } else {
+        api_router
+    };
+
+    let api_router = api_router.layer(middleware::from_fn(access_log::log_http_request));
+    let api_router = if config.otel_enabled {
+        api_router
+            .layer(OtelInResponseLayer)
+            .layer(OtelAxumLayer::default().filter(|path| path != "/health"))
     } else {
         api_router
     };
