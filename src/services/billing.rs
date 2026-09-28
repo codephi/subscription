@@ -532,14 +532,12 @@ fn validate_card_display_name(request: &CreatePaymentMethodFromCardRequest) -> A
 }
 
 fn card_display_name(request: &CreatePaymentMethodFromCardRequest) -> String {
-    if let Some(name) = request
+    let name = request
         .card_name
         .as_deref()
         .map(str::trim)
         .filter(|name| !name.is_empty())
-    {
-        return name.to_string();
-    }
+        .unwrap_or("Cartão");
     let last_four: String = request
         .card_number
         .chars()
@@ -550,7 +548,7 @@ fn card_display_name(request: &CreatePaymentMethodFromCardRequest) -> String {
         .into_iter()
         .rev()
         .collect();
-    format!("Cartão •••• {last_four}")
+    format!("{name} •••• {last_four}")
 }
 
 fn validate_cardholder_name(name: &str) -> ApiResult<()> {

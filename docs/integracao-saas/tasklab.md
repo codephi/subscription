@@ -124,7 +124,7 @@ termos a partir do plano e do pacote cadastrados. O formulário de cartão fica 
 TaskLab, que encaminha PAN/CVC pela sua API autenticada à Subscription. A
 Subscription envia os dados ao provedor, valida o SetupIntent e guarda a
 referência tokenizada e o nome de exibição quando o usuário opta por salvar o
-cartão. O nome é informado pelo usuário ou gerado com os últimos quatro dígitos;
+cartão. O nome informado pelo usuário sempre é acompanhado dos últimos quatro dígitos; sem nome, é exibido “Cartão” com os últimos quatro dígitos;
 PAN e CVC não são persistidos.
 
 ### Fluxo de tokenização

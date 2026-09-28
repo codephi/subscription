@@ -142,7 +142,7 @@ fn direct_card_setup_rejects_invalid_name_cvc_and_expiry_shape() {
 }
 
 #[test]
-fn saved_card_name_uses_custom_label_or_only_the_last_four_digits() {
+fn saved_card_name_always_includes_last_four_digits() {
     let request = crate::dto::billing::CreatePaymentMethodFromCardRequest {
         customer_plan_id: uuid::Uuid::new_v4(),
         cardholder_name: "TaskLab Test".to_string(),
@@ -158,7 +158,7 @@ fn saved_card_name_uses_custom_label_or_only_the_last_four_digits() {
         card_name: Some("Cartão de trabalho".to_string()),
         ..request.clone()
     };
-    assert_eq!(card_display_name(&named), "Cartão de trabalho");
+    assert_eq!(card_display_name(&named), "Cartão de trabalho •••• 4242");
     assert!(validate_card_entry(&named).is_ok());
 
     let invalid_name = crate::dto::billing::CreatePaymentMethodFromCardRequest {

@@ -86,7 +86,7 @@ test("a card form is validated by Subscription and its saved binding funds a top
   await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
     account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
     catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [] },
-    payment_methods: bindingSaved ? [{ payment_method_binding_id: "binding-1", display_name: "Cartão pessoal", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }] : [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
+    payment_methods: bindingSaved ? [{ payment_method_binding_id: "binding-1", display_name: "Cartão pessoal •••• 4242", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }] : [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
     meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
   } }))
   let setupBody: unknown
@@ -114,7 +114,7 @@ test("a card form is validated by Subscription and its saved binding funds a top
 
   await expect.poll(() => setupBody).toEqual({ cardholder_name: "Teste TaskLab", card_name: "Cartão pessoal", card_number: "4242424242424242", exp_month: 12, exp_year: 2035, cvc: "123", save_for_future: true })
   await expect(page.getByLabel("Cartão salvo")).toHaveValue("binding-1")
-  await expect(page.getByLabel("Cartão salvo").locator("option:checked")).toHaveText("Cartão pessoal")
+  await expect(page.getByLabel("Cartão salvo").locator("option:checked")).toHaveText("Cartão pessoal •••• 4242")
   await page.getByRole("button", { name: "Iniciar recarga" }).click()
   await expect.poll(() => checkoutBody).toEqual({ checkout_kind: "ON_DEMAND", topup_credits: 10, payment_method_binding_id: "binding-1" })
 })
