@@ -131,10 +131,18 @@ async fn checkout(
 async fn payment_method_setup(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Json(request): Json<crate::models::CreatePaymentMethodFromCardRequest>,
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128 && value.is_ascii())
+        .ok_or_else(|| {
+            AppError::Invalid("Idempotency-Key deve conter de 1 a 128 caracteres ASCII".into())
+        })?;
     Ok(Json(
-        services::create_payment_method_setup(&state, &user).await?,
+        services::create_payment_method_setup(&state, &user, idempotency_key, request).await?,
     ))
 }
 
@@ -145,7 +153,8 @@ async fn save_payment_method_binding(
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
     Ok(Json(
-        services::save_payment_method_binding(&state, &user, request.payment_method_setup_id).await?,
+        services::save_payment_method_binding(&state, &user, request.payment_method_setup_id)
+            .await?,
     ))
 }
 

@@ -189,22 +189,30 @@ pub async fn create_checkout(
 pub async fn create_payment_method_setup(
     state: &AppState,
     user: &AuthenticatedUser,
+    idempotency_key: &str,
+    request: crate::models::CreatePaymentMethodFromCardRequest,
 ) -> Result<Value, AppError> {
     let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
-    let web_url = state.tasklab_web_url.trim_end_matches('/');
-    let success_url = format!("{web_url}/?payment_setup=complete");
-    let cancel_url = format!("{web_url}/?payment_setup=cancelled");
     let session = state
         .subscription
         .post(
-            &format!("/v1/workspaces/{}/payment-method-setup-sessions", user.workspace_id),
-            None,
-            &json!({"customer_plan_id":customer_plan_id,"success_url":success_url,"cancel_url":cancel_url}),
+            &format!(
+                "/v1/workspaces/{}/payment-methods/from-card",
+                user.workspace_id
+            ),
+            Some(idempotency_key),
+            &json!({
+                "customer_plan_id":customer_plan_id,
+                "cardholder_name":request.cardholder_name,
+                "card_number":request.card_number,
+                "exp_month":request.exp_month,
+                "exp_year":request.exp_year,
+                "cvc":request.cvc,
+                "save_for_future":request.save_for_future,
+            }),
         )
         .await?;
-    Ok(json!({
-        "redirect_url":session["redirect_url"],
-    }))
+    Ok(session)
 }
 
 pub async fn save_payment_method_binding(

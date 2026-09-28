@@ -4,6 +4,7 @@ use super::*;
 use crate::repositories::billing_connector::{
     BillingCapabilities, BillingPaymentMethod, ConnectorCollectionState, ConnectorFuture,
 };
+use chrono::Datelike;
 
 struct FakeBillingConnector {
     capabilities: BillingCapabilities,
@@ -78,6 +79,72 @@ fn payment_setup_return_reference_is_added_by_subscription() {
         setup_id
     )
     .is_err());
+}
+
+#[test]
+fn direct_card_setup_validates_shape_and_never_echoes_card_values() {
+    let valid = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        customer_plan_id: uuid::Uuid::new_v4(),
+        cardholder_name: "TaskLab Test".to_string(),
+        card_number: "4242424242424242".to_string(),
+        exp_month: 12,
+        exp_year: (chrono::Utc::now().year() + 2) as u16,
+        cvc: "123".to_string(),
+        save_for_future: true,
+    };
+    assert!(validate_card_entry(&valid).is_ok());
+
+    let invalid = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        card_number: "4111".to_string(),
+        ..valid
+    };
+    let error = validate_card_entry(&invalid).unwrap_err();
+    assert_eq!(error.code(), "invalid_card_number");
+    assert!(!error.to_string().contains("4111"));
+}
+
+#[test]
+fn direct_card_setup_rejects_invalid_name_cvc_and_expiry_shape() {
+    let valid = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        customer_plan_id: uuid::Uuid::new_v4(),
+        cardholder_name: "TaskLab Test".to_string(),
+        card_number: "4242424242424242".to_string(),
+        exp_month: 12,
+        exp_year: (chrono::Utc::now().year() + 2) as u16,
+        cvc: "123".to_string(),
+        save_for_future: false,
+    };
+    let invalid_name = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        cardholder_name: "  ".to_string(),
+        ..valid.clone()
+    };
+    assert_eq!(
+        validate_card_entry(&invalid_name).unwrap_err().code(),
+        "invalid_cardholder_name"
+    );
+    let invalid_cvc = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        cvc: "12x".to_string(),
+        ..valid.clone()
+    };
+    let error = validate_card_entry(&invalid_cvc).unwrap_err();
+    assert_eq!(error.code(), "invalid_card_security_code");
+    assert!(!error.to_string().contains("12x"));
+    let invalid_month = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        exp_month: 13,
+        ..valid
+    };
+    assert_eq!(
+        validate_card_entry(&invalid_month).unwrap_err().code(),
+        "invalid_card_expiry_month"
+    );
+}
+
+#[test]
+fn direct_card_setup_only_accepts_test_credentials() {
+    assert!(validate_raw_card_secret("sk_test_example").is_ok());
+    let error = validate_raw_card_secret("sk_live_example").unwrap_err();
+    assert_eq!(error.code(), "raw_card_setup_sandbox_only");
+    assert!(!error.to_string().contains("sk_live_example"));
 }
 
 #[test]

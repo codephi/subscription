@@ -1,8 +1,11 @@
+use chrono::Datelike;
+
 use crate::{
     dto::billing::{
         BillingCapabilitiesResponse, BillingConnectionResponse, CollectionRequestResponse,
         CreateBillingConnectionRequest, CreateInitialCollectionRequest,
         CreateOnDemandPurchaseRequest, CreatePaymentMethodBindingRequest,
+        CreatePaymentMethodFromCardRequest, CreatePaymentMethodFromCardResponse,
         CreatePaymentMethodSetupSessionRequest, CreateRenewalRegularizationRequest,
         PaymentMethodBindingResponse, PaymentMethodSetupSessionResponse,
         UnmatchedPaymentCaseResponse,
@@ -341,6 +344,227 @@ pub async fn create_payment_method_binding(
             &prepared.payment_method_id,
         )
         .await
+}
+
+pub async fn create_payment_method_from_card(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    idempotency_key: &str,
+    request: &CreatePaymentMethodFromCardRequest,
+) -> ApiResult<CreatePaymentMethodFromCardResponse> {
+    validate_card_entry(request)?;
+    repository
+        .ensure_customer_plan_workspace(workspace_id, request.customer_plan_id)
+        .await?;
+    let context = card_setup_context(repository, workspace_id).await?;
+    let prepared = confirm_card_setup(&context, request, idempotency_key).await?;
+    finish_card_setup(repository, workspace_id, request, &context, &prepared).await
+}
+
+struct CardSetupContext {
+    connection_id: uuid::Uuid,
+    connector: crate::repositories::stripe::StripeConnector,
+    customer_id: String,
+}
+
+async fn card_setup_context(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+) -> ApiResult<CardSetupContext> {
+    let connection_id = repository
+        .active_stripe_billing_connection(workspace_id)
+        .await?;
+    let configuration = repository
+        .billing_connector_configuration(connection_id)
+        .await?;
+    let customer_id =
+        card_setup_customer(repository, workspace_id, connection_id, &configuration).await?;
+    let connector = card_setup_connector(repository, workspace_id, connection_id, &configuration)?;
+    Ok(CardSetupContext {
+        connection_id,
+        connector,
+        customer_id,
+    })
+}
+
+async fn card_setup_customer(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
+    configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
+) -> ApiResult<String> {
+    if !configuration.managed {
+        return Ok(configuration.external_account_reference.clone());
+    }
+    let secrets = repository
+        .integration_secrets(workspace_id, connection_id)
+        .await?;
+    crate::services::billing_integrations::ensure_customer(repository, &secrets).await
+}
+
+fn card_setup_connector(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
+    configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
+) -> ApiResult<crate::repositories::stripe::StripeConnector> {
+    let secret = resolve_connection_secret(
+        repository,
+        workspace_id,
+        connection_id,
+        "stripe_api",
+        &configuration.secret_reference,
+        configuration.managed,
+    )?;
+    validate_raw_card_secret(&secret)?;
+    Ok(crate::repositories::stripe::StripeConnector::new(
+        secret,
+        (!configuration.managed)
+            .then(|| stripe_account(&configuration.external_account_reference))
+            .flatten(),
+    ))
+}
+
+fn validate_raw_card_secret(secret: &str) -> ApiResult<()> {
+    if secret.starts_with("sk_test_") {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "raw_card_setup_sandbox_only",
+        "direct card entry requires a Stripe test secret beginning with sk_test_",
+    ))
+}
+
+async fn confirm_card_setup(
+    context: &CardSetupContext,
+    request: &CreatePaymentMethodFromCardRequest,
+    idempotency_key: &str,
+) -> ApiResult<crate::repositories::stripe::PreparedStripePaymentMethod> {
+    let card_number: String = request
+        .card_number
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect();
+    context
+        .connector
+        .create_card_setup_intent(
+            &context.customer_id,
+            request.cardholder_name.trim(),
+            &card_number,
+            request.exp_month,
+            request.exp_year,
+            &request.cvc,
+            idempotency_key,
+        )
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))
+}
+
+async fn finish_card_setup(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    request: &CreatePaymentMethodFromCardRequest,
+    context: &CardSetupContext,
+    prepared: &crate::repositories::stripe::PreparedStripePaymentMethod,
+) -> ApiResult<CreatePaymentMethodFromCardResponse> {
+    if request.save_for_future {
+        return save_card_binding(repository, workspace_id, request, context, prepared).await;
+    }
+    context
+        .connector
+        .detach_payment_method(&prepared.payment_method_id)
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
+    Ok(CreatePaymentMethodFromCardResponse {
+        payment_method_binding_id: None,
+        saved: false,
+    })
+}
+
+async fn save_card_binding(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    request: &CreatePaymentMethodFromCardRequest,
+    context: &CardSetupContext,
+    prepared: &crate::repositories::stripe::PreparedStripePaymentMethod,
+) -> ApiResult<CreatePaymentMethodFromCardResponse> {
+    let binding = repository
+        .create_verified_payment_method_binding(
+            workspace_id,
+            context.connection_id,
+            Some(request.customer_plan_id),
+            &prepared.payment_method_id,
+        )
+        .await?;
+    Ok(CreatePaymentMethodFromCardResponse {
+        payment_method_binding_id: Some(binding.payment_method_binding_id),
+        saved: true,
+    })
+}
+
+fn validate_card_entry(request: &CreatePaymentMethodFromCardRequest) -> ApiResult<()> {
+    validate_cardholder_name(&request.cardholder_name)?;
+    validate_card_number(&request.card_number)?;
+    validate_card_security_code(&request.cvc)?;
+    validate_card_expiry(request.exp_month, request.exp_year)
+}
+
+fn validate_cardholder_name(name: &str) -> ApiResult<()> {
+    if name.trim().is_empty() || name.len() > 100 {
+        return Err(ApiError::unprocessable(
+            "invalid_cardholder_name",
+            "cardholder_name must contain 1 to 100 characters",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_card_number(number: &str) -> ApiResult<()> {
+    let digits = number.chars().filter(char::is_ascii_digit).count();
+    let allowed_characters = number
+        .chars()
+        .all(|character| character.is_ascii_digit() || character == ' ' || character == '-');
+    if allowed_characters && (12..=19).contains(&digits) {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_card_number",
+        "card_number must contain 12 to 19 digits",
+    ))
+}
+
+fn validate_card_security_code(cvc: &str) -> ApiResult<()> {
+    let valid_cvc =
+        (3..=4).contains(&cvc.len()) && cvc.chars().all(|character| character.is_ascii_digit());
+    if valid_cvc {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_card_security_code",
+        "cvc must contain 3 to 4 digits",
+    ))
+}
+
+fn validate_card_expiry(month: u8, year: u16) -> ApiResult<()> {
+    if !(1..=12).contains(&month) {
+        return Err(ApiError::unprocessable(
+            "invalid_card_expiry_month",
+            format!("exp_month {month} must be between 1 and 12"),
+        ));
+    }
+    let today = chrono::Utc::now();
+    let expiry_is_past =
+        year < today.year() as u16 || (year == today.year() as u16 && month < today.month() as u8);
+    if expiry_is_past {
+        return Err(ApiError::unprocessable(
+            "card_expired",
+            format!(
+                "card expiry {:02}/{} must be in the current month or future",
+                month, year
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_setup_return_urls(success_url: &str, cancel_url: &str) -> ApiResult<()> {

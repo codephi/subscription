@@ -30,7 +30,6 @@ export default function App() {
 
   useEffect(() => restoreSession(setUser, setAuthChecked), [])
   useEffect(() => restorePendingExecution(user, setTaskName, setPendingExecution, executionTransaction), [user?.username])
-  useEffect(() => recoverPaymentSetup(user, queryClient, setPaymentMethodBindingId, setUser, setError), [user?.username])
 
   const dashboard = useQuery({
     queryKey: ["dashboard", user?.username],
@@ -73,6 +72,13 @@ export default function App() {
     onError: reportError(setError),
   })
 
+  function finishPaymentMethodSetup(result: { payment_method_binding_id?: string | null; saved: boolean }) {
+    setShowCardSetup(false)
+    if (result.payment_method_binding_id) setPaymentMethodBindingId(result.payment_method_binding_id)
+    setError(result.saved ? "" : "Cartão validado, mas não salvo. Marque a opção para reutilizá-lo em recargas.")
+    if (user) void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+  }
+
   if (!authChecked) return <AppFrame><LoadingScreen /></AppFrame>
   if (!user) return <AppFrame><AuthScreen busy={authMutation.isPending} error={error} onErrorClear={() => setError("")} onSubmit={(mode, credentials) => authMutation.mutate({ mode, ...credentials })} /></AppFrame>
   if (!user.plan_model) {
@@ -85,7 +91,7 @@ export default function App() {
       onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : paymentMethodBindingId
         ? startCheckout("INITIAL", user, 10, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
         : setError("Adicione e valide um cartão antes de iniciar a assinatura.")}
-    />{showCardSetup && <PaymentMethodSetup />}</AppFrame>
+    />{showCardSetup && <PaymentMethodSetup onComplete={finishPaymentMethodSetup} onClose={() => setShowCardSetup(false)} />}</AppFrame>
   }
 
   return <AppFrame><WorkspaceDashboard
@@ -108,42 +114,18 @@ export default function App() {
     executionBusy={executeMutation.isPending}
     onSignOut={() => signOut(user, queryClient, setUser, setCheckout, setError, checkoutKey, executionTransaction)}
     onAddPaymentMethod={() => setShowCardSetup(true)}
+    cardSetupForm={showCardSetup ? <PaymentMethodSetup onComplete={finishPaymentMethodSetup} onClose={() => setShowCardSetup(false)} /> : null}
     onCheckout={(credits) => paymentMethodBindingId
       ? startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
       : setError("Adicione e valide um cartão antes de iniciar o checkout.")}
     onExecute={() => startExecution(user, taskName, setPendingExecution, executionTransaction, executeMutation.mutate)}
-  />{showCardSetup && <PaymentMethodSetup />}</AppFrame>
+  /></AppFrame>
 }
 
 function restoreSession(setUser: (user: User | null) => void, setChecked: (checked: boolean) => void) {
   let active = true
   api<User>("/me").then((account) => active && setUser(account)).catch(() => undefined).finally(() => active && setChecked(true))
   return () => { active = false }
-}
-
-function recoverPaymentSetup(user: User | null, queryClient: ReturnType<typeof useQueryClient>, setBinding: (id: string) => void, setUser: (user: User) => void, setError: (message: string) => void) {
-  const url = new URL(window.location.href)
-  const paymentMethodSetupId = url.searchParams.get("payment_method_setup_id")
-  const paymentSetupStatus = url.searchParams.get("payment_setup")
-  if (!user || (!paymentMethodSetupId && !paymentSetupStatus)) return
-  url.searchParams.delete("payment_method_setup_id")
-  url.searchParams.delete("payment_setup")
-  window.history.replaceState({}, "", url)
-  if (!paymentMethodSetupId) {
-    if (paymentSetupStatus === "cancelled") setError("O cartão não foi salvo. Você pode tentar novamente quando quiser.")
-    return
-  }
-  void api<{ payment_method_binding_id: string }>("/payment-method-bindings", {
-    method: "POST",
-    body: JSON.stringify({ payment_method_setup_id: paymentMethodSetupId }),
-  }).then((binding) => {
-    setBinding(binding.payment_method_binding_id)
-    setError("")
-    return Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] }),
-      api<User>("/me").then(setUser),
-    ])
-  }).catch((error: Error) => setError(error.message))
 }
 
 function restorePendingExecution(user: User | null, setTask: (task: string) => void, setPending: (pending: boolean) => void, transaction: React.MutableRefObject<string | null>) {

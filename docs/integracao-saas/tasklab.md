@@ -120,45 +120,41 @@ criação `PENDING` é devolvida como HTTP 202 pela API TaskLab; o frontend cons
 até sair de `PENDING` e então atualiza o painel.
 
 O valor submetido ao checkout não vem do formulário: Subscription resolve os
-termos a partir do plano e do pacote cadastrados. Para salvar um cartão, a
-Subscription inicia o cadastro no provedor hospedado e direciona o usuário à
-página de pagamento. TaskLab só inicia o fluxo e, no retorno, envia à
-Subscription a referência opaca do setup para validação server-side. PAN e CVC
-seguem diretamente do navegador para o provedor.
+termos a partir do plano e do pacote cadastrados. O formulário de cartão fica na
+TaskLab, que encaminha PAN/CVC pela sua API autenticada à Subscription. A
+Subscription envia os dados ao provedor, valida o SetupIntent e guarda apenas a
+referência tokenizada quando o usuário opta por salvar o cartão.
 
 ### Fluxo de tokenização
 
-1. O frontend pede autorização explícita para salvar o cartão e chama
-   `POST /api/payment-method-setup`. O backend TaskLab garante um `CustomerPlan`
-   e pede à Subscription uma sessão de setup para o cliente de cobrança.
-2. Subscription resolve a integração ativa, cria o setup hospedado e devolve a
-   URL de redirecionamento junto com uma referência opaca própria. TaskLab só
-   redireciona o navegador; não recebe identificadores de integração, chaves ou
-   identificadores do provedor.
-3. Após concluir o cadastro, o provedor redireciona à TaskLab com
-   `payment_method_setup_id`. O frontend envia essa referência a
-   `POST /api/payment-method-bindings`.
-4. TaskLab envia `payment_method_setup_id` e `customer_plan_id` à Subscription.
-   Subscription usa seu registro interno para localizar e validar a sessão junto
-   ao provedor e ao Customer esperado, e só então grava o vínculo tokenizado.
-   Reenvios retornam o vínculo já criado.
+1. O frontend coleta nome, número, validade e CVC e pede autorização para salvar
+   o cartão em usos futuros. Ele envia os dados somente à rota autenticada da
+   API TaskLab, com uma chave `Idempotency-Key`.
+2. A API TaskLab garante um `CustomerPlan` e encaminha os dados à
+   `POST /v1/workspaces/{workspace_id}/payment-methods/from-card` da Subscription.
+   O backend TaskLab não grava nem registra o corpo do cartão.
+3. Subscription resolve a integração e o Customer esperados, confirma um
+   SetupIntent `off_session` na Stripe e valida o resultado. Se o usuário marcou
+   “salvar”, Subscription cria o vínculo tokenizado; caso contrário, desanexa o
+   método após a validação.
+4. Apenas o ID do vínculo salvo volta ao TaskLab; a recarga seguinte usa esse ID
+   no checkout normal da Subscription. Número e CVC nunca são armazenados.
 
-As rotas usadas pela TaskLab são `POST
-/v1/workspaces/{workspace_id}/payment-method-setup-sessions`,
-`POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET` na mesma
-rota de vínculos. O primeiro endpoint recebe `customer_plan_id`, `success_url` e
-`cancel_url`; o segundo recebe `customer_plan_id` e `payment_method_setup_id`.
-Não envie PAN, validade ou CVC em JSON, logs, analytics ou banco da aplicação.
+A Subscription envia os dados ao endpoint de cartão da Stripe. Para essa
+integração de teste, a conta Stripe precisa ter acesso às APIs de dados brutos de
+cartão habilitado; esse acesso é restrito pela Stripe e não deve ser usado em
+produção sem a aprovação e o escopo PCI adequados. TaskLab não possui credencial,
+chave pública, ID de conexão ou chamada de API Stripe.
 
-Para pagamento de teste, informe um cartão de teste na página hospedada pelo provedor.
-`BILLING_SANDBOX_PAYMENT_SCENARIO` controla somente o método interno de
-demonstração quando o checkout não informa um vínculo tokenizado.
+Para testar, digite um cartão de teste na TaskLab. A Subscription retorna a
+recusa do SetupIntent à interface sem persistir PAN/CVC. `BILLING_SANDBOX_PAYMENT_SCENARIO`
+controla somente o método interno de demonstração quando o checkout não informa
+um vínculo tokenizado.
 
 Para sandbox, configure `BILLING_SANDBOX_ENABLED=true`, `STRIPE_SECRET_KEY`
 `sk_test_...`, `STRIPE_WEBHOOK_SECRET` `whsec_...` e
 `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED` no ambiente da
-Subscription. Configure `TASKLAB_WEB_URL` na TaskLab para definir os URLs de
-retorno permitidos. `make run` inicia o Stripe CLI quando o sandbox está ligado; o
+Subscription. `make run` inicia o Stripe CLI quando o sandbox está ligado; o
 script valida o segredo do listener e entrega webhooks a
 `/v1/billing/webhooks/stripe` da Subscription. Stripe CLI e credenciais são
 opcionais quando não se está testando checkout.
@@ -228,8 +224,8 @@ Rotas em `example/backend/src/routes.rs`:
 | `POST /api/auth/logout`, `GET /api/me` | Encerra ou consulta sessão |
 | `POST /api/plan` | Seleciona a opção pré-paga FREE |
 | `GET /api/dashboard` | Agrega carteira, catálogo, medidor e histórico |
-| `POST /api/payment-method-setup` | Cria CustomerPlan se necessário e solicita à Subscription o início do cadastro hospedado |
-| `POST /api/payment-method-bindings` | Envia a referência opaca do setup à Subscription para validação e criação do vínculo |
+| `POST /api/payment-method-setup` | Encaminha dados do formulário à Subscription para validar o cartão e, com consentimento, criar o vínculo |
+| `POST /api/payment-method-bindings` | Valida uma referência opaca de setup hospedado, mantida para integrações que usem esse fluxo |
 | `GET /api/payment-method-bindings` | Lista vínculos tokenizados ativos |
 | `POST /api/checkouts` | Cria checkout inicial ou recarga, com `Idempotency-Key` |
 | `GET /api/checkouts/{id}` | Atualiza o estado do checkout |
@@ -250,7 +246,6 @@ desenvolvimento encaminha à API local.
 | `DATABASE_URL` | SQLite local da TaskLab |
 | `SUBSCRIPTION_API_URL` | Endereço HTTP da Subscription; local padrão `:3000` |
 | `ACCOUNTS_WEBHOOK_SECRET` | Segredo compartilhado para assinar eventos de workspace |
-| `TASKLAB_WEB_URL` | Origin web usado nos retornos do Stripe Checkout; padrão `http://127.0.0.1:5174` |
 
 Copie para `example/.env`, use o mesmo segredo de webhook nos dois serviços,
 rode `npm install`, `npm run setup` dentro de `example/` e `make run` na raiz.
@@ -262,10 +257,10 @@ O Makefile inicia Subscription (`3000`), admin-ui (`5173`), TaskLab API
 - A POC oferece uma modalidade pré-paga ou assinatura inicial por conta; não
   oferece troca de plano, cancelamento pela interface, renovação automática ou
   recarga de conta assinante.
-- Pagamento só pode ser exercitado pelo sandbox Stripe configurado na
-  Subscription. A Subscription cria e valida o setup hospedado; TaskLab não
-  conhece Stripe, suas sessões ou credenciais. PAN e CVC seguem do navegador
-  diretamente ao provedor.
+- A coleta direta de dados do cartão é somente para o sandbox. PAN/CVC passam
+  transitoriamente pela API TaskLab, não são registrados nem persistidos, e são
+  encaminhados à Subscription; produção requer integração tokenizada no cliente
+  para que os servidores TaskLab não recebam esses dados.
 - A TaskLab guarda estado em SQLite local; perder ou trocar o arquivo perde
   sessão, associação de plano, catálogo configurado e histórico local. Os
   lançamentos e pagamentos confirmados continuam na Subscription.

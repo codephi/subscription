@@ -12,7 +12,8 @@ use crate::{
         BillingCapabilitiesResponse, BillingConnectionResponse, BillingOperationsResponse,
         BillingWebhookResponse, CollectionRequestResponse, CreateBillingConnectionRequest,
         CreateInitialCollectionRequest, CreateOnDemandPurchaseRequest,
-        CreatePaymentMethodBindingRequest, CreatePaymentMethodSetupSessionRequest,
+        CreatePaymentMethodBindingRequest, CreatePaymentMethodFromCardRequest,
+        CreatePaymentMethodFromCardResponse, CreatePaymentMethodSetupSessionRequest,
         CreateRenewalRegularizationRequest, CustomerPaymentMethodBindingResponse,
         PaymentMethodSetupSessionResponse, UnmatchedPaymentCaseResponse,
     },
@@ -29,6 +30,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_billing_capabilities))
         .routes(routes!(create_payment_method_setup_session))
         .routes(routes!(create_workspace_payment_method_setup_session))
+        .routes(routes!(create_payment_method_from_card))
         .routes(routes!(receive_shared_stripe_webhook))
         .routes(routes!(create_payment_method_binding))
         .routes(routes!(list_payment_method_bindings))
@@ -212,6 +214,26 @@ async fn create_workspace_payment_method_setup_session(
     let response = billing::create_workspace_payment_method_setup_session(
         &state.database(),
         workspace_id,
+        &request,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/payment-methods/from-card", tag = "Billing",
+    params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+    request_body = CreatePaymentMethodFromCardRequest,
+    responses((status = 201, body = CreatePaymentMethodFromCardResponse), (status = 422, body = ErrorResponse)))]
+async fn create_payment_method_from_card(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+    headers: HeaderMap,
+    Json(request): Json<CreatePaymentMethodFromCardRequest>,
+) -> ApiResult<(StatusCode, Json<CreatePaymentMethodFromCardResponse>)> {
+    let response = billing::create_payment_method_from_card(
+        &state.database(),
+        workspace_id,
+        idempotency_key(&headers)?,
         &request,
     )
     .await?;

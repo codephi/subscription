@@ -78,11 +78,18 @@ async fn customer_payment_method_contract_hides_integration_identifiers() {
     assert!(document["paths"]
         .get("/v1/workspaces/{workspace_id}/payment-method-setup-sessions")
         .is_some());
+    assert!(document["paths"]
+        .get("/v1/workspaces/{workspace_id}/payment-methods/from-card")
+        .is_some());
     let binding = &document["components"]["schemas"]["CreatePaymentMethodBindingRequest"];
-    assert!(binding["properties"].get("payment_method_setup_id").is_some());
+    assert!(binding["properties"]
+        .get("payment_method_setup_id")
+        .is_some());
     assert!(binding["properties"].get("billing_connection_id").is_none());
     let response = &document["components"]["schemas"]["CustomerPaymentMethodBindingResponse"];
-    assert!(response["properties"].get("billing_connection_id").is_none());
+    assert!(response["properties"]
+        .get("billing_connection_id")
+        .is_none());
     assert!(response["properties"]
         .get("provider_payment_method_reference")
         .is_none());

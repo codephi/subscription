@@ -179,7 +179,118 @@ impl StripeConnector {
         let value = self
             .post_form("/v1/setup_intents", &fields, Some(idempotency_key))
             .await?;
+        if value.get("status").and_then(Value::as_str) != Some("succeeded") {
+            let code = value
+                .pointer("/last_setup_error/code")
+                .and_then(Value::as_str)
+                .unwrap_or("card_setup_failed");
+            return Err(BillingConnectorError {
+                code: code.to_string(),
+                message: "Stripe could not set up the supplied card".to_string(),
+                retryable: false,
+                outcome_uncertain: false,
+            });
+        }
         prepared_payment_method(&value, customer_id)
+    }
+
+    pub async fn create_card_setup_intent(
+        &self,
+        customer_id: &str,
+        cardholder_name: &str,
+        card_number: &str,
+        exp_month: u8,
+        exp_year: u16,
+        cvc: &str,
+        idempotency_key: &str,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let fields = vec![
+            ("customer", customer_id.to_string()),
+            ("usage", "off_session".to_string()),
+            ("payment_method_types[]", "card".to_string()),
+            ("payment_method_data[type]", "card".to_string()),
+            (
+                "payment_method_data[billing_details][name]",
+                cardholder_name.to_string(),
+            ),
+            ("payment_method_data[card][number]", card_number.to_string()),
+            (
+                "payment_method_data[card][exp_month]",
+                exp_month.to_string(),
+            ),
+            ("payment_method_data[card][exp_year]", exp_year.to_string()),
+            ("payment_method_data[card][cvc]", cvc.to_string()),
+            ("confirm", "true".to_string()),
+        ];
+        let value = self
+            .post_form("/v1/setup_intents", &fields, Some(idempotency_key))
+            .await?;
+        if value.get("status").and_then(Value::as_str) != Some("succeeded") {
+            let code = value
+                .pointer("/last_setup_error/code")
+                .and_then(Value::as_str)
+                .unwrap_or("card_setup_failed");
+            return Err(BillingConnectorError {
+                code: code.to_string(),
+                message: "Stripe could not set up the supplied card".to_string(),
+                retryable: false,
+                outcome_uncertain: false,
+            });
+        }
+        let returned_customer = value
+            .get("customer")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_response("SetupIntent.customer", "missing"))?;
+        let usage = value
+            .get("usage")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_response("SetupIntent.usage", "missing"))?;
+        let setup_intent_id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| id.starts_with("seti_"))
+            .ok_or_else(|| invalid_response("SetupIntent.id", "missing or unsupported"))?;
+        let payment_method_id = value
+            .get("payment_method")
+            .and_then(Value::as_str)
+            .filter(|id| id.starts_with("pm_"))
+            .ok_or_else(|| {
+                invalid_response("SetupIntent.payment_method", "missing or unsupported")
+            })?;
+        if returned_customer != customer_id || usage != "off_session" {
+            return Err(invalid_response(
+                "SetupIntent",
+                "customer or usage does not match the request",
+            ));
+        }
+        Ok(PreparedStripePaymentMethod {
+            setup_intent_id: setup_intent_id.to_string(),
+            payment_method_id: payment_method_id.to_string(),
+            customer_id: returned_customer.to_string(),
+        })
+    }
+
+    pub async fn detach_payment_method(
+        &self,
+        payment_method_id: &str,
+    ) -> Result<(), BillingConnectorError> {
+        let mut request = self
+            .client
+            .post(format!(
+                "{}/v1/payment_methods/{payment_method_id}/detach",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""));
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(api_error(status.as_u16(), &body))
     }
 
     async fn post_form(

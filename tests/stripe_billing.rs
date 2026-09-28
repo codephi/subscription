@@ -634,6 +634,57 @@ async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stripe_direct_card_setup_confirms_card_without_echoing_card_secrets() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"seti_card_test","status":"succeeded","customer":"cus_card_test","payment_method":"pm_card_test","usage":"off_session"}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let result = connector
+        .create_card_setup_intent(
+            "cus_card_test",
+            "TaskLab Test",
+            "4242424242424242",
+            12,
+            2035,
+            "123",
+            "card-setup-test",
+        )
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert_eq!(result.payment_method_id, "pm_card_test");
+    assert!(request.starts_with("POST /v1/setup_intents "));
+    assert!(request.contains("usage=off_session"));
+    assert!(request.contains("payment_method_data%5Bcard%5D%5Bnumber%5D=4242424242424242"));
+    assert!(request.contains("payment_method_data%5Bcard%5D%5Bcvc%5D=123"));
+    assert!(request.contains("idempotency-key: card-setup-test"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stripe_declined_direct_card_setup_returns_safe_provider_error() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"seti_card_failed","status":"requires_payment_method","client_secret":"do_not_return","last_setup_error":{"code":"card_declined","message":"card declined"}}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let error = connector
+        .create_card_setup_intent(
+            "cus_card_test",
+            "TaskLab Test",
+            "4242424242424242",
+            12,
+            2035,
+            "123",
+            "card-setup-failure-test",
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "card_declined");
+    assert!(!error.message.contains("do_not_return"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stripe_setup_verification_reads_provider_state_and_requires_off_session_use() {
     let server = FakeStripeServer::responding_with(
         r#"{"id":"cs_test_verified","mode":"setup","status":"complete","customer":"cus_verified","client_reference_id":"plan_verified","metadata":{"billing_connection_id":"connection_verified"},"setup_intent":{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"off_session"}}"#,

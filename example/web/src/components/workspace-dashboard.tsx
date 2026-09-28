@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { CreditCard, History, LogOut, Play, Plus, Sparkles, WalletCards, Zap } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -37,6 +38,7 @@ type WorkspaceDashboardProps = {
   onSignOut: () => void
   onCheckout: (credits: number) => void
   onAddPaymentMethod: () => void
+  cardSetupForm: ReactNode
   onExecute: () => void
 }
 
@@ -198,7 +200,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   return <Card>
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><Sparkles />Simular checkout</CardTitle>
-      <CardDescription>Escolha um cartão salvo ou adicione outro. O provedor de pagamento coleta os dados e a Subscription guarda somente a referência tokenizada.</CardDescription>
+      <CardDescription>Escolha um cartão salvo ou digite outro. A Subscription valida os dados e mantém apenas a referência tokenizada.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
       {prepaid && <Field>
@@ -217,6 +219,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
       <Button variant="outline" onClick={props.onAddPaymentMethod} disabled={props.checkoutBusy || pending}>
         <CreditCard data-icon="inline-start" />Adicionar cartão
       </Button>
+      {props.cardSetupForm}
       {props.checkoutBusy && <Alert role="status" aria-live="polite">
         <Spinner />
         <AlertTitle>Preparando sua {prepaid ? "recarga" : "assinatura"}</AlertTitle>
@@ -224,7 +227,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
       </Alert>}
       <Item variant="muted" size="sm">
         <ItemMedia variant="icon"><CreditCard /></ItemMedia>
-        <ItemContent><ItemTitle>Dados protegidos</ItemTitle><ItemDescription>Os dados do cartão não passam pelo backend da TaskLab.</ItemDescription></ItemContent>
+        <ItemContent><ItemTitle>Dados protegidos</ItemTitle><ItemDescription>A TaskLab encaminha os dados à Subscription sem armazená-los; a Subscription gerencia a validação e o token.</ItemDescription></ItemContent>
       </Item>
     </CardContent>
     <CardFooter>

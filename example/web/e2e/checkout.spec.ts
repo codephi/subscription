@@ -80,7 +80,7 @@ test("checkout sends the saved payment binding and reports Subscription state", 
   await expect(page.locator(".balance-value")).toHaveText("25")
 })
 
-test("a saved card is validated by Subscription and can immediately fund a top-up", async ({ page }) => {
+test("a card form is validated by Subscription and its saved binding funds a top-up", async ({ page }) => {
   let bindingSaved = false
   await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
   await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
@@ -89,34 +89,35 @@ test("a saved card is validated by Subscription and can immediately fund a top-u
     payment_methods: bindingSaved ? [{ payment_method_binding_id: "binding-1", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }] : [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
     meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
   } }))
-  await page.route("**/api/payment-method-setup", (route) => route.fulfill({ status: 200, json: { redirect_url: "https://payments.example.test/session?payment_method_setup_id=11111111-1111-4111-8111-111111111111" } }))
-  let bindingBody: unknown
-  await page.route("**/api/payment-method-bindings", async (route) => {
-    bindingBody = route.request().postDataJSON()
+  let setupBody: unknown
+  await page.route("**/api/payment-method-setup", async (route) => {
+    setupBody = route.request().postDataJSON()
+    expect(route.request().headers()["idempotency-key"]).toBeTruthy()
     bindingSaved = true
-    await route.fulfill({ status: 201, json: { payment_method_binding_id: "binding-1" } })
+    await route.fulfill({ status: 200, json: { payment_method_binding_id: "binding-1", saved: true } })
   })
   let checkoutBody: unknown
   await page.route("**/api/checkouts", async (route) => {
     checkoutBody = route.request().postDataJSON()
     await route.fulfill({ status: 202, json: { checkout_id: "checkout-1", status: "PENDING" } })
   })
-  await page.route("https://payments.example.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "Hosted payment page" }))
-
   await page.goto("/")
   await page.getByRole("button", { name: "Adicionar cartão" }).click()
+  await page.getByLabel("Nome impresso no cartão").fill("Teste TaskLab")
+  await page.getByLabel("Número do cartão").fill("4242 4242 4242 4242")
+  await page.getByLabel("Mês de validade").fill("12")
+  await page.getByLabel("Ano de validade").fill("2035")
+  await page.getByLabel("Código de segurança").fill("123")
   await page.getByRole("checkbox").check()
-  await page.getByRole("button", { name: "Adicionar ou validar cartão" }).click()
-  await expect(page).toHaveURL(/payments\.example\.test/)
+  await page.getByRole("button", { name: "Validar e salvar cartão" }).click()
 
-  await page.goto("/?payment_setup=complete&payment_method_setup_id=11111111-1111-4111-8111-111111111111")
-  await expect.poll(() => bindingBody).toEqual({ payment_method_setup_id: "11111111-1111-4111-8111-111111111111" })
+  await expect.poll(() => setupBody).toEqual({ cardholder_name: "Teste TaskLab", card_number: "4242424242424242", exp_month: 12, exp_year: 2035, cvc: "123", save_for_future: true })
   await expect(page.getByLabel("Cartão salvo")).toHaveValue("binding-1")
   await page.getByRole("button", { name: "Iniciar recarga" }).click()
   await expect.poll(() => checkoutBody).toEqual({ checkout_kind: "ON_DEMAND", topup_credits: 10, payment_method_binding_id: "binding-1" })
 })
 
-test("cancelled card setup explains that the card was not saved", async ({ page }) => {
+test("card form reports a provider rejection without leaving TaskLab", async ({ page }) => {
   await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
   await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
     account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
@@ -124,10 +125,45 @@ test("cancelled card setup explains that the card was not saved", async ({ page 
     payment_methods: [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
     meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
   } }))
+  await page.route("**/api/payment-method-setup", (route) => route.fulfill({ status: 422, json: { message: "Cartão recusado pelo provedor." } }))
 
-  await page.goto("/?payment_setup=cancelled")
-  await expect(page.getByText("O cartão não foi salvo. Você pode tentar novamente quando quiser.")).toBeVisible()
-  await expect(page).not.toHaveURL(/payment_setup/)
+  await page.goto("/")
+  await page.getByRole("button", { name: "Adicionar cartão" }).click()
+  await page.getByLabel("Nome impresso no cartão").fill("Teste TaskLab")
+  await page.getByLabel("Número do cartão").fill("4000000000000002")
+  await page.getByLabel("Mês de validade").fill("12")
+  await page.getByLabel("Ano de validade").fill("2035")
+  await page.getByLabel("Código de segurança").fill("123")
+  await page.getByRole("button", { name: "Validar cartão" }).click()
+  await expect(page.getByText("Cartão recusado pelo provedor.")).toBeVisible()
+  await expect(page).toHaveURL("/")
+})
+
+test("card form honors the choice not to save for later", async ({ page }) => {
+  await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
+  await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
+    account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
+    catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [] },
+    payment_methods: [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
+    meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
+  } }))
+  let setupBody: unknown
+  await page.route("**/api/payment-method-setup", async (route) => {
+    setupBody = route.request().postDataJSON()
+    await route.fulfill({ status: 200, json: { payment_method_binding_id: null, saved: false } })
+  })
+
+  await page.goto("/")
+  await page.getByRole("button", { name: "Adicionar cartão" }).click()
+  await page.getByLabel("Nome impresso no cartão").fill("Teste TaskLab")
+  await page.getByLabel("Número do cartão").fill("4242424242424242")
+  await page.getByLabel("Mês de validade").fill("12")
+  await page.getByLabel("Ano de validade").fill("2035")
+  await page.getByLabel("Código de segurança").fill("123")
+  await page.getByRole("button", { name: "Validar cartão" }).click()
+
+  await expect.poll(() => setupBody).toEqual({ cardholder_name: "Teste TaskLab", card_number: "4242424242424242", exp_month: 12, exp_year: 2035, cvc: "123", save_for_future: false })
+  await expect(page.getByText("Cartão validado, mas não salvo. Marque a opção para reutilizá-lo em recargas.")).toBeVisible()
 })
 
 test("onboarding sends a subscription intent with the saved payment binding", async ({ page }) => {

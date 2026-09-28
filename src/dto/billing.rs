@@ -99,6 +99,23 @@ pub struct CreatePaymentMethodBindingRequest {
     pub payment_method_setup_id: Uuid,
 }
 
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreatePaymentMethodFromCardRequest {
+    pub customer_plan_id: Uuid,
+    pub cardholder_name: String,
+    pub card_number: String,
+    pub exp_month: u8,
+    pub exp_year: u16,
+    pub cvc: String,
+    pub save_for_future: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct CreatePaymentMethodFromCardResponse {
+    pub payment_method_binding_id: Option<Uuid>,
+    pub saved: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct PaymentMethodBindingResponse {
     pub payment_method_binding_id: Uuid,

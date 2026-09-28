@@ -6,7 +6,6 @@ pub struct Config {
     pub database_url: String,
     pub subscription_api_url: String,
     pub accounts_webhook_secret: String,
-    pub tasklab_web_url: String,
 }
 
 impl Config {
@@ -17,7 +16,6 @@ impl Config {
             database_url: required("DATABASE_URL")?,
             subscription_api_url: required("SUBSCRIPTION_API_URL")?,
             accounts_webhook_secret: required("ACCOUNTS_WEBHOOK_SECRET")?,
-            tasklab_web_url: value("TASKLAB_WEB_URL", "http://127.0.0.1:5174"),
         })
     }
 }

@@ -21,12 +21,7 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
     let pool = database::connect(&config.database_url).await?;
     let api = api::SubscriptionClient::new(&config.subscription_api_url)?;
-    let state = AppState::new(
-        pool,
-        api,
-        config.accounts_webhook_secret,
-        config.tasklab_web_url,
-    );
+    let state = AppState::new(pool, api, config.accounts_webhook_secret);
     if std::env::args().nth(1).as_deref() == Some("setup") {
         services::setup_catalog(&state).await?;
         println!("Catálogo da POC configurado na Subscription.");
