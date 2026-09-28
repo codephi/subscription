@@ -34,6 +34,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(receive_shared_stripe_webhook))
         .routes(routes!(create_payment_method_binding))
         .routes(routes!(list_payment_method_bindings))
+        .routes(routes!(remove_payment_method_binding))
         .routes(routes!(create_on_demand_purchase))
         .routes(routes!(create_initial_collection))
         .routes(routes!(get_collection_request))
@@ -297,6 +298,17 @@ async fn list_payment_method_bindings(
 ) -> ApiResult<Json<Vec<CustomerPaymentMethodBindingResponse>>> {
     let bindings = billing::list_payment_method_bindings(&state.database(), workspace_id).await?;
     Ok(Json(bindings.into_iter().map(Into::into).collect()))
+}
+
+#[utoipa::path(delete, path = "/v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}", tag = "Billing",
+    params(("workspace_id" = Uuid, Path), ("binding_id" = Uuid, Path)),
+    responses((status = 204), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse)))]
+async fn remove_payment_method_binding(
+    State(state): State<AppState>,
+    Path((workspace_id, binding_id)): Path<(Uuid, Uuid)>,
+) -> ApiResult<StatusCode> {
+    billing::remove_payment_method_binding(&state.database(), workspace_id, binding_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

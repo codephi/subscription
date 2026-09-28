@@ -29,6 +29,11 @@ pub struct RegisteredPaymentMethodSetup {
     pub provider_setup_id: String,
 }
 
+pub struct PaymentMethodBindingRemoval {
+    pub binding: PaymentMethodBindingResponse,
+    pub provider_payment_method_reference: String,
+}
+
 impl DatabaseRepository {
     pub async fn active_stripe_billing_connection(&self, workspace_id: Uuid) -> ApiResult<Uuid> {
         let ids: Vec<Uuid> = sqlx::query_scalar(
@@ -116,6 +121,30 @@ impl DatabaseRepository {
             "payment_method_binding_inactive",
             format!("payment method binding {binding_id} is {}", binding.status),
         ))
+    }
+
+    pub async fn find_payment_method_binding_for_removal(
+        &self,
+        workspace_id: Uuid,
+        binding_id: Uuid,
+    ) -> ApiResult<PaymentMethodBindingRemoval> {
+        let row = sqlx::query(
+            "SELECT * FROM payment_method_bindings WHERE workspace_id=$1 AND payment_method_binding_id=$2",
+        )
+        .bind(workspace_id)
+        .bind(binding_id)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "payment_method_binding_not_found",
+                format!("payment method binding {binding_id} does not belong to workspace {workspace_id}"),
+            )
+        })?;
+        Ok(PaymentMethodBindingRemoval {
+            binding: binding_from_row(&row),
+            provider_payment_method_reference: row.get("provider_payment_method_reference"),
+        })
     }
 
     pub async fn find_payment_method_binding(
@@ -301,6 +330,38 @@ impl DatabaseRepository {
         .fetch_all(&self.pool())
         .await?;
         Ok(rows.iter().map(binding_from_row).collect())
+    }
+
+    pub async fn mark_payment_method_binding_detached(
+        &self,
+        workspace_id: Uuid,
+        binding_id: Uuid,
+    ) -> ApiResult<()> {
+        let row = sqlx::query(
+            "UPDATE payment_method_bindings SET status='DETACHED' \
+             WHERE workspace_id=$1 AND payment_method_binding_id=$2 AND status='ACTIVE' \
+             RETURNING status",
+        )
+        .bind(workspace_id)
+        .bind(binding_id)
+        .fetch_optional(&self.pool())
+        .await?;
+        if row.is_some() {
+            return Ok(());
+        }
+        let current = self
+            .find_payment_method_binding_for_removal(workspace_id, binding_id)
+            .await?;
+        if current.binding.status == "DETACHED" {
+            return Ok(());
+        }
+        Err(ApiError::conflict(
+            "payment_method_binding_inactive",
+            format!(
+                "payment method binding {binding_id} is {}",
+                current.binding.status
+            ),
+        ))
     }
 }
 

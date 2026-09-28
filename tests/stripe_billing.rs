@@ -571,6 +571,91 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
         .any(|column| matches!(column.as_str(), "card_number" | "cvc" | "pan")));
 }
 
+#[tokio::test]
+async fn payment_method_binding_removal_keeps_history_and_is_idempotent() {
+    let fixture = setup_usage(1, 1, 0).await;
+    let connection = fixture
+        .repository
+        .create_billing_connection(
+            fixture.workspace_id,
+            &CreateBillingConnectionRequest {
+                provider: "STRIPE".into(),
+                external_account_reference: "cus_remove_test".into(),
+                secret_reference: "env://STRIPE_SECRET_KEY".into(),
+                webhook_secret_reference: "env://STRIPE_WEBHOOK_SECRET".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let binding = fixture
+        .repository
+        .create_verified_payment_method_binding(
+            fixture.workspace_id,
+            connection.billing_connection_id,
+            None,
+            "pm_remove_test",
+        )
+        .await
+        .unwrap();
+
+    let existing = fixture
+        .repository
+        .find_payment_method_binding_for_removal(
+            fixture.workspace_id,
+            binding.payment_method_binding_id,
+        )
+        .await
+        .unwrap();
+    assert_eq!(existing.binding.status, "ACTIVE");
+    fixture
+        .repository
+        .mark_payment_method_binding_detached(
+            fixture.workspace_id,
+            binding.payment_method_binding_id,
+        )
+        .await
+        .unwrap();
+    fixture
+        .repository
+        .mark_payment_method_binding_detached(
+            fixture.workspace_id,
+            binding.payment_method_binding_id,
+        )
+        .await
+        .unwrap();
+
+    let listed = fixture
+        .repository
+        .list_payment_method_bindings(fixture.workspace_id)
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].status, "DETACHED");
+}
+
+#[tokio::test]
+async fn stripe_detach_sends_payment_method_and_connected_account() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"pm_remove_test","object":"payment_method","customer":null}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base(
+        "sk_test_remove".into(),
+        Some("acct_connected_test".into()),
+        server.api_base(),
+    );
+
+    connector
+        .detach_payment_method("pm_remove_test")
+        .await
+        .unwrap();
+    let request = server.finish().await;
+
+    assert!(request.starts_with("POST /v1/payment_methods/pm_remove_test/detach HTTP/1.1"));
+    assert!(request.contains("stripe-account: acct_connected_test"));
+    assert!(request.contains("idempotency-key: subscription:payment-method-detach:pm_remove_test"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stripe_payment_intent_uses_stable_idempotency_and_domain_metadata() {
     let server =

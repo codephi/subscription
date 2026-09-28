@@ -81,6 +81,10 @@ async fn customer_payment_method_contract_hides_integration_identifiers() {
     assert!(document["paths"]
         .get("/v1/workspaces/{workspace_id}/payment-methods/from-card")
         .is_some());
+    assert!(document["paths"]
+        ["/v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}"]
+        .get("delete")
+        .is_some());
     let binding = &document["components"]["schemas"]["CreatePaymentMethodBindingRequest"];
     assert!(binding["properties"]
         .get("payment_method_setup_id")

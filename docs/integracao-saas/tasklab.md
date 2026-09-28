@@ -180,6 +180,12 @@ falhar; o extrato de carteira é necessário para responder ao dashboard. A UI
 exibe créditos usando os dados retornados pela Subscription, não calcula saldo a
 partir do SQLite.
 
+Para remover um cartão salvo, TaskLab chama a rota autenticada
+`DELETE /v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}` da
+Subscription. A Subscription valida o workspace, desanexa o método na Stripe e
+marca o vínculo como `DETACHED`, preservando o histórico de cobranças. A remoção
+é idempotente para vínculos já desanexados.
+
 ## Execução de tarefa e débito de uso
 
 O navegador gera e mantém um `transaction_id` em `sessionStorage` até receber
@@ -227,6 +233,7 @@ Rotas em `example/backend/src/routes.rs`:
 | `POST /api/payment-method-setup` | Encaminha dados do formulário à Subscription para validar o cartão e, com consentimento, criar o vínculo |
 | `POST /api/payment-method-bindings` | Valida uma referência opaca de setup hospedado, mantida para integrações que usem esse fluxo |
 | `GET /api/payment-method-bindings` | Lista vínculos tokenizados ativos |
+| `DELETE /api/payment-method-bindings/{binding_id}` | Solicita à Subscription a desanexação e remoção do cartão salvo |
 | `POST /api/checkouts` | Cria checkout inicial ou recarga, com `Idempotency-Key` |
 | `GET /api/checkouts/{id}` | Atualiza o estado do checkout |
 | `POST /api/executions` | Registra e cobra uma execução idempotente |

@@ -25,6 +25,12 @@ impl SubscriptionClient {
         self.send(Method::GET, path, None, None).await
     }
 
+    pub async fn delete(&self, path: &str) -> Result<(), AppError> {
+        self.send(Method::DELETE, path, None, None)
+            .await
+            .map(|_| ())
+    }
+
     pub async fn post<T: Serialize>(
         &self,
         path: &str,
@@ -119,6 +125,9 @@ impl SubscriptionClient {
 
 async fn decode_response(response: Response) -> Result<Value, AppError> {
     let status = response.status();
+    if status == reqwest::StatusCode::NO_CONTENT {
+        return Ok(Value::Null);
+    }
     let body: Value = response.json().await.map_err(map_transport)?;
     if status.is_success() {
         return Ok(body);

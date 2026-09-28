@@ -166,6 +166,29 @@ test("card form honors the choice not to save for later", async ({ page }) => {
   await expect(page.getByText("Cartão validado, mas não salvo. Marque a opção para reutilizá-lo em recargas.")).toBeVisible()
 })
 
+test("removing a saved card is handled by Subscription and clears the selection", async ({ page }) => {
+  let bindingRemoved = false
+  await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
+  await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
+    account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
+    catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [] },
+    payment_methods: bindingRemoved ? [] : [{ payment_method_binding_id: "binding-1", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }],
+    wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" }, meter: { next_block_credit_units: "1" },
+    item_statement: { items: [] }, checkouts: [], executions: [],
+  } }))
+  await page.route("**/api/payment-method-bindings/binding-1", async (route) => {
+    expect(route.request().method()).toBe("DELETE")
+    bindingRemoved = true
+    await route.fulfill({ status: 204, body: "" })
+  })
+
+  await page.goto("/")
+  await expect(page.getByLabel("Cartão salvo")).toHaveValue("binding-1")
+  await page.getByRole("button", { name: "Remover cartão" }).click()
+  await expect(page.getByLabel("Cartão salvo")).toHaveValue("")
+  await expect(page.getByRole("button", { name: "Remover cartão" })).toHaveCount(0)
+})
+
 test("onboarding sends a subscription intent with the saved payment binding", async ({ page }) => {
   const fakeApi = new FakeTaskLabOnboardingApi()
   await fakeApi.install(page)

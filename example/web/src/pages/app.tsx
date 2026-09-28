@@ -66,6 +66,19 @@ export default function App() {
     onSuccess: (result) => refreshAfterCheckout(result, user, setUser, setCheckout, checkoutKey, queryClient, setError),
     onError: reportError(setError),
   })
+  const removePaymentMethodMutation = useMutation({
+    mutationFn: (bindingId: string) => api<void>(`/payment-method-bindings/${bindingId}`, { method: "DELETE" }),
+    onSuccess: async (_, bindingId) => {
+      const remaining = (dashboard.data?.payment_methods ?? []).filter((method) => method.payment_method_binding_id !== bindingId && method.status === "ACTIVE")
+      queryClient.setQueryData<Dashboard>(["dashboard", user?.username], (current) => current
+        ? { ...current, payment_methods: current.payment_methods.filter((method) => method.payment_method_binding_id !== bindingId) }
+        : current)
+      if (paymentMethodBindingId === bindingId) setPaymentMethodBindingId(remaining[0]?.payment_method_binding_id ?? "")
+      setError("")
+      if (user) await queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+    },
+    onError: reportError(setError),
+  })
   const executeMutation = useMutation({
     mutationFn: submitExecution,
     onSuccess: (result) => finishExecution(result, user, setTaskResult, setTaskName, setPendingExecution, executionTransaction, queryClient, setError),
@@ -114,6 +127,8 @@ export default function App() {
     executionBusy={executeMutation.isPending}
     onSignOut={() => signOut(user, queryClient, setUser, setCheckout, setError, checkoutKey, executionTransaction)}
     onAddPaymentMethod={() => setShowCardSetup(true)}
+    onRemovePaymentMethod={(bindingId) => removePaymentMethodMutation.mutate(bindingId)}
+    removingPaymentMethod={removePaymentMethodMutation.isPending}
     cardSetupForm={showCardSetup ? <PaymentMethodSetup onComplete={finishPaymentMethodSetup} onClose={() => setShowCardSetup(false)} /> : null}
     onCheckout={(credits) => paymentMethodBindingId
       ? startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)

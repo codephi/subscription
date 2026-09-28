@@ -280,7 +280,11 @@ impl StripeConnector {
                 "{}/v1/payment_methods/{payment_method_id}/detach",
                 self.api_base
             ))
-            .basic_auth(&self.secret_key, Some(""));
+            .basic_auth(&self.secret_key, Some(""))
+            .header(
+                "Idempotency-Key",
+                format!("subscription:payment-method-detach:{payment_method_id}"),
+            );
         if let Some(account) = &self.connected_account {
             request = request.header("Stripe-Account", account);
         }

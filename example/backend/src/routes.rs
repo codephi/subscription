@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde_json::{json, Value};
@@ -21,6 +21,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/payment-method-bindings",
             get(payment_method_bindings).post(save_payment_method_binding),
+        )
+        .route(
+            "/api/payment-method-bindings/{binding_id}",
+            delete(remove_payment_method_binding),
         )
         .route("/api/dashboard", get(dashboard))
         .route("/api/checkouts", post(checkout))
@@ -190,6 +194,16 @@ async fn execute(
                 .await?,
         ),
     ))
+}
+
+async fn remove_payment_method_binding(
+    State(state): State<AppState>,
+    Path(binding_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    services::remove_payment_method_binding(&state, &user, binding_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn dashboard(

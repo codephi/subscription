@@ -621,6 +621,91 @@ pub async fn list_payment_method_bindings(
     repository.list_payment_method_bindings(workspace_id).await
 }
 
+pub async fn remove_payment_method_binding(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    binding_id: uuid::Uuid,
+) -> ApiResult<()> {
+    let binding = repository
+        .find_payment_method_binding_for_removal(workspace_id, binding_id)
+        .await?;
+    if binding.binding.status == "DETACHED" {
+        return Ok(());
+    }
+    ensure_binding_can_be_detached(&binding.binding)?;
+    detach_provider_payment_method(repository, workspace_id, &binding).await?;
+    repository
+        .mark_payment_method_binding_detached(workspace_id, binding_id)
+        .await
+}
+
+fn ensure_binding_can_be_detached(binding: &PaymentMethodBindingResponse) -> ApiResult<()> {
+    if binding.status == "ACTIVE" {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "payment_method_binding_inactive",
+        format!(
+            "payment method binding {} is {}",
+            binding.payment_method_binding_id, binding.status
+        ),
+    ))
+}
+
+async fn detach_provider_payment_method(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    binding: &crate::repositories::billing_connections::PaymentMethodBindingRemoval,
+) -> ApiResult<()> {
+    let configuration = repository
+        .billing_connector_configuration(binding.binding.billing_connection_id)
+        .await?;
+    validate_binding_connection(workspace_id, &binding.binding, &configuration)?;
+    let connector = payment_method_removal_connector(repository, workspace_id, &configuration)?;
+    connector
+        .detach_payment_method(&binding.provider_payment_method_reference)
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))
+}
+
+fn validate_binding_connection(
+    workspace_id: uuid::Uuid,
+    binding: &PaymentMethodBindingResponse,
+    configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
+) -> ApiResult<()> {
+    if configuration.workspace_id == workspace_id && configuration.provider == "STRIPE" {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "billing_connection_not_usable",
+        format!(
+            "billing connection {} must belong to workspace {workspace_id} and use STRIPE",
+            binding.billing_connection_id
+        ),
+    ))
+}
+
+fn payment_method_removal_connector(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
+) -> ApiResult<crate::repositories::stripe::StripeConnector> {
+    let secret = resolve_connection_secret(
+        repository,
+        workspace_id,
+        configuration.billing_connection_id,
+        "stripe_api",
+        &configuration.secret_reference,
+        configuration.managed,
+    )?;
+    Ok(crate::repositories::stripe::StripeConnector::new(
+        secret,
+        (!configuration.managed)
+            .then(|| stripe_account(&configuration.external_account_reference))
+            .flatten(),
+    ))
+}
+
 pub async fn list_unmatched_payments(
     repository: &DatabaseRepository,
     workspace_id: uuid::Uuid,

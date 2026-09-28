@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { CreditCard, History, LogOut, Play, Plus, Sparkles, WalletCards, Zap } from "lucide-react"
+import { CreditCard, History, LogOut, Play, Plus, Sparkles, Trash2, WalletCards, Zap } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,8 @@ type WorkspaceDashboardProps = {
   onSignOut: () => void
   onCheckout: (credits: number) => void
   onAddPaymentMethod: () => void
+  onRemovePaymentMethod: (bindingId: string) => void
+  removingPaymentMethod: boolean
   cardSetupForm: ReactNode
   onExecute: () => void
 }
@@ -215,7 +217,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
           </Field>)}
         </RadioGroup>
       </Field>}
-      <SavedPaymentMethods methods={props.view?.payment_methods ?? []} selectedId={props.selectedPaymentMethodId} onSelect={props.setSelectedPaymentMethodId} />
+      <SavedPaymentMethods methods={props.view?.payment_methods ?? []} selectedId={props.selectedPaymentMethodId} onSelect={props.setSelectedPaymentMethodId} onRemove={props.onRemovePaymentMethod} removing={props.removingPaymentMethod} disabled={props.checkoutBusy || pending} />
       <Button variant="outline" onClick={props.onAddPaymentMethod} disabled={props.checkoutBusy || pending}>
         <CreditCard data-icon="inline-start" />Adicionar cartão
       </Button>
@@ -239,14 +241,21 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   </Card>
 }
 
-function SavedPaymentMethods({ methods, selectedId, onSelect }: { methods: PaymentMethodBinding[]; selectedId: string; onSelect: (id: string) => void }) {
+function SavedPaymentMethods({ methods, selectedId, onSelect, onRemove, removing, disabled }: { methods: PaymentMethodBinding[]; selectedId: string; onSelect: (id: string) => void; onRemove: (id: string) => void; removing: boolean; disabled: boolean }) {
   const active = methods.filter((method) => method.status === "ACTIVE")
+  const selected = active.find((method) => method.payment_method_binding_id === selectedId)
   return <Field>
     <FieldLabel htmlFor="saved-payment-method">Cartão salvo</FieldLabel>
-    <select id="saved-payment-method" className="h-10 rounded-md border bg-background px-3 text-sm" value={selectedId} onChange={(event) => onSelect(event.target.value)} disabled={!active.length}>
+    <div className="flex flex-wrap gap-2">
+    <select id="saved-payment-method" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" value={selectedId} onChange={(event) => onSelect(event.target.value)} disabled={!active.length || disabled || removing}>
       {!active.length && <option value="">Adicione um cartão para continuar</option>}
       {active.map((method, index) => <option key={method.payment_method_binding_id} value={method.payment_method_binding_id}>Cartão salvo {index + 1}</option>)}
     </select>
+    {selected && <Button type="button" variant="outline" onClick={() => onRemove(selected.payment_method_binding_id)} disabled={disabled || removing}>
+      {removing ? <Spinner data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}
+      Remover cartão
+    </Button>}
+    </div>
   </Field>
 }
 

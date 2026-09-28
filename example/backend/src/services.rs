@@ -244,6 +244,20 @@ pub async fn list_payment_method_bindings(
         .await
 }
 
+pub async fn remove_payment_method_binding(
+    state: &AppState,
+    user: &AuthenticatedUser,
+    binding_id: Uuid,
+) -> Result<(), AppError> {
+    state
+        .subscription
+        .delete(&format!(
+            "/v1/workspaces/{}/payment-method-bindings/{binding_id}",
+            user.workspace_id
+        ))
+        .await
+}
+
 async fn ensure_payment_customer_plan(
     state: &AppState,
     user: &AuthenticatedUser,
