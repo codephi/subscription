@@ -10,7 +10,7 @@ uma interface pública para clientes.
 | Rota                                             | Página                    | O que oferece                                                                                |
 | ------------------------------------------------ | ------------------------- | -------------------------------------------------------------------------------------------- |
 | `/`                                              | Visão geral               | Indicadores de operação de Billing e atalhos para investigar cada fila.                      |
-| `/workspaces`                                    | Workspaces                | Lista paginada, busca direta por UUID e acesso aos detalhes.                                 |
+| `/workspaces`                                    | Workspaces                | Criação, lista paginada, busca direta por UUID e acesso aos detalhes.                         |
 | `/workspaces/:workspaceId`                       | Detalhe do workspace      | Estado operacional, provisionamento, carteira, planos, extrato e consumo.                    |
 | `/workspaces/:workspaceId/integrations`          | Integrações do workspace  | Configuração de provedores de Billing; Stripe na primeira versão.                            |
 | `/workspaces/:workspaceId/actions`               | Ações do workspace        | Configuração de Billing, crédito direto e reconciliações.                                    |
@@ -48,6 +48,9 @@ consulta de workspaces.
 
 A lista consulta `GET /v1/admin/workspaces` em páginas de até 20 registros e
 mostra o UUID, o estado operacional, a sequência externa e a data de atualização.
+O formulário cria um workspace com ID gerado pelo serviço, estado `CREATED` e
+referência obrigatória do operador registrada na auditoria por
+`POST /v1/admin/workspaces`.
 O campo de busca aceita um UUID completo; após validar o formato, consulta o
 detalhe e abre o workspace. Nomes e identidades de usuários não são exibidos,
 pois esses dados pertencem ao Accounts e não fazem parte da projeção do
@@ -68,6 +71,11 @@ ação “Conferir uso” solicita a reconciliação do item e exibe o resultado
 As chamadas de workspace, carteira e provisionamento são independentes; uma
 falha em uma consulta não transforma os valores das demais em resultados
 confirmados.
+
+No cartão de provisionamento, “Provisionar wallet” chama a reconciliação
+administrativa para materializar a carteira do workspace e as item-wallets do
+escopo atual do catálogo. A operação é repetível; após sucesso, o detalhe
+atualiza o estado de provisionamento e a hierarquia de carteiras.
 
 ### Investigação de Billing
 
@@ -150,7 +158,8 @@ pela API, mantidos em cache do frontend ou escritos na auditoria.
 As chaves são cifradas com AES-256-GCM. Configure
 `BILLING_CREDENTIAL_ENCRYPTION_KEY` como base64 de 32 bytes em um secret manager
 no servidor. Gere uma chave diferente por ambiente e preserve-a junto aos
-backups do banco: sem a chave, a API não consegue usar as novas conexões,\ embora conexões antigas `env://` continuem funcionando. Não altere a chave sem
+backups do banco: sem a chave, a API não consegue usar as novas conexões,
+embora conexões antigas `env://` continuem funcionando. Não altere a chave sem
 migrar as credenciais.
 
 O crédito direto pede ID de transação, unidades de crédito e descrição opcional.
@@ -161,7 +170,8 @@ atualiza as consultas de carteira e extrato.
 
 A área de reconciliação permite conferir o saldo da carteira contra o extrato e
 reconciliar o provisionamento. O resultado mostra consistência, saldos e
-quantidade de item wallets materializadas/esperadas.
+quantidade de item wallets materializadas/esperadas. O provisionamento também
+fica disponível diretamente no cartão de estado do workspace.
 
 ### Ações de plano do cliente
 
@@ -224,7 +234,7 @@ npm run api:types
 
 ### Endpoints usados pela interface
 
-- **Workspaces e leitura:** `GET /v1/admin/workspaces`,
+- **Workspaces:** `POST /v1/admin/workspaces`, `GET /v1/admin/workspaces`,
   `GET /v1/admin/workspaces/{workspace_id}`,
   `GET /v1/admin/workspaces/{workspace_id}/customer-plans`,
   `GET /v1/workspaces/{workspace_id}/wallets`,

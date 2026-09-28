@@ -12,6 +12,7 @@ import {
   Package,
   ScrollText,
   Inbox,
+  Settings,
 } from "lucide-react";
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +87,11 @@ const InboxPage = lazy(() =>
     default: module.InboxPage,
   })),
 );
+const StripeDefaultsPage = lazy(() =>
+  import("@/pages/stripe-defaults-page").then((module) => ({
+    default: module.StripeDefaultsPage,
+  })),
+);
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -102,6 +108,7 @@ function Navigation() {
     { to: "/catalog/products", label: "Catálogo", icon: Package },
     { to: "/audit", label: "Auditoria", icon: ScrollText },
     { to: "/inbox", label: "Inbox", icon: Inbox },
+    { to: "/settings/stripe", label: "Credenciais padrão", icon: Settings },
   ];
   return (
     <nav aria-label="Navegação principal" className="flex flex-col gap-1">
@@ -194,6 +201,7 @@ function Shell() {
             <Route path="/catalog/:kind/:id" element={<CatalogDetailPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/settings/stripe" element={<StripeDefaultsPage />} />
             <Route path="*" element={<div>Página não encontrada.</div>} />
           </Routes>
         </Suspense>

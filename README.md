@@ -4,7 +4,8 @@
 
 O painel interno fica em [`admin-ui/`](admin-ui/). Ele mostra indicadores e
 evidências de Billing, catálogo, auditoria e detalhes de workspaces, planos,
-carteira, créditos e consumo. Há formulários para ofertas e ações operacionais.
+carteira, créditos e consumo. Ele permite criar workspaces em estado `CREATED`,
+com autoria registrada na auditoria, além de formulários para ofertas e ações operacionais.
 Foi criado para acesso por rede local/VPN e ainda não tem login; mantenha também
 a API restrita a essa rede.
 
@@ -390,6 +391,12 @@ environment-referenced legacy secrets, encrypted workspace credentials, signed w
 operational views for unmatched payments and externally observed refunds. See
 `docs/runbooks/billing-mvp.md` for uncertain payments, replay and credential
 rotation procedures.
+
+The admin's **Credenciais padrão** page stores encrypted Stripe credentials for
+new workspaces. Each workspace receives its own integration record and Stripe
+customer; workspace-level integrations can still be configured independently.
+Default credentials are never returned by the API, and require
+`BILLING_CREDENTIAL_ENCRYPTION_KEY` to be configured.
 
 - Full quality gate: `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-features && cargo test --all-features`
 - Unit tests: `cargo test`

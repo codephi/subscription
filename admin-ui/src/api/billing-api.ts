@@ -1,5 +1,21 @@
 import { api, unwrapResponse } from "./client";
 
+/** Read the encrypted default Stripe configuration summary; secrets are never returned. */
+export async function getDefaultStripeCredentials() {
+  return unwrapResponse(await api.GET("/v1/admin/billing/stripe-defaults"));
+}
+
+/** Save default Stripe credentials used when provisioning new workspaces. */
+export async function updateDefaultStripeCredentials(body: {
+  expected_version: number;
+  secret_key?: string;
+  webhook_secret?: string;
+}) {
+  return unwrapResponse(
+    await api.PUT("/v1/admin/billing/stripe-defaults", { body }),
+  );
+}
+
 /** List the available billing providers; e.g. `listIntegrationProviders()`. */
 export async function listIntegrationProviders() {
   return unwrapResponse(await api.GET("/v1/admin/integrations/providers"));

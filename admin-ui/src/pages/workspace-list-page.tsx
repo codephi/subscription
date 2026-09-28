@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Search } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getWorkspace, listWorkspaces } from "@/api/client";
+import { createWorkspace, getWorkspace, listWorkspaces } from "@/api/client";
 import { CursorPager } from "@/components/cursor-pager";
 import {
   QueryEmpty,
@@ -36,11 +36,20 @@ const uuidPattern =
 
 export function WorkspaceListPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const search = usePanelStore((state) => state.workspaceSearch);
   const setSearch = usePanelStore((state) => state.setWorkspaceSearch);
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const [lookupId, setLookupId] = useState<string>();
+  const [actorReference, setActorReference] = useState("");
+  const creation = useMutation({
+    mutationFn: () => createWorkspace(actorReference.trim()),
+    onSuccess: async (workspace) => {
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      navigate(`/workspaces/${workspace.workspace_id}`);
+    },
+  });
   const page = useQuery({
     queryKey: ["workspaces", cursor],
     queryFn: () => listWorkspaces(cursor),
@@ -69,12 +78,52 @@ export function WorkspaceListPage() {
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-2">
-        <p className="text-sm font-medium text-muted-foreground">CONSULTA</p>
+        <p className="text-sm font-medium text-muted-foreground">
+          ADMINISTRAÇÃO
+        </p>
         <h1 className="text-3xl font-semibold tracking-tight">Workspaces</h1>
         <p className="text-muted-foreground">
-          Projeções operacionais recebidas do Accounts.
+          Workspaces recebidos do Accounts ou criados pela administração.
         </p>
       </header>
+      <Card>
+        <CardHeader>
+          <CardTitle>Criar workspace</CardTitle>
+          <CardDescription>
+            Gera um novo ID e registra o workspace no estado inicial CREATED.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              creation.mutate();
+            }}
+            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+          >
+            <FieldGroup className="flex-1">
+              <Field>
+                <FieldLabel htmlFor="workspace-actor">Criado por</FieldLabel>
+                <Input
+                  id="workspace-actor"
+                  value={actorReference}
+                  onChange={(event) => setActorReference(event.target.value)}
+                  placeholder="operador ou e-mail"
+                  maxLength={255}
+                />
+              </Field>
+            </FieldGroup>
+            <Button
+              type="submit"
+              disabled={!actorReference.trim() || creation.isPending}
+            >
+              <Plus data-icon="inline-start" />
+              {creation.isPending ? "Criando…" : "Criar workspace"}
+            </Button>
+          </form>
+          {creation.error && <QueryError error={creation.error} />}
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Abrir por ID</CardTitle>

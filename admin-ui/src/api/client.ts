@@ -81,6 +81,15 @@ export async function getWorkspace(workspaceId: string) {
   );
 }
 
+/** Create a workspace from the admin panel; e.g. `createWorkspace("ops@example.com")`. */
+export async function createWorkspace(actorReference: string) {
+  return unwrapResponse(
+    await api.POST("/v1/admin/workspaces", {
+      body: { actor_reference: actorReference },
+    }),
+  );
+}
+
 /** Page customer plans; e.g. `listCustomerPlans(id)` for the workspace panel. */
 export async function listCustomerPlans(workspaceId: string, cursor?: string) {
   return unwrapResponse(
