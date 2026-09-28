@@ -100,6 +100,7 @@ pub async fn create_checkout(
     state: &AppState,
     user: &AuthenticatedUser,
     kind: CheckoutKind,
+    topup_credits: Option<i64>,
     transaction: String,
 ) -> Result<CheckoutResponse, AppError> {
     if transaction.trim().is_empty() || transaction.len() > 128 {
@@ -145,7 +146,9 @@ pub async fn create_checkout(
             json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction})
         }
         CheckoutKind::OnDemand => {
-            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":setting(&state.pool,"topup_plan_id").await?,"transaction_id":transaction})
+            let credits = topup_credits.unwrap_or(10);
+            let topup_plan = topup_plan_id(&state.pool, credits).await?;
+            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"transaction_id":transaction})
         }
     };
     let body = state
@@ -417,6 +420,35 @@ pub async fn dashboard_catalog(state: &AppState) -> Result<Value, AppError> {
         .await?
         .ok_or_else(catalog_missing)?;
     Ok(
-        json!({"product_id":product,"item_id":item,"prepaid_price_minor":1000,"prepaid_credits":10,"subscription_price_minor":2990,"subscription_credits":50,"task_cost":1}),
+        json!({"product_id":product,"item_id":item,"prepaid_price_minor":1000,"prepaid_credits":10,"subscription_price_minor":2990,"subscription_credits":50,"task_cost":1,"topup_offers":[{"credit_units":10,"price_amount_minor":1000},{"credit_units":25,"price_amount_minor":2500},{"credit_units":50,"price_amount_minor":5000}]}),
     )
+}
+
+async fn topup_plan_id(pool: &SqlitePool, credits: i64) -> Result<String, AppError> {
+    let key = topup_plan_setting_key(credits)?;
+    setting(pool, key).await?.ok_or_else(catalog_missing)
+}
+
+fn topup_plan_setting_key(credits: i64) -> Result<&'static str, AppError> {
+    match credits {
+        10 => Ok("topup_10_plan_id"),
+        25 => Ok("topup_25_plan_id"),
+        50 => Ok("topup_50_plan_id"),
+        _ => Err(AppError::Invalid(
+            "pacote de recarga inválido; escolha 10, 25 ou 50 créditos".into(),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod topup_tests {
+    use super::topup_plan_setting_key;
+
+    #[test]
+    fn only_persisted_topup_packages_are_selectable() {
+        assert_eq!(topup_plan_setting_key(10).unwrap(), "topup_10_plan_id");
+        assert_eq!(topup_plan_setting_key(25).unwrap(), "topup_25_plan_id");
+        assert_eq!(topup_plan_setting_key(50).unwrap(), "topup_50_plan_id");
+        assert!(topup_plan_setting_key(11).is_err());
+    }
 }

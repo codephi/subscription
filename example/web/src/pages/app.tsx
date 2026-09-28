@@ -9,8 +9,9 @@ import { AppFrame } from "@/components/app-frame"
 
 type PlanModel = "PREPAID" | "SUBSCRIPTION"
 type CheckoutKind = "INITIAL" | "ON_DEMAND"
-type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null }
+type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null; transaction_id?: string }
 type DemoCard = { number: string; expiry: string; cvc: string }
+type CheckoutKey = { scope: string; value: string }
 
 const emptyCard: DemoCard = { number: "", expiry: "", cvc: "" }
 
@@ -24,7 +25,8 @@ export default function App() {
   const [taskResult, setTaskResult] = useState("")
   const [checkout, setCheckout] = useState<CheckoutView | null>(null)
   const [card, setCard] = useState<DemoCard>(emptyCard)
-  const checkoutKey = useRef<string | null>(null)
+  const [topupCredits, setTopupCredits] = useState(10)
+  const checkoutKey = useRef<CheckoutKey | null>(null)
   const executionTransaction = useRef<string | null>(null)
 
   useEffect(() => restoreSession(setUser, setAuthChecked), [])
@@ -70,7 +72,7 @@ export default function App() {
       setCard={setCard}
       busy={planMutation.isPending || checkoutMutation.isPending}
       error={error}
-      onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : startCheckout("INITIAL", user, checkoutKey, checkoutMutation.mutate)}
+      onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : startCheckout("INITIAL", user, 10, checkoutKey, checkoutMutation.mutate)}
     /></AppFrame>
   }
 
@@ -84,6 +86,8 @@ export default function App() {
     checkout={checkout}
     card={card}
     setCard={setCard}
+    topupCredits={topupCredits}
+    setTopupCredits={setTopupCredits}
     taskName={taskName}
     setTaskName={setTaskName}
     taskResult={taskResult}
@@ -91,7 +95,7 @@ export default function App() {
     checkoutBusy={checkoutMutation.isPending}
     executionBusy={executeMutation.isPending}
     onSignOut={() => signOut(user, queryClient, setUser, setCheckout, setError, checkoutKey, executionTransaction)}
-    onCheckout={() => startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, checkoutKey, checkoutMutation.mutate)}
+    onCheckout={(credits) => startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, checkoutKey, checkoutMutation.mutate)}
     onExecute={() => startExecution(user, taskName, setPendingExecution, executionTransaction, executeMutation.mutate)}
   /></AppFrame>
 }
@@ -126,7 +130,7 @@ function syncPendingCheckout(view: Dashboard | undefined, checkout: CheckoutView
   if (latest?.status === "PENDING" && latest.checkout_id !== checkout?.checkout_id) setCheckout(latest)
 }
 
-function watchCheckout(checkout: CheckoutView | null, user: User | null, update: (checkout: CheckoutView) => void, key: React.MutableRefObject<string | null>, fail: (message: string) => void) {
+function watchCheckout(checkout: CheckoutView | null, user: User | null, update: (checkout: CheckoutView) => void, key: React.MutableRefObject<CheckoutKey | null>, fail: (message: string) => void) {
   if (!checkout || checkout.status !== "PENDING") return
   const timer = window.setInterval(() => api<CheckoutView>(`/checkouts/${checkout.checkout_id}`).then((result) => {
     update(result)
@@ -135,17 +139,22 @@ function watchCheckout(checkout: CheckoutView | null, user: User | null, update:
   return () => window.clearInterval(timer)
 }
 
-function clearFinishedCheckout(result: CheckoutView, user: User | null, key: React.MutableRefObject<string | null>) {
+function clearFinishedCheckout(result: CheckoutView, user: User | null, key: React.MutableRefObject<CheckoutKey | null>) {
   if (result.status === "PENDING") return
-  key.current = null
-  if (user) sessionStorage.removeItem(`tasklab_checkout_${user.username}`)
+  if (user && key.current && (!result.transaction_id || key.current.value === result.transaction_id)) {
+    sessionStorage.removeItem(`tasklab_checkout_${user.username}_${key.current.scope}`)
+    key.current = null
+  }
 }
 
-function startCheckout(kind: CheckoutKind, user: User, key: React.MutableRefObject<string | null>, mutate: (input: { checkout_kind: CheckoutKind; idempotencyKey: string }) => void) {
-  key.current ??= sessionStorage.getItem(`tasklab_checkout_${user.username}`)
-  key.current ??= crypto.randomUUID()
-  sessionStorage.setItem(`tasklab_checkout_${user.username}`, key.current)
-  mutate({ checkout_kind: kind, idempotencyKey: key.current })
+function startCheckout(kind: CheckoutKind, user: User, credits: number, key: React.MutableRefObject<CheckoutKey | null>, mutate: (input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string }) => void) {
+  const scope = `${kind}_${kind === "ON_DEMAND" ? credits : "initial"}`
+  if (key.current?.scope !== scope) {
+    const storageKey = `tasklab_checkout_${user.username}_${scope}`
+    key.current = { scope, value: sessionStorage.getItem(storageKey) ?? crypto.randomUUID() }
+    sessionStorage.setItem(storageKey, key.current.value)
+  }
+  mutate({ checkout_kind: kind, topup_credits: credits, idempotencyKey: key.current.value })
 }
 
 async function refreshAccount(queryClient: ReturnType<typeof useQueryClient>, setUser: (user: User) => void) {
@@ -153,16 +162,19 @@ async function refreshAccount(queryClient: ReturnType<typeof useQueryClient>, se
   setUser(await api<User>("/me"))
 }
 
-function submitCheckout(input: { checkout_kind: CheckoutKind; idempotencyKey: string }) {
+function submitCheckout(input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string }) {
   // Card demo fields stay in React state; only the commercial intent crosses this boundary.
+  const intent = input.checkout_kind === "ON_DEMAND"
+    ? { checkout_kind: input.checkout_kind, topup_credits: input.topup_credits }
+    : { checkout_kind: input.checkout_kind }
   return api<CheckoutView>("/checkouts", {
     method: "POST",
     headers: { "idempotency-key": input.idempotencyKey },
-    body: JSON.stringify({ checkout_kind: input.checkout_kind }),
+    body: JSON.stringify(intent),
   })
 }
 
-function refreshAfterCheckout(result: CheckoutView, user: User | null, setUser: (user: User) => void, setCheckout: (checkout: CheckoutView) => void, key: React.MutableRefObject<string | null>, queryClient: ReturnType<typeof useQueryClient>, setError: (error: string) => void) {
+function refreshAfterCheckout(result: CheckoutView, user: User | null, setUser: (user: User) => void, setCheckout: (checkout: CheckoutView) => void, key: React.MutableRefObject<CheckoutKey | null>, queryClient: ReturnType<typeof useQueryClient>, setError: (error: string) => void) {
   setCheckout(result)
   clearFinishedCheckout(result, user, key)
   if (user) void api<User>("/me").then(setUser).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard"] })).catch(() => undefined)
@@ -202,9 +214,9 @@ function finishExecution(result: { result_text: string }, user: User | null, set
   setError("")
 }
 
-async function signOut(user: User, queryClient: ReturnType<typeof useQueryClient>, setUser: (user: null) => void, setCheckout: (checkout: null) => void, setError: (error: string) => void, checkoutKey: React.MutableRefObject<string | null>, executionTransaction: React.MutableRefObject<string | null>) {
+async function signOut(user: User, queryClient: ReturnType<typeof useQueryClient>, setUser: (user: null) => void, setCheckout: (checkout: null) => void, setError: (error: string) => void, checkoutKey: React.MutableRefObject<CheckoutKey | null>, executionTransaction: React.MutableRefObject<string | null>) {
   await api("/auth/logout", { method: "POST" }).catch(() => undefined)
-  sessionStorage.removeItem(`tasklab_checkout_${user.username}`)
+  if (checkoutKey.current) sessionStorage.removeItem(`tasklab_checkout_${user.username}_${checkoutKey.current.scope}`)
   sessionStorage.removeItem(`tasklab_execution_${user.username}`)
   checkoutKey.current = null
   executionTransaction.current = null

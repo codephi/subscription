@@ -106,8 +106,14 @@ async fn checkout(
             AppError::Invalid("Idempotency-Key deve conter de 1 a 128 caracteres ASCII".into())
         })?
         .to_owned();
-    let response =
-        services::create_checkout(&state, &user, request.checkout_kind, transaction).await?;
+    let response = services::create_checkout(
+        &state,
+        &user,
+        request.checkout_kind,
+        request.topup_credits,
+        transaction,
+    )
+    .await?;
     let status = if response.status == "PENDING" {
         StatusCode::ACCEPTED
     } else {

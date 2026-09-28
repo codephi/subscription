@@ -4,12 +4,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { Dashboard, User } from "@/lib/api"
 
@@ -31,9 +32,11 @@ type WorkspaceDashboardProps = {
   taskResult: string
   pendingExecution: boolean
   checkoutBusy: boolean
+  topupCredits: number
+  setTopupCredits: (credits: number) => void
   executionBusy: boolean
   onSignOut: () => void
-  onCheckout: () => void
+  onCheckout: (credits: number) => void
   onExecute: () => void
 }
 
@@ -74,7 +77,7 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
         <ActivityCard view={view} loading={loading} />
       </section>
       <aside className="dashboard-aside">
-        <PlanCard user={user} busy={props.checkoutBusy} onCheckout={props.onCheckout} />
+        <PlanCard user={user} busy={props.checkoutBusy} onCheckout={() => props.onCheckout(props.topupCredits)} topupCredits={props.topupCredits} />
         {(user.plan_model === "PREPAID" || latestCheckout?.status !== "PAID") && <CheckoutCard {...props} />}
         <LedgerCard view={view} loading={loading} />
       </aside>
@@ -168,7 +171,7 @@ function ActivityCard({ view, loading }: { view?: Dashboard; loading: boolean })
   </Card>
 }
 
-function PlanCard({ user, busy, onCheckout }: { user: User; busy: boolean; onCheckout: () => void }) {
+function PlanCard({ user, busy, onCheckout, topupCredits }: { user: User; busy: boolean; onCheckout: () => void; topupCredits: number }) {
   const prepaid = user.plan_model === "PREPAID"
 
   return <Card>
@@ -178,8 +181,8 @@ function PlanCard({ user, busy, onCheckout }: { user: User; busy: boolean; onChe
     </CardHeader>
     <CardContent className="flex items-end justify-between gap-3">
       <div>
-        <p className="text-2xl font-semibold tracking-tight">{prepaid ? "R$ 10,00" : "R$ 29,90"}</p>
-        <p className="text-sm text-muted-foreground">{prepaid ? "10 créditos por compra" : "50 créditos por ciclo"}</p>
+        <p className="text-2xl font-semibold tracking-tight">{prepaid ? formatCurrency(topupCredits * 100) : "R$ 29,90"}</p>
+        <p className="text-sm text-muted-foreground">{prepaid ? `${topupCredits} créditos por compra` : "50 créditos por ciclo"}</p>
       </div>
       {prepaid ? <Button variant="outline" onClick={onCheckout} disabled={busy}><Plus data-icon="inline-start" />Recarregar</Button> : <Badge variant="secondary">Ativo</Badge>}
     </CardContent>
@@ -190,6 +193,7 @@ function PlanCard({ user, busy, onCheckout }: { user: User; busy: boolean; onChe
 function CheckoutCard(props: WorkspaceDashboardProps) {
   const pending = props.checkout?.status === "PENDING"
   const prepaid = props.user.plan_model === "PREPAID"
+  const offers = props.view?.catalog.topup_offers ?? [10, 25, 50].map((credit_units) => ({ credit_units, price_amount_minor: credit_units * 100 }))
 
   return <Card>
     <CardHeader>
@@ -197,14 +201,31 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
       <CardDescription>Estes campos fictícios ficam no navegador. A aprovação ou recusa é configurada na Subscription.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
+      {prepaid && <Field>
+        <FieldLabel>Quanto deseja carregar?</FieldLabel>
+        <RadioGroup value={String(props.topupCredits)} onValueChange={(value) => props.setTopupCredits(Number(value))} disabled={props.checkoutBusy || pending} className="grid gap-2 sm:grid-cols-3">
+          {offers.map((offer) => <Field data-selected={props.topupCredits === offer.credit_units} className="plan-option" key={offer.credit_units}>
+            <RadioGroupItem id={`topup-${offer.credit_units}`} value={String(offer.credit_units)} />
+            <FieldContent>
+              <FieldLabel htmlFor={`topup-${offer.credit_units}`}>{offer.credit_units} créditos</FieldLabel>
+              <FieldDescription>{formatCurrency(offer.price_amount_minor)}</FieldDescription>
+            </FieldContent>
+          </Field>)}
+        </RadioGroup>
+      </Field>}
       <DemoCardFields card={props.card} setCard={props.setCard} />
+      {props.checkoutBusy && <Alert role="status" aria-live="polite">
+        <Spinner />
+        <AlertTitle>Preparando sua {prepaid ? "recarga" : "assinatura"}</AlertTitle>
+        <AlertDescription>Enviando a solicitação para a Subscription. Esta etapa pode levar alguns segundos.</AlertDescription>
+      </Alert>}
       <Item variant="muted" size="sm">
         <ItemMedia variant="icon"><CreditCard /></ItemMedia>
         <ItemContent><ItemTitle>Pagamento transparente</ItemTitle><ItemDescription>A TaskLab envia somente a intenção de compra.</ItemDescription></ItemContent>
       </Item>
     </CardContent>
     <CardFooter>
-      <Button className="w-full" variant="outline" onClick={props.onCheckout} disabled={props.checkoutBusy || pending}>
+      <Button className="w-full" variant="outline" onClick={() => props.onCheckout(props.topupCredits)} disabled={props.checkoutBusy || pending}>
         {props.checkoutBusy || pending ? <Spinner data-icon="inline-start" /> : <Zap data-icon="inline-start" />}
         {prepaid ? "Iniciar recarga" : failedCheckout(props.checkout) ? "Tentar assinatura novamente" : "Iniciar assinatura"}
       </Button>
@@ -285,4 +306,8 @@ function failedCheckout(checkout: CheckoutView | null) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value))
+}
+
+function formatCurrency(amountMinor: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(amountMinor / 100)
 }

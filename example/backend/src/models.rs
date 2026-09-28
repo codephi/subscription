@@ -37,6 +37,7 @@ pub struct ChoosePlanRequest {
 #[derive(Clone, Debug, Deserialize)]
 pub struct CreateCheckoutRequest {
     pub checkout_kind: CheckoutKind,
+    pub topup_credits: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
