@@ -6,6 +6,7 @@ pub struct Config {
     pub database_url: String,
     pub subscription_api_url: String,
     pub accounts_webhook_secret: String,
+    pub stripe_publishable_key: Option<String>,
 }
 
 impl Config {
@@ -16,6 +17,7 @@ impl Config {
             database_url: required("DATABASE_URL")?,
             subscription_api_url: required("SUBSCRIPTION_API_URL")?,
             accounts_webhook_secret: required("ACCOUNTS_WEBHOOK_SECRET")?,
+            stripe_publishable_key: std::env::var("STRIPE_PUBLISHABLE_KEY").ok(),
         })
     }
 }

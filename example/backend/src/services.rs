@@ -101,6 +101,7 @@ pub async fn create_checkout(
     user: &AuthenticatedUser,
     kind: CheckoutKind,
     topup_credits: Option<i64>,
+    payment_method_binding_id: Uuid,
     transaction: String,
 ) -> Result<CheckoutResponse, AppError> {
     if transaction.trim().is_empty() || transaction.len() > 128 {
@@ -126,29 +127,36 @@ pub async fn create_checkout(
                     "conta pré-paga não pode trocar de modalidade nesta POC".into(),
                 ));
             }
-            let id = setting(&state.pool, "paid_plan_id")
-                .await?
-                .ok_or_else(catalog_missing)?;
-            let customer_plan = create_customer_plan(state, user, &id, &transaction).await?;
-            sqlx::query(
-                "UPDATE users SET plan_model='SUBSCRIPTION',customer_plan_id=? WHERE user_id=?",
-            )
-            .bind(customer_plan.to_string())
-            .bind(&user.user_id)
-            .execute(&state.pool)
-            .await?;
+            let customer_plan = match user.customer_plan_id.as_deref() {
+                Some(id) => Uuid::parse_str(id)
+                    .map_err(|error| AppError::Integration(error.to_string()))?,
+                None => {
+                    let id = setting(&state.pool, "paid_plan_id")
+                        .await?
+                        .ok_or_else(catalog_missing)?;
+                    let customer_plan = create_customer_plan(state, user, &id, &transaction).await?;
+                    sqlx::query(
+                        "UPDATE users SET plan_model='SUBSCRIPTION',customer_plan_id=? WHERE user_id=? AND customer_plan_id IS NULL",
+                    )
+                    .bind(customer_plan.to_string())
+                    .bind(&user.user_id)
+                    .execute(&state.pool)
+                    .await?;
+                    customer_plan
+                }
+            };
             (customer_plan.to_string(), Some("SUBSCRIPTION"))
         }
     };
     let key = format!("tasklab-checkout:{}:{transaction}", user.user_id);
     let request = match kind {
         CheckoutKind::Initial => {
-            json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction})
+            json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id})
         }
         CheckoutKind::OnDemand => {
             let credits = topup_credits.unwrap_or(10);
             let topup_plan = topup_plan_id(&state.pool, credits).await?;
-            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"transaction_id":transaction})
+            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id})
         }
     };
     let body = state
@@ -174,6 +182,101 @@ pub async fn create_checkout(
         .execute(&state.pool).await?;
     let _ = model;
     Ok(response)
+}
+
+pub async fn create_payment_method_setup(
+    state: &AppState,
+    user: &AuthenticatedUser,
+) -> Result<Value, AppError> {
+    let publishable_key = state
+        .stripe_publishable_key
+        .as_deref()
+        .filter(|key| key.starts_with("pk_test_") || key.starts_with("pk_live_"))
+        .ok_or_else(|| AppError::Invalid("configure STRIPE_PUBLISHABLE_KEY para tokenizar cartões".into()))?;
+    let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
+    let integrations = state
+        .subscription
+        .get(&format!("/v1/admin/workspaces/{}/integrations", user.workspace_id))
+        .await?;
+    let connection_id = integrations
+        .as_array()
+        .and_then(|items| items.iter().find(|item| {
+            item["provider"] == "STRIPE" && item["status"] == "ACTIVE"
+        }))
+        .and_then(|item| item["billing_connection_id"].as_str())
+        .ok_or_else(|| AppError::Integration("não existe uma integração Stripe ativa para esta conta".into()))?;
+    let session = state
+        .subscription
+        .post(
+            &format!("/v1/workspaces/{}/billing-connections/{connection_id}/payment-method-setup-sessions", user.workspace_id),
+            None,
+            &json!({"customer_plan_id":customer_plan_id}),
+        )
+        .await?;
+    Ok(json!({
+        "billing_connection_id":connection_id,
+        "customer_plan_id":customer_plan_id,
+        "setup_intent_id":session["provider_setup_id"],
+        "client_secret":session["client_secret"],
+        "publishable_key":publishable_key,
+    }))
+}
+
+pub async fn save_payment_method_binding(
+    state: &AppState,
+    user: &AuthenticatedUser,
+    setup_intent_id: String,
+) -> Result<Value, AppError> {
+    if setup_intent_id.len() > 255 || !setup_intent_id.starts_with("seti_") {
+        return Err(AppError::Invalid("setup_intent_id deve ser uma referência seti_ válida".into()));
+    }
+    let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
+    let integration = state
+        .subscription
+        .get(&format!("/v1/admin/workspaces/{}/integrations", user.workspace_id))
+        .await?;
+    let connection_id = integration
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["provider"] == "STRIPE" && item["status"] == "ACTIVE"))
+        .and_then(|item| item["billing_connection_id"].as_str())
+        .ok_or_else(|| AppError::Integration("não existe uma integração Stripe ativa para esta conta".into()))?;
+    state
+        .subscription
+        .post(
+            &format!("/v1/workspaces/{}/payment-method-bindings", user.workspace_id),
+            None,
+            &json!({"billing_connection_id":connection_id,"customer_plan_id":customer_plan_id,"setup_intent_id":setup_intent_id}),
+        )
+        .await
+}
+
+pub async fn list_payment_method_bindings(
+    state: &AppState,
+    user: &AuthenticatedUser,
+) -> Result<Value, AppError> {
+    state
+        .subscription
+        .get(&format!("/v1/workspaces/{}/payment-method-bindings", user.workspace_id))
+        .await
+}
+
+async fn ensure_payment_customer_plan(
+    state: &AppState,
+    user: &AuthenticatedUser,
+) -> Result<Uuid, AppError> {
+    if let Some(customer_plan_id) = user.customer_plan_id.as_deref() {
+        return Uuid::parse_str(customer_plan_id)
+            .map_err(|error| AppError::Integration(error.to_string()));
+    }
+    let plan_id = setting(&state.pool, "paid_plan_id").await?.ok_or_else(catalog_missing)?;
+    let transaction = format!("tasklab-card-setup:{}", user.user_id);
+    let customer_plan_id = create_customer_plan(state, user, &plan_id, &transaction).await?;
+    sqlx::query("UPDATE users SET plan_model='SUBSCRIPTION',customer_plan_id=? WHERE user_id=? AND customer_plan_id IS NULL")
+        .bind(customer_plan_id.to_string())
+        .bind(&user.user_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(customer_plan_id)
 }
 
 pub async fn refresh_checkout(

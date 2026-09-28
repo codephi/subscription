@@ -3,8 +3,7 @@ use uuid::Uuid;
 
 use crate::{
     dto::billing::{
-        BillingConnectionResponse, CreateBillingConnectionRequest,
-        CreatePaymentMethodBindingRequest, PaymentMethodBindingResponse,
+        BillingConnectionResponse, CreateBillingConnectionRequest, PaymentMethodBindingResponse,
     },
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
@@ -145,12 +144,45 @@ impl DatabaseRepository {
         Ok(connection_from_row(&row))
     }
 
-    pub async fn create_payment_method_binding(
+    pub async fn ensure_customer_plan_workspace(
         &self,
         workspace_id: Uuid,
-        request: &CreatePaymentMethodBindingRequest,
+        customer_plan_id: Uuid,
+    ) -> ApiResult<()> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM customer_plans WHERE customer_plan_id=$1 AND customer_id=$2)",
+        )
+        .bind(customer_plan_id)
+        .bind(workspace_id)
+        .fetch_one(&self.pool())
+        .await?;
+        if exists {
+            return Ok(());
+        }
+        Err(ApiError::not_found(
+            "customer_plan_not_found",
+            format!("customer plan {customer_plan_id} does not belong to workspace {workspace_id}"),
+        ))
+    }
+
+    pub async fn create_verified_payment_method_binding(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        customer_plan_id: Option<Uuid>,
+        provider_payment_method_reference: &str,
     ) -> ApiResult<PaymentMethodBindingResponse> {
-        validate_binding_reference(&request.provider_payment_method_reference)?;
+        validate_binding_reference(provider_payment_method_reference)?;
+        if let Some(existing) = self
+            .find_payment_method_binding(
+                workspace_id,
+                connection_id,
+                provider_payment_method_reference,
+            )
+            .await?
+        {
+            return Ok(existing);
+        }
         let row = sqlx::query(
             "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
              workspace_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,status) \
@@ -161,12 +193,12 @@ impl DatabaseRepository {
         )
         .bind(Uuid::new_v4())
         .bind(workspace_id)
-        .bind(request.customer_plan_id)
-        .bind(&request.provider_payment_method_reference)
-        .bind(request.billing_connection_id)
+        .bind(customer_plan_id)
+        .bind(provider_payment_method_reference)
+        .bind(connection_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_connection(workspace_id, request.billing_connection_id))?;
+        .ok_or_else(|| missing_connection(workspace_id, connection_id))?;
         Ok(binding_from_row(&row))
     }
 

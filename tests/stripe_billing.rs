@@ -11,7 +11,6 @@ use subscription::{
     dto::{
         billing::{
             CreateBillingConnectionRequest, CreateInitialCollectionRequest,
-            CreatePaymentMethodBindingRequest,
         },
         events::{WorkspaceEventEnvelope, WorkspaceEventPayload, WorkspaceEventType},
         plans::{
@@ -222,7 +221,8 @@ impl FakeStripeServer {
             *server_received.lock().unwrap() = String::from_utf8_lossy(&bytes[..read]).into_owned();
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             socket.write_all(response.as_bytes()).await.unwrap();
         });
@@ -301,17 +301,16 @@ async fn stripe_webhooks_converge_without_duplicate_effects() {
     )
     .await
     .unwrap();
-    let binding = billing::create_payment_method_binding(
-        &fixture.repository,
-        fixture.workspace_id,
-        &CreatePaymentMethodBindingRequest {
-            billing_connection_id: connection.billing_connection_id,
-            customer_plan_id: Some(customer_plan.customer_plan_id),
-            provider_payment_method_reference: "pm_webhook".into(),
-        },
-    )
-    .await
-    .unwrap();
+    let binding = fixture
+        .repository
+        .create_verified_payment_method_binding(
+            fixture.workspace_id,
+            connection.billing_connection_id,
+            Some(customer_plan.customer_plan_id),
+            "pm_webhook",
+        )
+        .await
+        .unwrap();
     let collection = billing::create_initial_collection(
         &fixture.repository,
         fixture.workspace_id,
@@ -469,17 +468,16 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
     .unwrap();
     let serialized = serde_json::to_string(&connection).unwrap();
     assert!(!serialized.contains("SECRET"));
-    let binding = billing::create_payment_method_binding(
-        &fixture.repository,
-        fixture.workspace_id,
-        &CreatePaymentMethodBindingRequest {
-            billing_connection_id: connection.billing_connection_id,
-            customer_plan_id: None,
-            provider_payment_method_reference: "pm_tokenized_test".into(),
-        },
-    )
-    .await
-    .unwrap();
+    let binding = fixture
+        .repository
+        .create_verified_payment_method_binding(
+            fixture.workspace_id,
+            connection.billing_connection_id,
+            None,
+            "pm_tokenized_test",
+        )
+        .await
+        .unwrap();
     let bindings = billing::list_payment_method_bindings(&fixture.repository, fixture.workspace_id)
         .await
         .unwrap();
@@ -532,7 +530,6 @@ async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
     let setup = connector
         .create_setup_session(&SetupSessionCommand {
             customer_reference: "cus_test".into(),
-            return_url: "https://example.test/billing/return".into(),
         })
         .await
         .unwrap();
@@ -543,6 +540,35 @@ async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
     assert!(request.contains("customer=cus_test"));
     assert!(request.contains("payment_method_types%5B%5D=card"));
     assert!(request.contains("usage=off_session"));
+    assert!(!request.contains("return_url"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stripe_setup_verification_reads_provider_state_and_requires_off_session_use() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"off_session"}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let payment_method = connector
+        .retrieve_setup_intent("seti_verified")
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert!(request.starts_with("GET /v1/setup_intents/seti_verified "));
+    assert_eq!(payment_method.customer_id, "cus_verified");
+    assert_eq!(payment_method.payment_method_id, "pm_verified");
+
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"on_session"}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    assert!(connector
+        .retrieve_setup_intent("seti_verified")
+        .await
+        .is_err());
+    let _ = server.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

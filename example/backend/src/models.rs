@@ -38,6 +38,12 @@ pub struct ChoosePlanRequest {
 pub struct CreateCheckoutRequest {
     pub checkout_kind: CheckoutKind,
     pub topup_credits: Option<i64>,
+    pub payment_method_binding_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SavePaymentMethodBindingRequest {
+    pub setup_intent_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]

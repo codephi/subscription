@@ -43,7 +43,6 @@ pub struct ConnectorCollectionResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SetupSessionCommand {
     pub customer_reference: String,
-    pub return_url: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

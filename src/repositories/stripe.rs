@@ -77,6 +77,35 @@ impl StripeConnector {
         Ok(())
     }
 
+    pub async fn retrieve_setup_intent(
+        &self,
+        setup_intent_id: &str,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let mut request = self
+            .client
+            .get(format!(
+                "{}/v1/setup_intents/{setup_intent_id}",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""));
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        let setup = prepared_payment_method(&body, "")?;
+        if setup.setup_intent_id != setup_intent_id
+            || body.get("usage").and_then(Value::as_str) != Some("off_session")
+        {
+            return Err(invalid_response("SetupIntent", &body.to_string()));
+        }
+        Ok(setup)
+    }
+
     pub async fn create_workspace_customer(
         &self,
         workspace_id: &str,
@@ -154,12 +183,20 @@ fn prepared_payment_method(
 ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
     let status = required_string(value, "status")?;
     let customer_id = required_string(value, "customer")?;
-    if status != "succeeded" || customer_id != expected_customer {
+    if status != "succeeded" || (!expected_customer.is_empty() && customer_id != expected_customer)
+    {
         return Err(invalid_response("SetupIntent", &value.to_string()));
+    }
+    let payment_method_id = required_string(value, "payment_method")?;
+    if !payment_method_id.starts_with("pm_") {
+        return Err(invalid_response(
+            "SetupIntent.payment_method",
+            &value.to_string(),
+        ));
     }
     Ok(PreparedStripePaymentMethod {
         setup_intent_id: required_string(value, "id")?,
-        payment_method_id: required_string(value, "payment_method")?,
+        payment_method_id,
         customer_id,
     })
 }
@@ -212,7 +249,6 @@ impl BillingConnector for StripeConnector {
                 ("customer", command.customer_reference.clone()),
                 ("payment_method_types[]", "card".to_string()),
                 ("usage", "off_session".to_string()),
-                ("return_url", command.return_url.clone()),
             ];
             let value = self.post_form("/v1/setup_intents", &fields, None).await?;
             Ok(SetupSessionResult {

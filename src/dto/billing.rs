@@ -97,7 +97,7 @@ pub struct BillingCapabilitiesResponse {
 pub struct CreatePaymentMethodBindingRequest {
     pub billing_connection_id: Uuid,
     pub customer_plan_id: Option<Uuid>,
-    pub provider_payment_method_reference: String,
+    pub setup_intent_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
@@ -113,7 +113,7 @@ pub struct PaymentMethodBindingResponse {
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreatePaymentMethodSetupSessionRequest {
-    pub return_url: String,
+    pub customer_plan_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]

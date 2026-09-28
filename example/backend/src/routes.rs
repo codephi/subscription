@@ -17,6 +17,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/logout", post(logout))
         .route("/api/me", get(me))
         .route("/api/plan", post(choose_plan))
+        .route("/api/payment-method-setup", post(payment_method_setup))
+        .route("/api/payment-method-bindings", get(payment_method_bindings).post(save_payment_method_binding))
         .route("/api/dashboard", get(dashboard))
         .route("/api/checkouts", post(checkout))
         .route("/api/checkouts/{id}", get(checkout_status))
@@ -111,6 +113,7 @@ async fn checkout(
         &user,
         request.checkout_kind,
         request.topup_credits,
+        request.payment_method_binding_id,
         transaction,
     )
     .await?;
@@ -120,6 +123,31 @@ async fn checkout(
         StatusCode::OK
     };
     Ok((status, Json(response)))
+}
+
+async fn payment_method_setup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    Ok(Json(services::create_payment_method_setup(&state, &user).await?))
+}
+
+async fn save_payment_method_binding(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<crate::models::SavePaymentMethodBindingRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    Ok(Json(services::save_payment_method_binding(&state, &user, request.setup_intent_id).await?))
+}
+
+async fn payment_method_bindings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    Ok(Json(services::list_payment_method_bindings(&state, &user).await?))
 }
 
 async fn checkout_status(
@@ -152,6 +180,7 @@ async fn dashboard(
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
     let catalog = services::dashboard_catalog(&state).await?;
+    let payment_methods = services::list_payment_method_bindings(&state, &user).await?;
     let workspace = &user.workspace_id;
     let (product_id, item_id) = dashboard_catalog_ids(&catalog)?;
     let wallet = state
@@ -189,7 +218,7 @@ async fn dashboard(
     let executions=sqlx::query_as::<_,ExecutionRow>("SELECT execution_id,task_name,result_text,credits_debited,status,created_at FROM executions WHERE user_id=? ORDER BY created_at DESC LIMIT 20")
         .bind(&user.user_id).fetch_all(&state.pool).await?;
     Ok(Json(
-        json!({"account":auth::account_response(user)?,"catalog":catalog,"wallet_statement":wallet,
+        json!({"account":auth::account_response(user)?,"catalog":catalog,"payment_methods":payment_methods,"wallet_statement":wallet,
         "eligibility":eligibility,"meter":meter,"item_statement":item_statement,"checkouts":checkouts,"executions":executions}),
     ))
 }

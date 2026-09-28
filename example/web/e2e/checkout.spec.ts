@@ -38,18 +38,20 @@ class FakeTaskLabOnboardingApi {
     return {
       account: this.subscriptionAccount(),
       catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [{ credit_units: 10, price_amount_minor: 1000 }, { credit_units: 25, price_amount_minor: 2500 }, { credit_units: 50, price_amount_minor: 5000 }] },
+      payment_methods: [{ payment_method_binding_id: "binding-2", billing_connection_id: "connection-2", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }],
       wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
       meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
     }
   }
 }
 
-test("checkout keeps demo card fields in the browser and reports Subscription state", async ({ page }) => {
+test("checkout sends the saved Stripe binding and reports Subscription state", async ({ page }) => {
   let checkoutPaid = false
   await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
   await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
     account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
     catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [{ credit_units: 10, price_amount_minor: 1000 }, { credit_units: 25, price_amount_minor: 2500 }, { credit_units: 50, price_amount_minor: 5000 }] },
+    payment_methods: [{ payment_method_binding_id: "binding-1", billing_connection_id: "connection-1", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }],
     wallet_statement: { items: [] }, eligibility: { access_allowed: checkoutPaid, balance_credit_units: checkoutPaid ? "25" : "0" },
     meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
   } }))
@@ -68,19 +70,17 @@ test("checkout keeps demo card fields in the browser and reports Subscription st
   })
 
   await page.goto("/")
-  await page.getByLabel("Cartão de demonstração").fill("qualquer-cartao")
-  await page.getByLabel("Validade fictícia").fill("qualquer-validade")
-  await page.getByLabel("Código fictício").fill("qualquer-codigo")
+  await expect(page.getByLabel("Cartão salvo")).toHaveValue("binding-1")
   await page.getByText("25 créditos", { exact: true }).click()
   await page.getByRole("button", { name: "Iniciar recarga" }).click()
   await expect(page.getByText("Preparando sua recarga")).toBeVisible()
-  await expect.poll(() => checkoutBody).toEqual({ checkout_kind: "ON_DEMAND", topup_credits: 25 })
+  await expect.poll(() => checkoutBody).toEqual({ checkout_kind: "ON_DEMAND", topup_credits: 25, payment_method_binding_id: "binding-1" })
   releaseCheckout?.()
   await expect(page.getByText(/Checkout paid/i)).toBeVisible()
   await expect(page.locator(".balance-value")).toHaveText("25")
 })
 
-test("onboarding sends a subscription intent without fictitious card fields", async ({ page }) => {
+test("onboarding sends a subscription intent with the saved Stripe binding", async ({ page }) => {
   const fakeApi = new FakeTaskLabOnboardingApi()
   await fakeApi.install(page)
   await page.goto("/")
@@ -89,10 +89,8 @@ test("onboarding sends a subscription intent without fictitious card fields", as
   await page.locator("#register-password").fill("senha-local")
   await page.getByRole("button", { name: "Criar conta" }).click()
   await page.getByRole("radio", { name: "Assinatura" }).click()
-  await page.getByLabel("Número do cartão").fill("qualquer-cartao")
-  await page.getByLabel("Validade fictícia").fill("qualquer-validade")
-  await page.getByLabel("Código fictício").fill("qualquer-codigo")
+  await expect.poll(() => page.getByRole("button", { name: "Iniciar assinatura" }).isEnabled()).toBe(true)
   await page.getByRole("button", { name: "Iniciar assinatura" }).click()
-  await expect.poll(() => fakeApi.checkoutIntent).toEqual({ checkout_kind: "INITIAL" })
+  await expect.poll(() => fakeApi.checkoutIntent).toEqual({ checkout_kind: "INITIAL", payment_method_binding_id: "binding-2" })
   await expect(page.getByText(/Checkout paid/i)).toBeVisible()
 })

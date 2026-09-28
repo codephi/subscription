@@ -5,7 +5,7 @@ use crate::{
     dto::{
         billing::{
             CreateInitialCollectionRequest, CreateOnDemandPurchaseRequest,
-            CreatePaymentMethodBindingRequest, UpdateStripeIntegrationRequest,
+            UpdateStripeIntegrationRequest,
         },
         checkouts::{
             checkout_request_hash, CheckoutQuoteRequest, CheckoutQuoteResponse, CheckoutResponse,
@@ -303,13 +303,11 @@ async fn find_or_create_binding(
         return Ok(binding);
     }
     repository
-        .create_payment_method_binding(
+        .create_verified_payment_method_binding(
             checkout.workspace_id,
-            &CreatePaymentMethodBindingRequest {
-                billing_connection_id: connection_id,
-                customer_plan_id: Some(checkout.customer_plan_id),
-                provider_payment_method_reference: payment_method_id.to_string(),
-            },
+            connection_id,
+            Some(checkout.customer_plan_id),
+            payment_method_id,
         )
         .await
 }

@@ -1,6 +1,6 @@
 # TaskLab
 
-TaskLab é uma POC para testar uma aplicação cliente da Subscription. A aplicação local conhece somente a API da Subscription: o checkout envia o plano, o tipo da compra, o pacote quando aplicável, uma transação e uma chave de idempotência. Credenciais, cartão de pagamento, conexão do provedor, decisão de aprovação ou recusa e webhook ficam na Subscription.
+TaskLab é uma POC para testar uma aplicação cliente da Subscription. O checkout envia o plano, o tipo da compra, o pacote quando aplicável, a referência do cartão tokenizado, uma transação e uma chave de idempotência. Stripe Elements envia os dados do cartão diretamente à Stripe; TaskLab e Subscription recebem apenas referências e estado do setup.
 
 Veja a [documentação completa da integração com a Subscription](../docs/integracao-saas/tasklab.md) para os contratos remotos, provisionamento do workspace, catálogo, checkout, medição de uso e limites atuais.
 
@@ -11,8 +11,8 @@ O produto de demonstração é uma tarefa nomeada que custa 1 crédito. O modo p
 ## Preparar
 
 1. Configure na Subscription `ACCOUNTS_WEBHOOK_SECRET` e o segredo de criptografia das conexões de cobrança. O sandbox de checkout é opcional e permanece desligado por padrão.
-2. Para exercitar pagamentos, habilite o sandbox **somente no ambiente da Subscription** com `BILLING_SANDBOX_ENABLED=true`, credenciais de teste do provedor, o segredo de assinatura de webhook e `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED`. Os campos de cartão da TaskLab aceitam qualquer valor e são apenas cenográficos. A Subscription escolhe o método de pagamento de teste correspondente ao cenário; a TaskLab nunca recebe esses segredos nem envia dados de cartão.
-3. Copie `.env.example` para `.env` e defina `ACCOUNTS_WEBHOOK_SECRET` com o mesmo segredo configurado na Subscription. `DATABASE_URL` já aponta para um arquivo SQLite local.
+2. Para exercitar pagamentos, habilite o sandbox **somente no ambiente da Subscription** com `BILLING_SANDBOX_ENABLED=true`, credenciais de teste do provedor, o segredo de assinatura de webhook e `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED`. Configure também a chave publicável `STRIPE_PUBLISHABLE_KEY=pk_test_...` na TaskLab. Stripe Elements envia o cartão de teste diretamente à Stripe; TaskLab envia à Subscription apenas o ID do SetupIntent para verificar e guardar o vínculo tokenizado.
+3. Copie `.env.example` para `.env`, defina `STRIPE_PUBLISHABLE_KEY` com uma chave publicável de teste e `ACCOUNTS_WEBHOOK_SECRET` com o mesmo segredo configurado na Subscription. `DATABASE_URL` já aponta para um arquivo SQLite local.
 4. Execute `npm install` e depois `npm run setup`. O setup cria o catálogo e as ofertas por HTTP e grava os identificadores em `catalog_settings`; repeti-lo reutiliza os identificadores já persistidos.
 5. Na raiz do repositório, rode `make run`. O comando inicia os backends da Subscription e TaskLab e os frontends admin-ui e TaskLab juntos. Abra o admin em [http://localhost:5173](http://localhost:5173) e a TaskLab em [http://localhost:5174](http://localhost:5174).
 
@@ -33,4 +33,4 @@ O ingresso de webhook de pagamento deve apontar diretamente para a Subscription 
 
 O saldo, extrato, elegibilidade, medidor e consumo são consultados na Subscription. O SQLite local guarda usuários com hash de senha, sessões, referências de checkout e histórico das execuções. Se uma resposta de consumo se perder, a repetição reutiliza a mesma transação e chave de idempotência.
 
-Esta primeira versão não inclui renovação automática, cancelamento, troca de plano nem recarga de uma conta assinante. Os campos fictícios de cartão existem apenas na interface e não são enviados nem armazenados.
+Esta primeira versão não inclui renovação automática, cancelamento, troca de plano nem recarga de uma conta assinante. O fluxo de tokenização e os contratos usados estão descritos em `docs/integracao-saas/tasklab.md`.

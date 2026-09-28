@@ -1,27 +1,23 @@
 import { useState } from "react"
-import { ArrowRight, CreditCard, Sparkles, WalletCards } from "lucide-react"
+import { ArrowRight, Sparkles, WalletCards } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { type User } from "@/lib/api"
 
 type PlanModel = Exclude<User["plan_model"], null>
-type DemoCard = { number: string; expiry: string; cvc: string }
-
 type OnboardingScreenProps = {
   username: string
-  card: DemoCard
-  setCard: (card: DemoCard) => void
+  selectedPaymentMethodId: string
   busy: boolean
   error: string
+  onAddPaymentMethod: () => void
   onChoose: (model: PlanModel) => void
 }
 
-export function OnboardingScreen({ username, card, setCard, busy, error, onChoose }: OnboardingScreenProps) {
+export function OnboardingScreen({ username, selectedPaymentMethodId, busy, error, onAddPaymentMethod, onChoose }: OnboardingScreenProps) {
   const [plan, setPlan] = useState<PlanModel>("PREPAID")
 
   return <main className="app-shell onboarding-shell">
@@ -43,7 +39,10 @@ export function OnboardingScreen({ username, card, setCard, busy, error, onChoos
           <PlanOption id="plan-subscription" value="SUBSCRIPTION" selected={plan === "SUBSCRIPTION"} title="Assinatura" description="Créditos entram após a confirmação do ciclo." icon={<Sparkles />} price="R$ 29,90" allowance="50 créditos por mês" />
         </RadioGroup>
       </FieldSet>
-      {plan === "SUBSCRIPTION" && <DemoCardFields card={card} setCard={setCard} />}
+      {plan === "SUBSCRIPTION" && <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">{selectedPaymentMethodId ? "Cartão de teste validado." : "Valide um cartão de teste antes de iniciar a assinatura."}</p>
+        <Button type="button" variant="outline" onClick={onAddPaymentMethod}>Adicionar ou validar cartão</Button>
+      </div>}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Button onClick={() => onChoose(plan)} disabled={busy}>
           {plan === "PREPAID" ? "Começar no pré-pago" : "Iniciar assinatura"}
@@ -80,32 +79,6 @@ function PlanOption({ id, value, selected, title, description, icon, price, allo
     </FieldContent>
     <span className="plan-option-icon" aria-hidden="true">{icon}</span>
   </Field>
-}
-
-function DemoCardFields({ card, setCard }: { card: DemoCard; setCard: (card: DemoCard) => void }) {
-  return <Card>
-    <CardHeader>
-      <CardTitle className="flex items-center gap-2"><CreditCard />Cartão fictício</CardTitle>
-      <CardDescription>Preencha com qualquer valor. Eles ficam no navegador; a Subscription usa o cartão de teste configurado internamente.</CardDescription>
-    </CardHeader>
-    <CardContent>
-      <FieldGroup className="demo-card-fields">
-        <Field>
-          <FieldLabel htmlFor="first-card-number">Número do cartão</FieldLabel>
-          <Input id="first-card-number" autoComplete="off" inputMode="numeric" placeholder="0000 0000 0000 0000" value={card.number} onChange={(event) => setCard({ ...card, number: event.target.value })} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="first-card-expiry">Validade fictícia</FieldLabel>
-          <Input id="first-card-expiry" autoComplete="off" placeholder="MM/AA" value={card.expiry} onChange={(event) => setCard({ ...card, expiry: event.target.value })} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="first-card-cvc">Código fictício</FieldLabel>
-          <Input id="first-card-cvc" autoComplete="off" inputMode="numeric" placeholder="CVC" value={card.cvc} onChange={(event) => setCard({ ...card, cvc: event.target.value })} />
-        </Field>
-      </FieldGroup>
-    </CardContent>
-    <CardFooter className="text-sm text-muted-foreground">A Subscription controla o método de pagamento e o resultado do checkout.</CardFooter>
-  </Card>
 }
 
 function Brand() {

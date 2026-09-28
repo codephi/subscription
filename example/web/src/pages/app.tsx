@@ -6,14 +6,12 @@ import { OnboardingScreen } from "@/components/onboarding-screen"
 import { WorkspaceDashboard } from "@/components/workspace-dashboard"
 import { LoadingScreen } from "@/components/loading-screen"
 import { AppFrame } from "@/components/app-frame"
+import { StripeCardSetup } from "@/components/stripe-card-setup"
 
 type PlanModel = "PREPAID" | "SUBSCRIPTION"
 type CheckoutKind = "INITIAL" | "ON_DEMAND"
 type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null; transaction_id?: string }
-type DemoCard = { number: string; expiry: string; cvc: string }
 type CheckoutKey = { scope: string; value: string }
-
-const emptyCard: DemoCard = { number: "", expiry: "", cvc: "" }
 
 export default function App() {
   const queryClient = useQueryClient()
@@ -24,13 +22,15 @@ export default function App() {
   const [pendingExecution, setPendingExecution] = useState(false)
   const [taskResult, setTaskResult] = useState("")
   const [checkout, setCheckout] = useState<CheckoutView | null>(null)
-  const [card, setCard] = useState<DemoCard>(emptyCard)
+  const [paymentMethodBindingId, setPaymentMethodBindingId] = useState<string | null>(null)
+  const [showCardSetup, setShowCardSetup] = useState(false)
   const [topupCredits, setTopupCredits] = useState(10)
   const checkoutKey = useRef<CheckoutKey | null>(null)
   const executionTransaction = useRef<string | null>(null)
 
   useEffect(() => restoreSession(setUser, setAuthChecked), [])
   useEffect(() => restorePendingExecution(user, setTaskName, setPendingExecution, executionTransaction), [user?.username])
+  useEffect(() => recoverStripeSetup(user, queryClient, setPaymentMethodBindingId, setError), [user?.username])
 
   const dashboard = useQuery({
     queryKey: ["dashboard", user?.username],
@@ -40,6 +40,12 @@ export default function App() {
   })
 
   useEffect(() => syncPendingCheckout(dashboard.data, checkout, setCheckout), [dashboard.data?.checkouts, checkout?.checkout_id])
+  useEffect(() => {
+    if (!paymentMethodBindingId) {
+      const firstActive = dashboard.data?.payment_methods?.find((binding) => binding.status === "ACTIVE")
+      if (firstActive) setPaymentMethodBindingId(firstActive.payment_method_binding_id)
+    }
+  }, [dashboard.data?.payment_methods, paymentMethodBindingId])
   useEffect(() => watchCheckout(checkout, user, setCheckout, checkoutKey, setError), [checkout?.checkout_id, checkout?.status, user?.username])
   useEffect(() => {
     if (checkout?.status !== "PAID" || !user) return
@@ -72,12 +78,19 @@ export default function App() {
   if (!user.plan_model) {
     return <AppFrame><OnboardingScreen
       username={user.username}
-      card={card}
-      setCard={setCard}
+      selectedPaymentMethodId={paymentMethodBindingId ?? ""}
+      onAddPaymentMethod={() => setShowCardSetup(true)}
       busy={planMutation.isPending || checkoutMutation.isPending}
       error={error}
-      onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : startCheckout("INITIAL", user, 10, checkoutKey, checkoutMutation.mutate)}
-    /></AppFrame>
+      onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : paymentMethodBindingId
+        ? startCheckout("INITIAL", user, 10, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
+        : setError("Adicione e valide um cartão antes de iniciar a assinatura.")}
+    />{showCardSetup && <StripeCardSetup onSaved={(id) => {
+      setPaymentMethodBindingId(id)
+      setShowCardSetup(false)
+      setError("")
+      void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+    }} />}</AppFrame>
   }
 
   return <AppFrame><WorkspaceDashboard
@@ -88,8 +101,8 @@ export default function App() {
     actionError={error}
     retryDashboard={() => dashboard.refetch()}
     checkout={checkout}
-    card={card}
-    setCard={setCard}
+    selectedPaymentMethodId={paymentMethodBindingId ?? ""}
+    setSelectedPaymentMethodId={setPaymentMethodBindingId}
     topupCredits={topupCredits}
     setTopupCredits={setTopupCredits}
     taskName={taskName}
@@ -99,15 +112,40 @@ export default function App() {
     checkoutBusy={checkoutMutation.isPending}
     executionBusy={executeMutation.isPending}
     onSignOut={() => signOut(user, queryClient, setUser, setCheckout, setError, checkoutKey, executionTransaction)}
-    onCheckout={(credits) => startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, checkoutKey, checkoutMutation.mutate)}
+    onAddPaymentMethod={() => setShowCardSetup(true)}
+    onCheckout={(credits) => paymentMethodBindingId
+      ? startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
+      : setError("Adicione e valide um cartão antes de iniciar o checkout.")}
     onExecute={() => startExecution(user, taskName, setPendingExecution, executionTransaction, executeMutation.mutate)}
-  /></AppFrame>
+  />{showCardSetup && <StripeCardSetup onSaved={(id) => {
+    setPaymentMethodBindingId(id)
+    setShowCardSetup(false)
+    setError("")
+    void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+  }} />}</AppFrame>
 }
 
 function restoreSession(setUser: (user: User | null) => void, setChecked: (checked: boolean) => void) {
   let active = true
   api<User>("/me").then((account) => active && setUser(account)).catch(() => undefined).finally(() => active && setChecked(true))
   return () => { active = false }
+}
+
+function recoverStripeSetup(user: User | null, queryClient: ReturnType<typeof useQueryClient>, setBinding: (id: string) => void, setError: (message: string) => void) {
+  const url = new URL(window.location.href)
+  const setupIntentId = url.searchParams.get("setup_intent")
+  if (!user || !setupIntentId?.startsWith("seti_")) return
+  url.searchParams.delete("setup_intent")
+  url.searchParams.delete("setup_intent_client_secret")
+  window.history.replaceState({}, "", url)
+  void api<{ payment_method_binding_id: string }>("/payment-method-bindings", {
+    method: "POST",
+    body: JSON.stringify({ setup_intent_id: setupIntentId }),
+  }).then((binding) => {
+    setBinding(binding.payment_method_binding_id)
+    setError("")
+    return queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+  }).catch((error: Error) => setError(error.message))
 }
 
 function restorePendingExecution(user: User | null, setTask: (task: string) => void, setPending: (pending: boolean) => void, transaction: React.MutableRefObject<string | null>) {
@@ -151,14 +189,14 @@ function clearFinishedCheckout(result: CheckoutView, user: User | null, key: Rea
   }
 }
 
-function startCheckout(kind: CheckoutKind, user: User, credits: number, key: React.MutableRefObject<CheckoutKey | null>, mutate: (input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string }) => void) {
+function startCheckout(kind: CheckoutKind, user: User, credits: number, paymentMethodBindingId: string, key: React.MutableRefObject<CheckoutKey | null>, mutate: (input: { checkout_kind: CheckoutKind; topup_credits: number; payment_method_binding_id: string; idempotencyKey: string }) => void) {
   const scope = `${kind}_${kind === "ON_DEMAND" ? credits : "initial"}`
   if (key.current?.scope !== scope) {
     const storageKey = `tasklab_checkout_${user.username}_${scope}`
     key.current = { scope, value: sessionStorage.getItem(storageKey) ?? crypto.randomUUID() }
     sessionStorage.setItem(storageKey, key.current.value)
   }
-  mutate({ checkout_kind: kind, topup_credits: credits, idempotencyKey: key.current.value })
+  mutate({ checkout_kind: kind, topup_credits: credits, payment_method_binding_id: paymentMethodBindingId, idempotencyKey: key.current.value })
 }
 
 async function refreshAccount(queryClient: ReturnType<typeof useQueryClient>, setUser: (user: User) => void) {
@@ -166,17 +204,17 @@ async function refreshAccount(queryClient: ReturnType<typeof useQueryClient>, se
   setUser(await api<User>("/me"))
 }
 
-function submitCheckout(input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string }) {
-  // Card demo fields stay in React state; only the commercial intent crosses this boundary.
+function submitCheckout(input: { checkout_kind: CheckoutKind; topup_credits: number; payment_method_binding_id: string; idempotencyKey: string }) {
   const intent = input.checkout_kind === "ON_DEMAND"
-    ? { checkout_kind: input.checkout_kind, topup_credits: input.topup_credits }
-    : { checkout_kind: input.checkout_kind }
+    ? { checkout_kind: input.checkout_kind, topup_credits: input.topup_credits, payment_method_binding_id: input.payment_method_binding_id }
+    : { checkout_kind: input.checkout_kind, payment_method_binding_id: input.payment_method_binding_id }
   return api<CheckoutView>("/checkouts", {
     method: "POST",
     headers: { "idempotency-key": input.idempotencyKey },
     body: JSON.stringify(intent),
   })
 }
+
 
 function refreshAfterCheckout(result: CheckoutView, user: User | null, setUser: (user: User) => void, setCheckout: (checkout: CheckoutView) => void, key: React.MutableRefObject<CheckoutKey | null>, queryClient: ReturnType<typeof useQueryClient>, setError: (error: string) => void) {
   setCheckout(result)

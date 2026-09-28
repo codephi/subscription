@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Separator } from "@/components/ui/separator"
@@ -12,9 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import type { Dashboard, User } from "@/lib/api"
+import type { Dashboard, PaymentMethodBinding, User } from "@/lib/api"
 
-type DemoCard = { number: string; expiry: string; cvc: string }
 type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null }
 
 type WorkspaceDashboardProps = {
@@ -25,8 +24,8 @@ type WorkspaceDashboardProps = {
   actionError: string
   retryDashboard: () => void
   checkout: CheckoutView | null
-  card: DemoCard
-  setCard: (card: DemoCard) => void
+  selectedPaymentMethodId: string
+  setSelectedPaymentMethodId: (id: string) => void
   taskName: string
   setTaskName: (name: string) => void
   taskResult: string
@@ -37,6 +36,7 @@ type WorkspaceDashboardProps = {
   executionBusy: boolean
   onSignOut: () => void
   onCheckout: (credits: number) => void
+  onAddPaymentMethod: () => void
   onExecute: () => void
 }
 
@@ -198,7 +198,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   return <Card>
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><Sparkles />Simular checkout</CardTitle>
-      <CardDescription>Preencha com qualquer valor. Os campos ficam no navegador; a Subscription usa o cartão de teste e define a aprovação ou recusa.</CardDescription>
+      <CardDescription>Escolha um cartão salvo ou adicione outro. O Stripe coleta os dados e a Subscription guarda somente a referência tokenizada.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
       {prepaid && <Field>
@@ -213,7 +213,10 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
           </Field>)}
         </RadioGroup>
       </Field>}
-      <DemoCardFields card={props.card} setCard={props.setCard} />
+      <SavedPaymentMethods methods={props.view?.payment_methods ?? []} selectedId={props.selectedPaymentMethodId} onSelect={props.setSelectedPaymentMethodId} />
+      <Button variant="outline" onClick={props.onAddPaymentMethod} disabled={props.checkoutBusy || pending}>
+        <CreditCard data-icon="inline-start" />Adicionar cartão
+      </Button>
       {props.checkoutBusy && <Alert role="status" aria-live="polite">
         <Spinner />
         <AlertTitle>Preparando sua {prepaid ? "recarga" : "assinatura"}</AlertTitle>
@@ -221,11 +224,11 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
       </Alert>}
       <Item variant="muted" size="sm">
         <ItemMedia variant="icon"><CreditCard /></ItemMedia>
-        <ItemContent><ItemTitle>Pagamento transparente</ItemTitle><ItemDescription>A TaskLab envia somente a intenção de compra.</ItemDescription></ItemContent>
+        <ItemContent><ItemTitle>Dados protegidos</ItemTitle><ItemDescription>Os dados do cartão não passam pelo backend da TaskLab.</ItemDescription></ItemContent>
       </Item>
     </CardContent>
     <CardFooter>
-      <Button className="w-full" variant="outline" onClick={() => props.onCheckout(props.topupCredits)} disabled={props.checkoutBusy || pending}>
+      <Button className="w-full" variant="outline" onClick={() => props.onCheckout(props.topupCredits)} disabled={props.checkoutBusy || pending || !props.selectedPaymentMethodId}>
         {props.checkoutBusy || pending ? <Spinner data-icon="inline-start" /> : <Zap data-icon="inline-start" />}
         {prepaid ? "Iniciar recarga" : failedCheckout(props.checkout) ? "Tentar assinatura novamente" : "Iniciar assinatura"}
       </Button>
@@ -233,21 +236,15 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   </Card>
 }
 
-function DemoCardFields({ card, setCard }: { card: DemoCard; setCard: (card: DemoCard) => void }) {
-  return <FieldGroup className="demo-card-fields">
-    <Field>
-      <FieldLabel htmlFor="card-number">Cartão de demonstração</FieldLabel>
-      <Input id="card-number" autoComplete="off" inputMode="numeric" placeholder="0000 0000 0000 0000" value={card.number} onChange={(event) => setCard({ ...card, number: event.target.value })} />
-    </Field>
-    <Field>
-      <FieldLabel htmlFor="card-expiry">Validade fictícia</FieldLabel>
-      <Input id="card-expiry" autoComplete="off" placeholder="MM/AA" value={card.expiry} onChange={(event) => setCard({ ...card, expiry: event.target.value })} />
-    </Field>
-    <Field>
-      <FieldLabel htmlFor="card-cvc">Código fictício</FieldLabel>
-      <Input id="card-cvc" autoComplete="off" inputMode="numeric" placeholder="CVC" value={card.cvc} onChange={(event) => setCard({ ...card, cvc: event.target.value })} />
-    </Field>
-  </FieldGroup>
+function SavedPaymentMethods({ methods, selectedId, onSelect }: { methods: PaymentMethodBinding[]; selectedId: string; onSelect: (id: string) => void }) {
+  const active = methods.filter((method) => method.status === "ACTIVE")
+  return <Field>
+    <FieldLabel htmlFor="saved-payment-method">Cartão salvo</FieldLabel>
+    <select id="saved-payment-method" className="h-10 rounded-md border bg-background px-3 text-sm" value={selectedId} onChange={(event) => onSelect(event.target.value)} disabled={!active.length}>
+      {!active.length && <option value="">Adicione um cartão para continuar</option>}
+      {active.map((method, index) => <option key={method.payment_method_binding_id} value={method.payment_method_binding_id}>Cartão salvo {index + 1}</option>)}
+    </select>
+  </Field>
 }
 
 function LedgerCard({ view, loading }: { view?: Dashboard; loading: boolean }) {

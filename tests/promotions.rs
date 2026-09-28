@@ -5,7 +5,7 @@ mod support;
 use chrono::{Duration, Utc};
 use credit_fixture::CreditFixture;
 use subscription::dto::{
-    billing::{CreateBillingConnectionRequest, CreatePaymentMethodBindingRequest},
+    billing::CreateBillingConnectionRequest,
     catalog::{
         CatalogStatus, CreateItemRequest, CreatePriceVersionRequest, CreateProductRequest,
         PricingModel, UpdateItemRequest, UpdateProductRequest, UsageModel,
@@ -259,17 +259,15 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     )
     .await
     .expect("billing connection");
-    let binding = billing::create_payment_method_binding(
-        &repository,
-        workspace_id,
-        &CreatePaymentMethodBindingRequest {
-            billing_connection_id: connection.billing_connection_id,
-            customer_plan_id: Some(customer_plan.customer_plan_id),
-            provider_payment_method_reference: "pm_coupon_test".into(),
-        },
-    )
-    .await
-    .expect("payment binding");
+    let binding = repository
+        .create_verified_payment_method_binding(
+            workspace_id,
+            connection.billing_connection_id,
+            Some(customer_plan.customer_plan_id),
+            "pm_coupon_test",
+        )
+        .await
+        .expect("payment binding");
     let coupon = promotions::create_coupon(
         &repository,
         CreateCouponRequest {

@@ -91,12 +91,6 @@ pub async fn create_payment_method_setup_session(
     connection_id: uuid::Uuid,
     request: &CreatePaymentMethodSetupSessionRequest,
 ) -> ApiResult<PaymentMethodSetupSessionResponse> {
-    if !request.return_url.starts_with("https://") {
-        return Err(ApiError::unprocessable(
-            "invalid_setup_return_url",
-            format!("return_url {:?} must use HTTPS", request.return_url),
-        ));
-    }
     let configuration = repository
         .billing_connector_configuration(connection_id)
         .await?;
@@ -126,6 +120,11 @@ pub async fn create_payment_method_setup_session(
         }
         false => configuration.external_account_reference.clone(),
     };
+    if let Some(customer_plan_id) = request.customer_plan_id {
+        repository
+            .ensure_customer_plan_workspace(configuration.workspace_id, customer_plan_id)
+            .await?;
+    }
     let connector = crate::repositories::stripe::StripeConnector::new(
         secret,
         (!configuration.managed)
@@ -133,10 +132,7 @@ pub async fn create_payment_method_setup_session(
             .flatten(),
     );
     let session = connector
-        .create_setup_session(&SetupSessionCommand {
-            customer_reference,
-            return_url: request.return_url.clone(),
-        })
+        .create_setup_session(&SetupSessionCommand { customer_reference })
         .await
         .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
     Ok(PaymentMethodSetupSessionResponse {
@@ -235,8 +231,81 @@ pub async fn create_payment_method_binding(
     workspace_id: uuid::Uuid,
     request: &CreatePaymentMethodBindingRequest,
 ) -> ApiResult<PaymentMethodBindingResponse> {
+    if !request.setup_intent_id.starts_with("seti_") {
+        return Err(ApiError::unprocessable(
+            "invalid_setup_intent_reference",
+            format!(
+                "setup_intent_id {:?} must begin with seti_",
+                request.setup_intent_id
+            ),
+        ));
+    }
+    let configuration = repository
+        .billing_connector_configuration(request.billing_connection_id)
+        .await?;
+    if configuration.workspace_id != workspace_id
+        || configuration.provider != "STRIPE"
+        || configuration.status != "ACTIVE"
+    {
+        return Err(ApiError::conflict(
+            "billing_connection_not_usable",
+            format!("billing connection {} must be an ACTIVE STRIPE connection for workspace {workspace_id}", request.billing_connection_id),
+        ));
+    }
+    if let Some(customer_plan_id) = request.customer_plan_id {
+        repository
+            .ensure_customer_plan_workspace(workspace_id, customer_plan_id)
+            .await?;
+    }
+    let secrets = if configuration.managed {
+        Some(
+            repository
+                .integration_secrets(workspace_id, request.billing_connection_id)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let secret = resolve_connection_secret(
+        repository,
+        workspace_id,
+        request.billing_connection_id,
+        "stripe_api",
+        &configuration.secret_reference,
+        configuration.managed,
+    )?;
+    let expected_customer = match secrets.as_ref() {
+        Some(secrets) => {
+            crate::services::billing_integrations::ensure_customer(repository, secrets).await?
+        }
+        None => configuration.external_account_reference.clone(),
+    };
+    let connector = crate::repositories::stripe::StripeConnector::new(
+        secret,
+        (!configuration.managed)
+            .then(|| stripe_account(&configuration.external_account_reference))
+            .flatten(),
+    );
+    let prepared = connector
+        .retrieve_setup_intent(&request.setup_intent_id)
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
+    if prepared.customer_id != expected_customer {
+        return Err(ApiError::conflict(
+            "billing_setup_customer_mismatch",
+            format!(
+                "SetupIntent {} belongs to customer {}, expected {expected_customer}",
+                request.setup_intent_id, prepared.customer_id
+            ),
+        ));
+    }
     repository
-        .create_payment_method_binding(workspace_id, request)
+        .create_verified_payment_method_binding(
+            workspace_id,
+            request.billing_connection_id,
+            request.customer_plan_id,
+            &prepared.payment_method_id,
+        )
         .await
 }
 
