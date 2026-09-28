@@ -121,39 +121,36 @@ até sair de `PENDING` e então atualiza o painel.
 
 O valor submetido ao checkout não vem do formulário: Subscription resolve os
 termos a partir do plano e do pacote cadastrados. Para salvar um cartão, a
-Subscription cria uma Checkout Session em modo `setup` e direciona o usuário à
-página hospedada da Stripe. TaskLab só inicia o fluxo e, no retorno, envia à
-Subscription o ID da Checkout Session para verificação server-side. PAN e CVC
-seguem diretamente do navegador para a Stripe.
+Subscription inicia o cadastro no provedor hospedado e direciona o usuário à
+página de pagamento. TaskLab só inicia o fluxo e, no retorno, envia à
+Subscription a referência opaca do setup para validação server-side. PAN e CVC
+seguem diretamente do navegador para o provedor.
 
 ### Fluxo de tokenização
 
 1. O frontend pede autorização explícita para salvar o cartão e chama
    `POST /api/payment-method-setup`. O backend TaskLab garante um `CustomerPlan`
-   e pede à Subscription uma Checkout Session de setup para o Customer Stripe.
-2. Subscription cria a sessão `mode=setup`, com `usage=off_session`, usando sua
-   própria credencial Stripe, e devolve a URL hospedada. TaskLab redireciona o
-   navegador para essa URL. Não usa Stripe.js, chave publicável ou credencial
-   Stripe.
-3. Após o usuário informar o cartão e concluir eventuais desafios bancários,
-   Stripe redireciona à TaskLab com `session_id=cs_...`. O frontend envia esse
-   identificador a `POST /api/payment-method-bindings`.
-4. TaskLab envia `checkout_session_id`, `billing_connection_id` e
-   `customer_plan_id` à Subscription. Subscription consulta a Checkout Session
-   expandindo o SetupIntent com a chave secreta da conexão, valida que a sessão
-   foi concluída, pertence ao Customer e plano esperados e contém um SetupIntent
-   `succeeded`, `usage=off_session` e um `pm_...`; só então grava o vínculo.
+   e pede à Subscription uma sessão de setup para o cliente de cobrança.
+2. Subscription resolve a integração ativa, cria o setup hospedado e devolve a
+   URL de redirecionamento junto com uma referência opaca própria. TaskLab só
+   redireciona o navegador; não recebe identificadores de integração, chaves ou
+   identificadores do provedor.
+3. Após concluir o cadastro, o provedor redireciona à TaskLab com
+   `payment_method_setup_id`. O frontend envia essa referência a
+   `POST /api/payment-method-bindings`.
+4. TaskLab envia `payment_method_setup_id` e `customer_plan_id` à Subscription.
+   Subscription usa seu registro interno para localizar e validar a sessão junto
+   ao provedor e ao Customer esperado, e só então grava o vínculo tokenizado.
    Reenvios retornam o vínculo já criado.
 
-As rotas da Subscription são `POST
-/v1/workspaces/{workspace_id}/billing-connections/{connection_id}/payment-method-setup-sessions`,
+As rotas usadas pela TaskLab são `POST
+/v1/workspaces/{workspace_id}/payment-method-setup-sessions`,
 `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET` na mesma
 rota de vínculos. O primeiro endpoint recebe `customer_plan_id`, `success_url` e
-`cancel_url`; o segundo recebe `billing_connection_id`, `customer_plan_id` e
-`checkout_session_id`. Não envie PAN, validade ou CVC em JSON, logs, analytics
-ou banco da aplicação.
+`cancel_url`; o segundo recebe `customer_plan_id` e `payment_method_setup_id`.
+Não envie PAN, validade ou CVC em JSON, logs, analytics ou banco da aplicação.
 
-Para pagamento de teste, informe um cartão de teste na página Stripe Checkout.
+Para pagamento de teste, informe um cartão de teste na página hospedada pelo provedor.
 `BILLING_SANDBOX_PAYMENT_SCENARIO` controla somente o método interno de
 demonstração quando o checkout não informa um vínculo tokenizado.
 

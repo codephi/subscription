@@ -88,13 +88,17 @@ pub async fn create_paid_plan_upgrade(
 
 pub async fn create_payment_method_setup_session(
     repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
     connection_id: uuid::Uuid,
     request: &CreatePaymentMethodSetupSessionRequest,
 ) -> ApiResult<PaymentMethodSetupSessionResponse> {
     let configuration = repository
         .billing_connector_configuration(connection_id)
         .await?;
-    if configuration.provider != "STRIPE" || configuration.status != "ACTIVE" {
+    if configuration.workspace_id != workspace_id
+        || configuration.provider != "STRIPE"
+        || configuration.status != "ACTIVE"
+    {
         return Err(ApiError::conflict(
             "billing_connection_not_usable",
             format!("billing connection {connection_id} must be an ACTIVE STRIPE connection"),
@@ -121,9 +125,11 @@ pub async fn create_payment_method_setup_session(
         false => configuration.external_account_reference.clone(),
     };
     repository
-        .ensure_customer_plan_workspace(configuration.workspace_id, request.customer_plan_id)
+        .ensure_customer_plan_workspace(workspace_id, request.customer_plan_id)
         .await?;
     validate_setup_return_urls(&request.success_url, &request.cancel_url)?;
+    let payment_method_setup_id = uuid::Uuid::new_v4();
+    let success_url = setup_success_return_url(&request.success_url, payment_method_setup_id)?;
     let connector = crate::repositories::stripe::StripeConnector::new(
         secret,
         (!configuration.managed)
@@ -135,15 +141,35 @@ pub async fn create_payment_method_setup_session(
             customer_reference,
             client_reference_id: request.customer_plan_id.to_string(),
             billing_connection_id: connection_id.to_string(),
-            success_url: request.success_url.clone(),
+            success_url,
             cancel_url: request.cancel_url.clone(),
         })
         .await
         .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
+    repository
+        .record_payment_method_setup_session(
+            payment_method_setup_id,
+            workspace_id,
+            connection_id,
+            request.customer_plan_id,
+            &session.provider_setup_id,
+        )
+        .await?;
     Ok(PaymentMethodSetupSessionResponse {
-        provider_setup_id: session.provider_setup_id,
+        payment_method_setup_id,
         redirect_url: session.redirect_url,
     })
+}
+
+pub async fn create_workspace_payment_method_setup_session(
+    repository: &DatabaseRepository,
+    workspace_id: uuid::Uuid,
+    request: &CreatePaymentMethodSetupSessionRequest,
+) -> ApiResult<PaymentMethodSetupSessionResponse> {
+    let connection_id = repository
+        .active_stripe_billing_connection(workspace_id)
+        .await?;
+    create_payment_method_setup_session(repository, workspace_id, connection_id, request).await
 }
 
 pub(crate) fn resolve_connection_secret(
@@ -236,9 +262,16 @@ pub async fn create_payment_method_binding(
     workspace_id: uuid::Uuid,
     request: &CreatePaymentMethodBindingRequest,
 ) -> ApiResult<PaymentMethodBindingResponse> {
-    validate_checkout_session_reference(&request.checkout_session_id)?;
+    let setup = repository
+        .find_payment_method_setup_session(
+            workspace_id,
+            request.customer_plan_id,
+            request.payment_method_setup_id,
+        )
+        .await?;
+    let connection_id = setup.billing_connection_id;
     let configuration = repository
-        .billing_connector_configuration(request.billing_connection_id)
+        .billing_connector_configuration(connection_id)
         .await?;
     if configuration.workspace_id != workspace_id
         || configuration.provider != "STRIPE"
@@ -246,7 +279,7 @@ pub async fn create_payment_method_binding(
     {
         return Err(ApiError::conflict(
             "billing_connection_not_usable",
-            format!("billing connection {} must be an ACTIVE STRIPE connection for workspace {workspace_id}", request.billing_connection_id),
+            format!("billing connection {connection_id} must be an ACTIVE STRIPE connection for workspace {workspace_id}"),
         ));
     }
     let customer_plan_id = request.customer_plan_id;
@@ -256,7 +289,7 @@ pub async fn create_payment_method_binding(
     let secrets = if configuration.managed {
         Some(
             repository
-                .integration_secrets(workspace_id, request.billing_connection_id)
+                .integration_secrets(workspace_id, connection_id)
                 .await?,
         )
     } else {
@@ -265,7 +298,7 @@ pub async fn create_payment_method_binding(
     let secret = resolve_connection_secret(
         repository,
         workspace_id,
-        request.billing_connection_id,
+        connection_id,
         "stripe_api",
         &configuration.secret_reference,
         configuration.managed,
@@ -284,10 +317,10 @@ pub async fn create_payment_method_binding(
     );
     let prepared = connector
         .retrieve_checkout_setup_intent(
-            &request.checkout_session_id,
+            &setup.provider_setup_id,
             &expected_customer,
             &customer_plan_id.to_string(),
-            &request.billing_connection_id.to_string(),
+            &connection_id.to_string(),
         )
         .await
         .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
@@ -303,24 +336,11 @@ pub async fn create_payment_method_binding(
     repository
         .create_verified_payment_method_binding(
             workspace_id,
-            request.billing_connection_id,
+            connection_id,
             Some(customer_plan_id),
             &prepared.payment_method_id,
         )
         .await
-}
-
-fn validate_checkout_session_reference(reference: &str) -> ApiResult<()> {
-    let id = reference.strip_prefix("cs_").unwrap_or_default();
-    if !id.is_empty() && id.len() <= 251 && id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
-        return Ok(());
-    }
-    Err(ApiError::unprocessable(
-        "invalid_checkout_session_reference",
-        format!(
-            "checkout_session_id {reference:?} must match cs_<alphanumeric ID> with at most 255 characters"
-        ),
-    ))
 }
 
 fn validate_setup_return_urls(success_url: &str, cancel_url: &str) -> ApiResult<()> {
@@ -333,16 +353,30 @@ fn validate_setup_return_urls(success_url: &str, cancel_url: &str) -> ApiResult<
         && success.port_or_known_default() == cancel.port_or_known_default();
     let secure = success.scheme() == "https"
         || (success.scheme() == "http" && success.host_str().is_some_and(is_local_host));
-    let session_return = success_url.contains("session_id={CHECKOUT_SESSION_ID}");
-    if same_origin
-        && secure
-        && session_return
-        && success.fragment().is_none()
-        && cancel.fragment().is_none()
-    {
+    if same_origin && secure && success.fragment().is_none() && cancel.fragment().is_none() {
         return Ok(());
     }
-    Err(ApiError::unprocessable("invalid_payment_setup_return_urls", "success_url and cancel_url must share a secure origin and success_url must include session_id={CHECKOUT_SESSION_ID}"))
+    Err(ApiError::unprocessable(
+        "invalid_payment_setup_return_urls",
+        "success_url and cancel_url must share a secure origin and must not contain fragments",
+    ))
+}
+
+fn setup_success_return_url(success_url: &str, setup_id: uuid::Uuid) -> ApiResult<String> {
+    let mut url = url::Url::parse(success_url)
+        .map_err(|error| invalid_setup_return_url(success_url, error))?;
+    if url
+        .query_pairs()
+        .any(|(key, _)| key == "payment_method_setup_id")
+    {
+        return Err(ApiError::unprocessable(
+            "invalid_payment_setup_return_url",
+            "success_url must not predefine payment_method_setup_id",
+        ));
+    }
+    url.query_pairs_mut()
+        .append_pair("payment_method_setup_id", &setup_id.to_string());
+    Ok(url.to_string())
 }
 
 fn is_local_host(host: &str) -> bool {

@@ -112,22 +112,21 @@ Idempotency-Key: account:<WORKSPACE_ID>:pro-plan
 {"plan_version_id":"<PLAN_VERSION_ID>","transaction_id":"account:<WORKSPACE_ID>:pro-plan"}
 ```
 
-2. Seu backend chama a sessão de setup da Subscription, que cria uma Checkout
-   Session hospedada em modo `setup` usando a credencial Stripe. Redirecione o
-   cliente autenticado à URL devolvida; o cartão é informado diretamente na
-   página Stripe Checkout.
+2. Seu backend pede à Subscription uma sessão de setup associada ao CustomerPlan.
+   Ela resolve a integração e devolve uma URL hospedada e um identificador opaco.
+   Redirecione o cliente autenticado à URL para informar o cartão.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/billing-connections/<CONNECTION_ID>/payment-method-setup-sessions
-{"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?session_id={CHECKOUT_SESSION_ID}","cancel_url":"https://app.example/return?payment_setup=cancelled"}
+POST /v1/workspaces/<WORKSPACE_ID>/payment-method-setup-sessions
+{"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?payment_setup=complete","cancel_url":"https://app.example/return?payment_setup=cancelled"}
 
 POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
-{"billing_connection_id":"<CONNECTION_ID>","customer_plan_id":"<CUSTOMER_PLAN_ID>","checkout_session_id":"cs_..."}
+{"customer_plan_id":"<CUSTOMER_PLAN_ID>","payment_method_setup_id":"<PAYMENT_METHOD_SETUP_ID>"}
 ```
 
-3. Subscription recupera a Checkout Session e o SetupIntent usando a credencial
-   privada da conexão e valida conclusão, Customer esperado, `usage=off_session`
-   e método associado antes de criar o vínculo. O redirect sozinho não é confirmação. O fluxo de
+3. Subscription usa o identificador opaco para localizar a sessão e valida
+   conclusão, Customer esperado e método associado antes de criar o vínculo.
+   O redirect sozinho não é confirmação. O fluxo de
    webhook atual também não ativa plano FREE que exija cartão; este guia usa
    plano PAID.
 

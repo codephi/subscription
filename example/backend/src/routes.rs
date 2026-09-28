@@ -145,7 +145,7 @@ async fn save_payment_method_binding(
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
     Ok(Json(
-        services::save_payment_method_binding(&state, &user, request.checkout_session_id).await?,
+        services::save_payment_method_binding(&state, &user, request.payment_method_setup_id).await?,
     ))
 }
 

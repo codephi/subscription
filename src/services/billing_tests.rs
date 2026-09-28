@@ -42,27 +42,60 @@ fn command(amount_minor: i64) -> CollectionCommand {
 }
 
 #[test]
-fn payment_setup_return_urls_require_same_secure_origin_and_checkout_session_marker() {
+fn payment_setup_return_urls_require_same_secure_origin() {
     assert!(validate_setup_return_urls(
-        "https://tasklab.example/?session_id={CHECKOUT_SESSION_ID}",
+        "https://tasklab.example/?payment_setup=complete",
         "https://tasklab.example/?payment_setup=cancelled",
     )
     .is_ok());
     assert!(validate_setup_return_urls(
-        "http://localhost:5174/?session_id={CHECKOUT_SESSION_ID}",
+        "http://localhost:5174/?payment_setup=complete",
         "http://localhost:5174/?payment_setup=cancelled",
     )
     .is_ok());
     assert!(validate_setup_return_urls(
-        "https://evil.example/?session_id={CHECKOUT_SESSION_ID}",
+        "https://evil.example/?payment_setup=complete",
         "https://tasklab.example/?payment_setup=cancelled",
     )
     .is_err());
     assert!(validate_setup_return_urls(
-        "http://tasklab.example/?session_id={CHECKOUT_SESSION_ID}",
+        "http://tasklab.example/?payment_setup=complete",
         "http://tasklab.example/?payment_setup=cancelled",
     )
     .is_err());
+}
+
+#[test]
+fn payment_setup_return_reference_is_added_by_subscription() {
+    let setup_id = uuid::Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+    assert_eq!(
+        setup_success_return_url("https://tasklab.example/return?payment_setup=complete", setup_id)
+            .unwrap(),
+        "https://tasklab.example/return?payment_setup=complete&payment_method_setup_id=11111111-1111-4111-8111-111111111111"
+    );
+    assert!(setup_success_return_url(
+        "https://tasklab.example/return?payment_method_setup_id=caller-value",
+        setup_id
+    )
+    .is_err());
+}
+
+#[test]
+fn customer_payment_method_binding_hides_provider_integration_details() {
+    let public: crate::dto::billing::CustomerPaymentMethodBindingResponse =
+        crate::dto::billing::PaymentMethodBindingResponse {
+            payment_method_binding_id: uuid::Uuid::new_v4(),
+            billing_connection_id: uuid::Uuid::new_v4(),
+            workspace_id: uuid::Uuid::new_v4(),
+            customer_plan_id: Some(uuid::Uuid::new_v4()),
+            payment_method: "CARD".to_string(),
+            status: "ACTIVE".to_string(),
+            created_at: chrono::Utc::now(),
+        }
+        .into();
+    let body = serde_json::to_value(public).unwrap();
+    assert!(body.get("billing_connection_id").is_none());
+    assert!(body.get("provider_payment_method_reference").is_none());
 }
 
 fn billing_capabilities(methods: Vec<BillingPaymentMethod>) -> BillingCapabilities {
@@ -105,12 +138,4 @@ async fn unsupported_capability_and_invalid_amount_skip_external_call() {
         .expect_err("zero amount");
     assert_eq!(amount.code(), "invalid_collection_amount");
     assert!(calls.lock().expect("fake calls lock").is_empty());
-}
-
-#[test]
-fn payment_binding_ingestion_requires_a_checkout_session_reference() {
-    let error = validate_checkout_session_reference("pm_client_supplied")
-        .expect_err("pm ID is not a checkout receipt");
-    assert_eq!(error.code(), "invalid_checkout_session_reference");
-    assert!(validate_checkout_session_reference("cs_testProvider123").is_ok());
 }

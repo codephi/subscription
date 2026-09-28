@@ -200,6 +200,86 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
     assert_eq!(new_workspace_integration.status, "ACTIVE");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn payment_setup_reference_resolves_inside_subscription_without_client_integration_id() {
+    let fixture = setup_usage(1, 1, 0).await;
+    let repository = &fixture.repository;
+    let connection = repository
+        .create_billing_connection(
+            fixture.workspace_id,
+            &CreateBillingConnectionRequest {
+                provider: "STRIPE".into(),
+                external_account_reference: "acct_setup_reference_test".into(),
+                secret_reference: "env://STRIPE_TEST_SECRET".into(),
+                webhook_secret_reference: "env://STRIPE_TEST_WEBHOOK".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        repository
+            .active_stripe_billing_connection(fixture.workspace_id)
+            .await
+            .unwrap(),
+        connection.billing_connection_id
+    );
+
+    let setup_reference = Uuid::new_v4();
+    repository
+        .record_payment_method_setup_session(
+            setup_reference,
+            fixture.workspace_id,
+            connection.billing_connection_id,
+            fixture.customer_plan_id,
+            "cs_test_provider_session",
+        )
+        .await
+        .unwrap();
+    let setup = repository
+        .find_payment_method_setup_session(
+            fixture.workspace_id,
+            fixture.customer_plan_id,
+            setup_reference,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        setup.billing_connection_id,
+        connection.billing_connection_id
+    );
+    assert_eq!(setup.provider_setup_id, "cs_test_provider_session");
+    assert!(repository
+        .find_payment_method_setup_session(fixture.workspace_id, Uuid::new_v4(), setup_reference,)
+        .await
+        .is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn payment_setup_requires_subscription_to_resolve_one_active_integration() {
+    let fixture = setup_usage(1, 1, 0).await;
+    for account in ["acct_setup_first", "acct_setup_second"] {
+        fixture
+            .repository
+            .create_billing_connection(
+                fixture.workspace_id,
+                &CreateBillingConnectionRequest {
+                    provider: "STRIPE".into(),
+                    external_account_reference: account.into(),
+                    secret_reference: "env://STRIPE_TEST_SECRET".into(),
+                    webhook_secret_reference: "env://STRIPE_TEST_WEBHOOK".into(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let error = fixture
+        .repository
+        .active_stripe_billing_connection(fixture.workspace_id)
+        .await
+        .expect_err("ambiguous integration must stay inside Subscription policy");
+    assert_eq!(error.code(), "billing_connection_ambiguous");
+}
+
 struct FakeStripeServer {
     address: std::net::SocketAddr,
     received: Arc<Mutex<String>>,

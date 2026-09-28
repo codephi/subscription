@@ -191,31 +191,13 @@ pub async fn create_payment_method_setup(
     user: &AuthenticatedUser,
 ) -> Result<Value, AppError> {
     let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
-    let integrations = state
-        .subscription
-        .get(&format!(
-            "/v1/admin/workspaces/{}/integrations",
-            user.workspace_id
-        ))
-        .await?;
-    let connection_id = integrations
-        .as_array()
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|item| item["provider"] == "STRIPE" && item["status"] == "ACTIVE")
-        })
-        .and_then(|item| item["billing_connection_id"].as_str())
-        .ok_or_else(|| {
-            AppError::Integration("não existe uma integração Stripe ativa para esta conta".into())
-        })?;
     let web_url = state.tasklab_web_url.trim_end_matches('/');
-    let success_url = format!("{web_url}/?payment_setup=complete&session_id={{CHECKOUT_SESSION_ID}}");
+    let success_url = format!("{web_url}/?payment_setup=complete");
     let cancel_url = format!("{web_url}/?payment_setup=cancelled");
     let session = state
         .subscription
         .post(
-            &format!("/v1/workspaces/{}/billing-connections/{connection_id}/payment-method-setup-sessions", user.workspace_id),
+            &format!("/v1/workspaces/{}/payment-method-setup-sessions", user.workspace_id),
             None,
             &json!({"customer_plan_id":customer_plan_id,"success_url":success_url,"cancel_url":cancel_url}),
         )
@@ -228,38 +210,15 @@ pub async fn create_payment_method_setup(
 pub async fn save_payment_method_binding(
     state: &AppState,
     user: &AuthenticatedUser,
-    checkout_session_id: String,
+    payment_method_setup_id: Uuid,
 ) -> Result<Value, AppError> {
-    if checkout_session_id.len() > 255 || !checkout_session_id.starts_with("cs_") {
-        return Err(AppError::Invalid(
-            "checkout_session_id deve ser uma referência cs_ válida".into(),
-        ));
-    }
     let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
-    let integration = state
-        .subscription
-        .get(&format!(
-            "/v1/admin/workspaces/{}/integrations",
-            user.workspace_id
-        ))
-        .await?;
-    let connection_id = integration
-        .as_array()
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|item| item["provider"] == "STRIPE" && item["status"] == "ACTIVE")
-        })
-        .and_then(|item| item["billing_connection_id"].as_str())
-        .ok_or_else(|| {
-            AppError::Integration("não existe uma integração Stripe ativa para esta conta".into())
-        })?;
     state
         .subscription
         .post(
             &format!("/v1/workspaces/{}/payment-method-bindings", user.workspace_id),
             None,
-            &json!({"billing_connection_id":connection_id,"customer_plan_id":customer_plan_id,"checkout_session_id":checkout_session_id}),
+            &json!({"customer_plan_id":customer_plan_id,"payment_method_setup_id":payment_method_setup_id}),
         )
         .await
 }

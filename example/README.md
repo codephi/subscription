@@ -1,6 +1,6 @@
 # TaskLab
 
-TaskLab é uma POC para testar uma aplicação cliente da Subscription. O checkout envia o plano, o tipo da compra, o pacote quando aplicável, a referência do cartão tokenizado, uma transação e uma chave de idempotência. A Subscription cria a sessão hospedada do Stripe Checkout e valida o retorno; TaskLab só redireciona o navegador e envia o ID da sessão.
+TaskLab é uma POC para testar uma aplicação cliente da Subscription. O checkout envia o plano, o tipo da compra, o pacote quando aplicável, a referência do cartão tokenizado, uma transação e uma chave de idempotência. A Subscription resolve a integração, cria uma sessão hospedada e valida o retorno; TaskLab só redireciona o navegador e envia uma referência opaca de setup.
 
 Veja a [documentação completa da integração com a Subscription](../docs/integracao-saas/tasklab.md) para os contratos remotos, provisionamento do workspace, catálogo, checkout, medição de uso e limites atuais.
 

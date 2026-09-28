@@ -155,19 +155,18 @@ e a adesão do cliente ao plano ainda exige API.
 ## 4. Salvar cartão e comprar créditos
 
 1. Seu backend chama a sessão de setup associada ao CustomerPlan. A Subscription
-   cria uma Checkout Session hospedada em modo `setup`; o frontend redireciona o
-   cliente à URL devolvida. PAN/CVV são enviados diretamente à Stripe.
-2. Após o retorno, envie o `checkout_session_id` à API. A Subscription consulta
-   a sessão e o SetupIntent na Stripe e valida sucesso, Customer esperado,
-   `usage=off_session` e PaymentMethod associado antes de persistir o vínculo.
-   O cliente não fornece o `pm_...` diretamente.
+   resolve a integração, cria uma sessão hospedada e devolve uma URL junto com
+   um identificador opaco. O frontend redireciona o cliente à URL.
+2. Após o retorno, envie `payment_method_setup_id` à API. A Subscription localiza
+   a sessão e valida sucesso, Customer esperado e PaymentMethod associado antes
+   de persistir o vínculo. O cliente não fornece referências do provedor.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/billing-connections/<CONNECTION_ID>/payment-method-setup-sessions
-{"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?session_id={CHECKOUT_SESSION_ID}","cancel_url":"https://app.example/return?payment_setup=cancelled"}
+POST /v1/workspaces/<WORKSPACE_ID>/payment-method-setup-sessions
+{"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?payment_setup=complete","cancel_url":"https://app.example/return?payment_setup=cancelled"}
 
 POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
-{"billing_connection_id":"<CONNECTION_ID>","customer_plan_id":"<CUSTOMER_PLAN_ID>","checkout_session_id":"cs_..."}
+{"customer_plan_id":"<CUSTOMER_PLAN_ID>","payment_method_setup_id":"<PAYMENT_METHOD_SETUP_ID>"}
 ```
 
 3. Quando o cliente escolher um pacote, gere uma intenção de compra única no

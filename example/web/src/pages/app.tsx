@@ -123,14 +123,14 @@ function restoreSession(setUser: (user: User | null) => void, setChecked: (check
 
 function recoverPaymentSetup(user: User | null, queryClient: ReturnType<typeof useQueryClient>, setBinding: (id: string) => void, setUser: (user: User) => void, setError: (message: string) => void) {
   const url = new URL(window.location.href)
-  const checkoutSessionId = url.searchParams.get("session_id")
-  if (!user || !checkoutSessionId?.startsWith("cs_")) return
-  url.searchParams.delete("session_id")
+  const paymentMethodSetupId = url.searchParams.get("payment_method_setup_id")
+  if (!user || !paymentMethodSetupId) return
+  url.searchParams.delete("payment_method_setup_id")
   url.searchParams.delete("payment_setup")
   window.history.replaceState({}, "", url)
   void api<{ payment_method_binding_id: string }>("/payment-method-bindings", {
     method: "POST",
-    body: JSON.stringify({ checkout_session_id: checkoutSessionId }),
+    body: JSON.stringify({ payment_method_setup_id: paymentMethodSetupId }),
   }).then((binding) => {
     setBinding(binding.payment_method_binding_id)
     setError("")

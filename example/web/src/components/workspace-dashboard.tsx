@@ -198,7 +198,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   return <Card>
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><Sparkles />Simular checkout</CardTitle>
-      <CardDescription>Escolha um cartão salvo ou adicione outro. O Stripe coleta os dados e a Subscription guarda somente a referência tokenizada.</CardDescription>
+      <CardDescription>Escolha um cartão salvo ou adicione outro. O provedor de pagamento coleta os dados e a Subscription guarda somente a referência tokenizada.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
       {prepaid && <Field>

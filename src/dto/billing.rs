@@ -95,9 +95,8 @@ pub struct BillingCapabilitiesResponse {
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreatePaymentMethodBindingRequest {
-    pub billing_connection_id: Uuid,
     pub customer_plan_id: Uuid,
-    pub checkout_session_id: String,
+    pub payment_method_setup_id: Uuid,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
@@ -111,6 +110,25 @@ pub struct PaymentMethodBindingResponse {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct CustomerPaymentMethodBindingResponse {
+    pub payment_method_binding_id: Uuid,
+    pub payment_method: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<PaymentMethodBindingResponse> for CustomerPaymentMethodBindingResponse {
+    fn from(binding: PaymentMethodBindingResponse) -> Self {
+        Self {
+            payment_method_binding_id: binding.payment_method_binding_id,
+            payment_method: binding.payment_method,
+            status: binding.status,
+            created_at: binding.created_at,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreatePaymentMethodSetupSessionRequest {
     pub customer_plan_id: Uuid,
@@ -120,7 +138,7 @@ pub struct CreatePaymentMethodSetupSessionRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct PaymentMethodSetupSessionResponse {
-    pub provider_setup_id: String,
+    pub payment_method_setup_id: Uuid,
     pub redirect_url: String,
 }
 

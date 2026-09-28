@@ -1224,6 +1224,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/payment-method-setup-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_workspace_payment_method_setup_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/products/{product_id}/eligibility": {
         parameters: {
             query?: never;
@@ -1664,10 +1680,9 @@ export interface components {
         };
         CreatePaymentMethodBindingRequest: {
             /** Format: uuid */
-            billing_connection_id: string;
-            checkout_session_id: string;
-            /** Format: uuid */
             customer_plan_id: string;
+            /** Format: uuid */
+            payment_method_setup_id: string;
         };
         CreatePaymentMethodSetupSessionRequest: {
             cancel_url: string;
@@ -1770,6 +1785,14 @@ export interface components {
         };
         /** @example 1250 */
         CreditUnits: string;
+        CustomerPaymentMethodBindingResponse: {
+            /** Format: date-time */
+            created_at: string;
+            payment_method: string;
+            /** Format: uuid */
+            payment_method_binding_id: string;
+            status: string;
+        };
         CustomerPlanCycleResponse: {
             /** Format: date-time */
             current_period_end?: string | null;
@@ -2051,22 +2074,9 @@ export interface components {
             /** Format: uuid */
             subscription_id: string;
         };
-        PaymentMethodBindingResponse: {
-            /** Format: uuid */
-            billing_connection_id: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: uuid */
-            customer_plan_id?: string | null;
-            payment_method: string;
-            /** Format: uuid */
-            payment_method_binding_id: string;
-            status: string;
-            /** Format: uuid */
-            workspace_id: string;
-        };
         PaymentMethodSetupSessionResponse: {
-            provider_setup_id: string;
+            /** Format: uuid */
+            payment_method_setup_id: string;
             redirect_url: string;
         };
         PendingUsageTransactionResponse: {
@@ -5394,7 +5404,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaymentMethodBindingResponse"][];
+                    "application/json": components["schemas"]["CustomerPaymentMethodBindingResponse"][];
                 };
             };
         };
@@ -5419,10 +5429,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaymentMethodBindingResponse"];
+                    "application/json": components["schemas"]["CustomerPaymentMethodBindingResponse"];
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_workspace_payment_method_setup_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePaymentMethodSetupSessionRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodSetupSessionResponse"];
+                };
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

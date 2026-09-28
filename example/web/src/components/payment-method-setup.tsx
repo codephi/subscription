@@ -16,7 +16,7 @@ export function PaymentMethodSetup() {
     setError("")
     try {
       const session = await api<SetupRedirect>("/payment-method-setup", { method: "POST", body: "{}" })
-      window.location.assign(secureStripeCheckoutUrl(session.redirect_url))
+      window.location.assign(securePaymentRedirectUrl(session.redirect_url))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível iniciar o cadastro do cartão.")
       setBusy(false)
@@ -35,10 +35,10 @@ export function PaymentMethodSetup() {
   </div>
 }
 
-function secureStripeCheckoutUrl(value: string): string {
+function securePaymentRedirectUrl(value: string): string {
   const url = new URL(value)
-  if (url.protocol !== "https:" || url.hostname !== "checkout.stripe.com") {
-    throw new Error(`Subscription returned checkout URL ${value}; expected an HTTPS Stripe Checkout URL`)
+  if (url.protocol !== "https:") {
+    throw new Error(`Subscription returned payment URL ${value}; expected an HTTPS URL`)
   }
   return url.href
 }

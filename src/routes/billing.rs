@@ -13,7 +13,7 @@ use crate::{
         BillingWebhookResponse, CollectionRequestResponse, CreateBillingConnectionRequest,
         CreateInitialCollectionRequest, CreateOnDemandPurchaseRequest,
         CreatePaymentMethodBindingRequest, CreatePaymentMethodSetupSessionRequest,
-        CreateRenewalRegularizationRequest, PaymentMethodBindingResponse,
+        CreateRenewalRegularizationRequest, CustomerPaymentMethodBindingResponse,
         PaymentMethodSetupSessionResponse, UnmatchedPaymentCaseResponse,
     },
     error::{ApiError, ApiResult, ErrorResponse},
@@ -28,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_billing_connection))
         .routes(routes!(get_billing_capabilities))
         .routes(routes!(create_payment_method_setup_session))
+        .routes(routes!(create_workspace_payment_method_setup_session))
         .routes(routes!(receive_shared_stripe_webhook))
         .routes(routes!(create_payment_method_binding))
         .routes(routes!(list_payment_method_bindings))
@@ -189,9 +190,31 @@ async fn create_payment_method_setup_session(
     Json(request): Json<CreatePaymentMethodSetupSessionRequest>,
 ) -> ApiResult<(StatusCode, Json<PaymentMethodSetupSessionResponse>)> {
     billing::get_billing_connection(&state.database(), workspace_id, connection_id).await?;
-    let response =
-        billing::create_payment_method_setup_session(&state.database(), connection_id, &request)
-            .await?;
+    let response = billing::create_payment_method_setup_session(
+        &state.database(),
+        workspace_id,
+        connection_id,
+        &request,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/payment-method-setup-sessions", tag = "Billing",
+    params(("workspace_id" = Uuid, Path)),
+    request_body = CreatePaymentMethodSetupSessionRequest,
+    responses((status = 201, body = PaymentMethodSetupSessionResponse), (status = 422, body = ErrorResponse)))]
+async fn create_workspace_payment_method_setup_session(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<Uuid>,
+    Json(request): Json<CreatePaymentMethodSetupSessionRequest>,
+) -> ApiResult<(StatusCode, Json<PaymentMethodSetupSessionResponse>)> {
+    let response = billing::create_workspace_payment_method_setup_session(
+        &state.database(),
+        workspace_id,
+        &request,
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
@@ -233,26 +256,25 @@ async fn get_billing_capabilities(
 
 #[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/payment-method-bindings", tag = "Billing",
     params(("workspace_id" = Uuid, Path)), request_body = CreatePaymentMethodBindingRequest,
-    responses((status = 201, body = PaymentMethodBindingResponse), (status = 409, body = ErrorResponse)))]
+    responses((status = 201, body = CustomerPaymentMethodBindingResponse), (status = 409, body = ErrorResponse)))]
 async fn create_payment_method_binding(
     State(state): State<AppState>,
     Path(workspace_id): Path<Uuid>,
     Json(request): Json<CreatePaymentMethodBindingRequest>,
-) -> ApiResult<(StatusCode, Json<PaymentMethodBindingResponse>)> {
+) -> ApiResult<(StatusCode, Json<CustomerPaymentMethodBindingResponse>)> {
     let response =
         billing::create_payment_method_binding(&state.database(), workspace_id, &request).await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((StatusCode::CREATED, Json(response.into())))
 }
 
 #[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/payment-method-bindings", tag = "Billing",
-    params(("workspace_id" = Uuid, Path)), responses((status = 200, body = [PaymentMethodBindingResponse])))]
+    params(("workspace_id" = Uuid, Path)), responses((status = 200, body = [CustomerPaymentMethodBindingResponse])))]
 async fn list_payment_method_bindings(
     State(state): State<AppState>,
     Path(workspace_id): Path<Uuid>,
-) -> ApiResult<Json<Vec<PaymentMethodBindingResponse>>> {
-    Ok(Json(
-        billing::list_payment_method_bindings(&state.database(), workspace_id).await?,
-    ))
+) -> ApiResult<Json<Vec<CustomerPaymentMethodBindingResponse>>> {
+    let bindings = billing::list_payment_method_bindings(&state.database(), workspace_id).await?;
+    Ok(Json(bindings.into_iter().map(Into::into).collect()))
 }
 
 #[utoipa::path(

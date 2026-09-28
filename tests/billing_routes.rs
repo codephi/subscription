@@ -68,6 +68,27 @@ async fn stripe_provider_is_advertised_without_database_access() {
 }
 
 #[tokio::test]
+async fn customer_payment_method_contract_hides_integration_identifiers() {
+    let router = test_router();
+    let response = router
+        .oneshot(Request::get("/openapi.json").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let document = response_json(response).await;
+    assert!(document["paths"]
+        .get("/v1/workspaces/{workspace_id}/payment-method-setup-sessions")
+        .is_some());
+    let binding = &document["components"]["schemas"]["CreatePaymentMethodBindingRequest"];
+    assert!(binding["properties"].get("payment_method_setup_id").is_some());
+    assert!(binding["properties"].get("billing_connection_id").is_none());
+    let response = &document["components"]["schemas"]["CustomerPaymentMethodBindingResponse"];
+    assert!(response["properties"].get("billing_connection_id").is_none());
+    assert!(response["properties"]
+        .get("provider_payment_method_reference")
+        .is_none());
+}
+
+#[tokio::test]
 async fn transparent_checkout_is_documented_and_disabled_without_sandbox_config() {
     let router = test_router();
     let workspace_id = Uuid::new_v4();

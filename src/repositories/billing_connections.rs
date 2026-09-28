@@ -24,7 +24,82 @@ pub struct BillingConnectorConfiguration {
     pub managed: bool,
 }
 
+pub struct RegisteredPaymentMethodSetup {
+    pub billing_connection_id: Uuid,
+    pub provider_setup_id: String,
+}
+
 impl DatabaseRepository {
+    pub async fn active_stripe_billing_connection(&self, workspace_id: Uuid) -> ApiResult<Uuid> {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT billing_connection_id FROM billing_connections \
+             WHERE workspace_id=$1 AND provider='STRIPE' AND status='ACTIVE' \
+             ORDER BY created_at,billing_connection_id LIMIT 2",
+        )
+        .bind(workspace_id)
+        .fetch_all(&self.pool())
+        .await?;
+        match ids.as_slice() {
+            [connection_id] => Ok(*connection_id),
+            [] => Err(ApiError::conflict(
+                "billing_connection_not_usable",
+                format!("workspace {workspace_id} has no ACTIVE payment integration"),
+            )),
+            _ => Err(ApiError::conflict(
+                "billing_connection_ambiguous",
+                format!("workspace {workspace_id} has multiple ACTIVE payment integrations"),
+            )),
+        }
+    }
+
+    pub async fn record_payment_method_setup_session(
+        &self,
+        payment_method_setup_id: Uuid,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        customer_plan_id: Uuid,
+        provider_setup_id: &str,
+    ) -> ApiResult<()> {
+        sqlx::query(
+            "INSERT INTO payment_method_setup_sessions \
+             (payment_method_setup_id,provider_setup_id,billing_connection_id,workspace_id,customer_plan_id) \
+             VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(payment_method_setup_id)
+        .bind(provider_setup_id)
+        .bind(connection_id)
+        .bind(workspace_id)
+        .bind(customer_plan_id)
+        .execute(&self.pool())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn find_payment_method_setup_session(
+        &self,
+        workspace_id: Uuid,
+        customer_plan_id: Uuid,
+        payment_method_setup_id: Uuid,
+    ) -> ApiResult<RegisteredPaymentMethodSetup> {
+        let row = sqlx::query(
+            "SELECT billing_connection_id,provider_setup_id FROM payment_method_setup_sessions \
+             WHERE workspace_id=$1 AND customer_plan_id=$2 AND payment_method_setup_id=$3",
+        )
+        .bind(workspace_id)
+        .bind(customer_plan_id)
+        .bind(payment_method_setup_id)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| ApiError::not_found(
+            "payment_method_setup_session_not_found",
+            format!("payment method setup {payment_method_setup_id} is not registered to customer plan {customer_plan_id}"),
+        ))?;
+        Ok(RegisteredPaymentMethodSetup {
+            billing_connection_id: row.get("billing_connection_id"),
+            provider_setup_id: row.get("provider_setup_id"),
+        })
+    }
+
     pub async fn find_payment_method_binding_by_id(
         &self,
         workspace_id: Uuid,
