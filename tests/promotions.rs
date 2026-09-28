@@ -5,6 +5,7 @@ mod support;
 use chrono::{Duration, Utc};
 use credit_fixture::CreditFixture;
 use subscription::dto::{
+    billing::{CreateBillingConnectionRequest, CreatePaymentMethodBindingRequest},
     catalog::{
         CatalogStatus, CreateItemRequest, CreatePriceVersionRequest, CreateProductRequest,
         PricingModel, UpdateItemRequest, UpdateProductRequest, UsageModel,
@@ -21,7 +22,7 @@ use subscription::dto::{
 use subscription::{
     dto::promotions::{CreateCouponRequest, CreateVoucherRequest, RedeemVoucherRequest},
     repositories::database::DatabaseRepository,
-    services::{billing_checkout, catalog, credits, plans, promotions, workspace_events},
+    services::{billing, billing_checkout, catalog, credits, plans, promotions, workspace_events},
 };
 use uuid::Uuid;
 
@@ -216,6 +217,131 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
     drop(router);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it() {
+    let (_router, pool) = support::setup_router_with_options(false, None).await;
+    let repository = DatabaseRepository::new(pool.clone());
+    let product_id = create_active_product(&repository).await;
+    let workspace_id = Uuid::new_v4();
+    activate_workspace(&repository, workspace_id).await;
+    credits::update_billing_config(
+        &repository,
+        workspace_id,
+        UpdateWorkspaceBillingConfigRequest {
+            direct_credit_enabled: false,
+            recurring_credit_enabled: true,
+            expected_version: 1,
+        },
+    )
+    .await
+    .expect("enable recurring cycle grants");
+    let plan = create_paid_plan(&repository, product_id).await;
+    let customer_plan = plans::create_customer_plan(
+        &repository,
+        workspace_id,
+        "paid-coupon-admission",
+        CreateCustomerPlanRequest {
+            plan_version_id: plan,
+            transaction_id: "paid-coupon-plan".into(),
+        },
+    )
+    .await
+    .expect("initial customer plan");
+    let connection = billing::create_billing_connection(
+        &repository,
+        workspace_id,
+        &CreateBillingConnectionRequest {
+            provider: "STRIPE".into(),
+            external_account_reference: "cus_coupon_test".into(),
+            secret_reference: "env://STRIPE_SECRET_KEY".into(),
+            webhook_secret_reference: "env://STRIPE_WEBHOOK_SECRET".into(),
+        },
+    )
+    .await
+    .expect("billing connection");
+    let binding = billing::create_payment_method_binding(
+        &repository,
+        workspace_id,
+        &CreatePaymentMethodBindingRequest {
+            billing_connection_id: connection.billing_connection_id,
+            customer_plan_id: Some(customer_plan.customer_plan_id),
+            provider_payment_method_reference: "pm_coupon_test".into(),
+        },
+    )
+    .await
+    .expect("payment binding");
+    let coupon = promotions::create_coupon(
+        &repository,
+        CreateCouponRequest {
+            code: "HALFOFF".into(),
+            name: "Half off".into(),
+            description: None,
+            discount_kind: "PERCENTAGE".into(),
+            discount_value: 5_000,
+            currency: None,
+            applies_to_initial: true,
+            applies_to_on_demand: false,
+            valid_from: None,
+            valid_until: None,
+            max_total_uses: Some(1),
+            max_uses_per_workspace: Some(1),
+        },
+    )
+    .await
+    .expect("half off coupon");
+    let checkout = billing_checkout::create(
+        &repository,
+        None,
+        workspace_id,
+        "paid-coupon-checkout-key",
+        CreateCheckoutRequest {
+            customer_plan_id: customer_plan.customer_plan_id,
+            checkout_kind: CheckoutKind::Initial,
+            on_demand_plan_id: None,
+            transaction_id: "paid-coupon-checkout-tx".into(),
+            coupon_code: Some("HALFOFF".into()),
+            payment_method_binding_id: Some(binding.payment_method_binding_id),
+        },
+    )
+    .await
+    .expect("paid coupon checkout");
+    assert!(checkout.payment_required);
+    assert_eq!(checkout.base_amount_minor, Some(2_500));
+    assert_eq!(checkout.discount_amount_minor, 1_250);
+    assert_eq!(checkout.amount_minor, Some(1_250));
+    let collection_id = checkout.collection_request_id.expect("collection request");
+    let snapshot: (i64, i64, i64) = sqlx::query_as(
+        "SELECT amount_minor,base_amount_minor,discount_amount_minor FROM collection_requests WHERE collection_request_id=$1",
+    )
+    .bind(collection_id)
+    .fetch_one(&pool)
+    .await
+    .expect("immutable discount snapshot");
+    assert_eq!(snapshot, (1_250, 2_500, 1_250));
+    let reserved: (i64, i64) = sqlx::query_as(
+        "SELECT reserved_uses,completed_uses FROM promotion_usage_counters WHERE promotion_kind='COUPON' AND promotion_id=$1 AND workspace_id=$2",
+    )
+    .bind(coupon.promotion_id)
+    .bind(workspace_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved coupon use");
+    assert_eq!(reserved, (1, 0));
+    sqlx::query("UPDATE collection_requests SET status='EXHAUSTED',terminal_reason='test_terminal_failure' WHERE collection_request_id=$1")
+        .bind(collection_id)
+        .execute(&pool)
+        .await
+        .expect("terminal failure");
+    let released: (String, i64, i64) = sqlx::query_as(
+        "SELECT r.status,c.reserved_uses,c.completed_uses FROM coupon_checkout_reservations r JOIN promotion_usage_counters c ON c.promotion_kind='COUPON' AND c.promotion_id=r.coupon_id AND c.workspace_id=r.workspace_id WHERE r.checkout_id=$1",
+    )
+    .bind(checkout.checkout_id)
+    .fetch_one(&pool)
+    .await
+    .expect("released coupon use");
+    assert_eq!(released, ("RELEASED".into(), 0, 0));
+}
+
 fn redemption(voucher_id: uuid::Uuid, transaction_id: &str) -> RedeemVoucherRequest {
     RedeemVoucherRequest {
         voucher_id: Some(voucher_id),
@@ -294,4 +420,50 @@ async fn create_active_product(repository: &DatabaseRepository) -> Uuid {
     .await
     .expect("activate product");
     product.product_id
+}
+
+async fn activate_workspace(repository: &DatabaseRepository, workspace_id: Uuid) {
+    for (event, sequence) in [("workspace.created", 1), ("workspace.activated", 2)] {
+        let envelope: WorkspaceEventEnvelope = serde_json::from_value(serde_json::json!({
+            "event_id": Uuid::new_v4(), "event_type": event, "schema_version": 1,
+            "aggregate_id": workspace_id, "workspace_id": workspace_id, "sequence": sequence,
+            "occurred_at": Utc::now(), "correlation_id": Uuid::new_v4(),
+            "payload": {"workspace_id": workspace_id}
+        }))
+        .unwrap();
+        workspace_events::process_workspace_event(repository, envelope)
+            .await
+            .unwrap();
+    }
+}
+
+async fn create_paid_plan(repository: &DatabaseRepository, product_id: Uuid) -> Uuid {
+    let subscription = plans::create_subscription(
+        repository,
+        CreateSubscriptionRequest {
+            name: "Paid coupon checkout".into(),
+            subscription_model: SubscriptionModel::CreditStrict,
+        },
+    )
+    .await
+    .expect("subscription");
+    plans::create_plan(
+        repository,
+        subscription.subscription_id,
+        CreateSubscriptionPlanRequest {
+            admission_policy_version_id: None,
+            name: "Monthly membership".into(),
+            commercial_model: CommercialModel::Paid,
+            price_amount_minor: Some(2_500),
+            currency: Some("USD".into()),
+            recurrence: PlanRecurrence::Monthly,
+            admission_policy: AdmissionPolicy::Open,
+            accepted_payment_methods: vec!["CARD".into()],
+            granted_credit_units: CreditUnits::new(120),
+            product_ids: vec![product_id],
+        },
+    )
+    .await
+    .expect("paid plan")
+    .plan_version_id
 }

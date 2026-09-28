@@ -350,9 +350,12 @@ Entregas:
 Voucher e Coupon têm implementação parcial na API e no admin-ui, incluindo
 cadastro, edição de limites/validade/estado, histórico, resgate de voucher,
 cotação, checkout pago com reserva e checkout integralmente descontado. O
-recorte ainda depende da validação completa dos fluxos concorrentes e da suíte
-Playwright para ser registrado como concluído. Compensation e autorização
-administrativa externa permanecem pendentes; por isso, a Fase 9 continua aberta.
+recorte tem testes de concorrência de resgate, cotação/checkout gratuito,
+reserva e liberação após falha terminal, além de cadastro no navegador. Ainda
+falta cobrir confirmação paga por webhook e a recuperação completa desse fluxo
+no navegador antes de registrar o recorte como concluído. Compensation e
+autorização administrativa externa permanecem pendentes; por isso, a Fase 9
+continua aberta.
 
 **Critério de saída:** vale, cupom ou Compensation nunca gera crédito duplicado,
 inclusive sob concorrência, reentrega e mudança do estado do workspace.

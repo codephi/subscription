@@ -63,6 +63,7 @@ concessões internas por ciclo foram concluídas na fase 5. A fase 6 segue abert
 | PH-08 | fases §8 | Stripe duplicado, atrasado ou fora de ordem não duplica efeito | `stripe_webhooks_converge_without_duplicate_effects`, `stripe_payment_intent_uses_stable_idempotency_and_domain_metadata` | contrato | 8 | passing |
 | PH-09-V | fases §9 | Resgates concorrentes de voucher respeitam limites por workspace e lançam créditos uma vez | `simultaneous_redemptions_respect_the_workspace_limit_and_credit_once` | concorrência | 9 | passing |
 | PH-09-C | fases §9 | Desconto integral conclui checkout inicial sem cobrança e sem concessão duplicada | `full_discount_completes_initial_checkout_without_a_payment_request` | integração | 9 | passing |
+| PH-09-CR | fases §9 | Checkout com desconto persiste snapshots, reserva capacidade e libera uso após falha terminal | `paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it` | recuperação | 9 | passing |
 | PH-09 | fases §9 | Voucher, cupom e Compensation nunca duplicam efeitos; Compensation é pendente | `promotion_and_compensation_effects_are_unique` | concorrência | 9 | not_implemented |
 | PH-10 | fases §10 | Restore, replay e reconciliação convergem sem editar histórico | `reconciliation_recovers_without_history_mutation` | recuperação | 10 | not_implemented |
 
