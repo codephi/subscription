@@ -12,6 +12,9 @@ vi.mock("@/api/client", () => ({
   createWorkspace: vi.fn().mockResolvedValue({
     workspace_id: "00000000-0000-4000-8000-000000000002",
   }),
+  terminateWorkspace: vi.fn().mockResolvedValue({
+    workspace_status: "TERMINATED",
+  }),
   listWorkspaces: vi.fn().mockResolvedValue({
     items: [
       {
@@ -74,5 +77,28 @@ it("creates a workspace and opens its detail page", async () => {
     expect(
       screen.getByText("/workspaces/00000000-0000-4000-8000-000000000002"),
     ).toBeTruthy();
+  });
+});
+
+it("requires confirmation before terminating a workspace", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <WorkspaceListPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  fireEvent.click((await screen.findAllByRole("button", { name: "Apagar" }))[0]);
+  expect(
+    await screen.findByText(/Planos, cobranças, carteiras e auditoria/),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Encerrar workspace" }));
+  await waitFor(async () => {
+    const api = await import("@/api/client");
+    expect(api.terminateWorkspace).toHaveBeenCalledWith(workspaceId);
   });
 });

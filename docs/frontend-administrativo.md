@@ -10,7 +10,7 @@ uma interface pública para clientes.
 | Rota                                             | Página                    | O que oferece                                                                                |
 | ------------------------------------------------ | ------------------------- | -------------------------------------------------------------------------------------------- |
 | `/`                                              | Visão geral               | Indicadores de operação de Billing e atalhos para investigar cada fila.                      |
-| `/workspaces`                                    | Workspaces                | Criação, lista paginada, busca direta por UUID e acesso aos detalhes.                         |
+| `/workspaces`                                    | Workspaces                | Criação, lista paginada, busca direta por UUID, acesso aos detalhes e encerramento.           |
 | `/workspaces/:workspaceId`                       | Detalhe do workspace      | Estado operacional, provisionamento, carteira, planos, extrato e consumo.                    |
 | `/workspaces/:workspaceId/integrations`          | Integrações do workspace  | Configuração de provedores de Billing; Stripe na primeira versão.                            |
 | `/workspaces/:workspaceId/actions`               | Ações do workspace        | Configuração de Billing, crédito direto e reconciliações.                                    |
@@ -55,6 +55,13 @@ O campo de busca aceita um UUID completo; após validar o formato, consulta o
 detalhe e abre o workspace. Nomes e identidades de usuários não são exibidos,
 pois esses dados pertencem ao Accounts e não fazem parte da projeção do
 Subscription.
+
+A ação “Apagar” encerra o workspace via
+`POST /v1/admin/workspaces/{workspace_id}/terminate`: o estado passa a
+`TERMINATED`, operações futuras deixam de ser aceitas e o evento fica registrado
+na inbox, outbox e auditoria. A confirmação informa que planos, cobranças,
+carteiras e histórico são preservados; exclusão física não é oferecida porque
+esses registros possuem referências restritivas ao workspace.
 
 O detalhe reúne consultas independentes para mostrar:
 

@@ -17,6 +17,33 @@ struct WorkspaceProjection {
 }
 
 impl DatabaseRepository {
+    /// Terminate a workspace administratively while preserving its event history.
+    pub async fn terminate_workspace(
+        &self,
+        workspace_id: Uuid,
+    ) -> ApiResult<WorkspaceEventResponse> {
+        let mut transaction = self.pool().begin().await?;
+        let current = lock_projection(&mut transaction, workspace_id)
+            .await?
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "workspace_not_found",
+                    format!("workspace {workspace_id} does not exist"),
+                )
+            })?;
+        if current.status == "TERMINATED" {
+            return Err(ApiError::conflict(
+                "workspace_already_terminated",
+                format!("workspace {workspace_id} is already TERMINATED"),
+            ));
+        }
+        let event = termination_event(workspace_id, current.sequence + 1);
+        insert_inbox(&mut transaction, &event).await?;
+        let response = apply_to_existing(&mut transaction, &event, current).await?;
+        transaction.commit().await?;
+        Ok(response)
+    }
+
     pub async fn apply_workspace_event(
         &self,
         event: &WorkspaceEventEnvelope,
@@ -41,6 +68,22 @@ impl DatabaseRepository {
         let response = replay_quarantined(&mut transaction, &event, projection).await?;
         transaction.commit().await?;
         Ok(response)
+    }
+}
+
+fn termination_event(workspace_id: Uuid, sequence: i64) -> WorkspaceEventEnvelope {
+    let event_id = Uuid::new_v4();
+    WorkspaceEventEnvelope {
+        event_id,
+        event_type: WorkspaceEventType::Terminated,
+        schema_version: 1,
+        aggregate_id: workspace_id,
+        sequence,
+        occurred_at: chrono::Utc::now(),
+        workspace_id,
+        correlation_id: Uuid::new_v4(),
+        causation_id: None,
+        payload: crate::dto::events::WorkspaceEventPayload { workspace_id },
     }
 }
 

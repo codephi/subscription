@@ -5,6 +5,7 @@ use crate::{
         AdminPageQuery, CreateWorkspaceRequest, CustomerPlanPageResponse, WorkspacePageResponse,
         WorkspaceProjectionResponse,
     },
+    dto::events::WorkspaceEventResponse,
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
 };
@@ -51,6 +52,14 @@ pub async fn get_workspace(
     id: Uuid,
 ) -> ApiResult<WorkspaceProjectionResponse> {
     repository.find_workspace_projection(id).await
+}
+
+/// Terminate a workspace from administration; e.g. `terminate_workspace(repo, id).await`.
+pub async fn terminate_workspace(
+    repository: &DatabaseRepository,
+    id: Uuid,
+) -> ApiResult<WorkspaceEventResponse> {
+    repository.terminate_workspace(id).await
 }
 
 /// List a workspace's customer plans; e.g. `list_customer_plans(&repo, id, query).await`.

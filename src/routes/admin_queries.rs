@@ -11,6 +11,7 @@ use crate::{
         AdminPageQuery, CreateWorkspaceRequest, CustomerPlanPageResponse, WorkspacePageResponse,
         WorkspaceProjectionResponse,
     },
+    dto::events::WorkspaceEventResponse,
     error::{ApiResult, ErrorResponse},
     services::admin_queries,
     state::AppState,
@@ -21,6 +22,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_workspace))
         .routes(routes!(list_workspaces))
         .routes(routes!(get_workspace))
+        .routes(routes!(terminate_workspace))
         .routes(routes!(list_customer_plans))
 }
 
@@ -53,6 +55,18 @@ async fn get_workspace(
 ) -> ApiResult<Json<WorkspaceProjectionResponse>> {
     Ok(Json(
         admin_queries::get_workspace(&state.database(), id).await?,
+    ))
+}
+
+#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/terminate", tag = "Operations",
+    params(("workspace_id" = Uuid, Path)),
+    responses((status = 200, body = WorkspaceEventResponse), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse)))]
+async fn terminate_workspace(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Json<WorkspaceEventResponse>> {
+    Ok(Json(
+        admin_queries::terminate_workspace(&state.database(), id).await?,
     ))
 }
 

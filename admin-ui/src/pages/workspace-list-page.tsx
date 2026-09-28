@@ -1,8 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createWorkspace, getWorkspace, listWorkspaces } from "@/api/client";
+import {
+  createWorkspace,
+  getWorkspace,
+  listWorkspaces,
+  terminateWorkspace,
+} from "@/api/client";
 import { CursorPager } from "@/components/cursor-pager";
 import {
   QueryEmpty,
@@ -11,6 +16,17 @@ import {
 } from "@/components/query-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Card,
   CardContent,
@@ -43,6 +59,12 @@ export function WorkspaceListPage() {
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const [lookupId, setLookupId] = useState<string>();
   const [actorReference, setActorReference] = useState("");
+  const termination = useMutation({
+    mutationFn: (workspaceId: string) => terminateWorkspace(workspaceId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+  });
   const creation = useMutation({
     mutationFn: () => createWorkspace(actorReference.trim()),
     onSuccess: async (workspace) => {
@@ -194,6 +216,7 @@ export function WorkspaceListPage() {
                     <TableHead>Estado</TableHead>
                     <TableHead>Sequência</TableHead>
                     <TableHead>Atualizado</TableHead>
+                    <TableHead>Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -214,6 +237,43 @@ export function WorkspaceListPage() {
                       </TableCell>
                       <TableCell>{workspace.external_sequence}</TableCell>
                       <TableCell>{formatDate(workspace.updated_at)}</TableCell>
+                      <TableCell>
+                        <AlertDialog>
+                          <AlertDialogTrigger
+                            render={<Button variant="outline" size="sm" />}
+                            disabled={
+                              workspace.operational_status === "TERMINATED" ||
+                              termination.isPending
+                            }
+                          >
+                            <Trash2 data-icon="inline-start" />
+                            Apagar
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>
+                                Apagar este workspace?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                O workspace será encerrado e deixará de aceitar
+                                operações. Planos, cobranças, carteiras e
+                                auditoria serão preservados. Esta ação não pode
+                                ser desfeita.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Voltar</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() =>
+                                  termination.mutate(workspace.workspace_id)
+                                }
+                              >
+                                Encerrar workspace
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -232,6 +292,7 @@ export function WorkspaceListPage() {
               setCursor(page.data?.next_cursor ?? undefined);
             }}
           />
+          {termination.error && <QueryError error={termination.error} />}
         </CardContent>
       </Card>
     </div>

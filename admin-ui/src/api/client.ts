@@ -90,6 +90,15 @@ export async function createWorkspace(actorReference: string) {
   );
 }
 
+/** Terminate a workspace while preserving its billing and audit history. */
+export async function terminateWorkspace(workspaceId: string) {
+  return unwrapResponse(
+    await api.POST("/v1/admin/workspaces/{workspace_id}/terminate", {
+      params: { path: { workspace_id: workspaceId } },
+    }),
+  );
+}
+
 /** Page customer plans; e.g. `listCustomerPlans(id)` for the workspace panel. */
 export async function listCustomerPlans(workspaceId: string, cursor?: string) {
   return unwrapResponse(

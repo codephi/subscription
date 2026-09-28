@@ -72,12 +72,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/billing/stripe-defaults": {
-        parameters: { query?: never; header?: never; path?: never; cookie?: never; };
-        get: operations["get_default_stripe_credentials"];
-        put: operations["update_default_stripe_credentials"];
-        post?: never; delete?: never; options?: never; head?: never; patch?: never; trace?: never;
-    };
     "/v1/admin/billing/records/{kind}": {
         parameters: {
             query?: never;
@@ -103,6 +97,22 @@ export interface paths {
         };
         get: operations["get_record"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/billing/stripe-defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_default_stripe_credentials"];
+        put: operations["update_default_stripe_credentials"];
         post?: never;
         delete?: never;
         options?: never;
@@ -366,6 +376,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/workspaces/{workspace_id}/terminate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["terminate_workspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile": {
         parameters: {
             query?: never;
@@ -408,6 +434,22 @@ export interface paths {
         get: operations["get_policy"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/webhooks/stripe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["receive_shared_stripe_webhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -776,6 +818,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["create_payment_method_setup_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/checkouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["create_checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/checkouts/{checkout_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_checkout"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1291,6 +1365,26 @@ export interface components {
         };
         /** @enum {string} */
         CatalogStatus: "ACTIVE" | "INACTIVE" | "ARCHIVED";
+        /** @enum {string} */
+        CheckoutKind: "INITIAL" | "ON_DEMAND";
+        CheckoutResponse: {
+            /** Format: int64 */
+            amount_minor?: number | null;
+            /** Format: uuid */
+            checkout_id: string;
+            checkout_kind: components["schemas"]["CheckoutKind"];
+            /** Format: uuid */
+            collection_request_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            currency?: string | null;
+            /** Format: uuid */
+            customer_plan_id: string;
+            /** Format: int64 */
+            granted_credit_units?: number | null;
+            status: string;
+            transaction_id: string;
+        };
         CollectionRequestResponse: {
             /** Format: int64 */
             amount_minor: number;
@@ -1326,6 +1420,14 @@ export interface components {
             provider: string;
             secret_reference: string;
             webhook_secret_reference: string;
+        };
+        CreateCheckoutRequest: {
+            checkout_kind: components["schemas"]["CheckoutKind"];
+            /** Format: uuid */
+            customer_plan_id: string;
+            /** Format: uuid */
+            on_demand_plan_id?: string | null;
+            transaction_id: string;
         };
         CreateCustomerPlanRequest: {
             /** Format: uuid */
@@ -1531,6 +1633,15 @@ export interface components {
         CustomerWalletStatementResponse: {
             items: components["schemas"]["CustomerWalletEntryResponse"][];
             next_cursor?: string | null;
+        };
+        DefaultStripeCredentialsResponse: {
+            account_reference?: string | null;
+            api_secret_configured: boolean;
+            /** Format: int32 */
+            configuration_version: number;
+            configured: boolean;
+            environment?: string | null;
+            webhook_secret_configured: boolean;
         };
         DirectCreditRequest: {
             credit_units: components["schemas"]["CreditUnits"];
@@ -1928,6 +2039,12 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        UpdateDefaultStripeCredentialsRequest: {
+            /** Format: int32 */
+            expected_version: number;
+            secret_key?: string | null;
+            webhook_secret?: string | null;
+        };
         UpdateItemRequest: {
             /** Format: int64 */
             expected_version: number;
@@ -1942,21 +2059,6 @@ export interface components {
             status?: null | components["schemas"]["CatalogStatus"];
         };
         UpdateStripeIntegrationRequest: {
-            /** Format: int32 */
-            expected_version: number;
-            secret_key?: string | null;
-            webhook_secret?: string | null;
-        };
-        DefaultStripeCredentialsResponse: {
-            configured: boolean;
-            environment?: string | null;
-            account_reference?: string | null;
-            api_secret_configured: boolean;
-            webhook_secret_configured: boolean;
-            /** Format: int32 */
-            configuration_version: number;
-        };
-        UpdateDefaultStripeCredentialsRequest: {
             /** Format: int32 */
             expected_version: number;
             secret_key?: string | null;
@@ -2374,20 +2476,6 @@ export interface operations {
             };
         };
     };
-    get_default_stripe_credentials: {
-        parameters: { query?: never; header?: never; path?: never; cookie?: never; };
-        requestBody?: never;
-        responses: { 200: { headers: { [name: string]: unknown; }; content: { "application/json": components["schemas"]["DefaultStripeCredentialsResponse"]; }; }; };
-    };
-    update_default_stripe_credentials: {
-        parameters: { query?: never; header?: never; path?: never; cookie?: never; };
-        requestBody: { content: { "application/json": components["schemas"]["UpdateDefaultStripeCredentialsRequest"]; }; };
-        responses: {
-            200: { headers: { [name: string]: unknown; }; content: { "application/json": components["schemas"]["DefaultStripeCredentialsResponse"]; }; };
-            409: { headers: { [name: string]: unknown; }; content: { "application/json": components["schemas"]["ErrorResponse"]; }; };
-            422: { headers: { [name: string]: unknown; }; content: { "application/json": components["schemas"]["ErrorResponse"]; }; };
-        };
-    };
     list_records: {
         parameters: {
             query?: {
@@ -2446,6 +2534,64 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_default_stripe_credentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefaultStripeCredentialsResponse"];
+                };
+            };
+        };
+    };
+    update_default_stripe_credentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDefaultStripeCredentialsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DefaultStripeCredentialsResponse"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3014,6 +3160,43 @@ export interface operations {
             };
         };
     };
+    terminate_workspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceEventResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     reconcile_wallet_provisioning: {
         parameters: {
             query?: never;
@@ -3122,6 +3305,45 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    receive_shared_stripe_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": string;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingWebhookResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3927,6 +4149,87 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_checkout: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCheckoutRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutResponse"];
+                };
+            };
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutResponse"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_checkout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                checkout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutResponse"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

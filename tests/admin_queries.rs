@@ -116,6 +116,54 @@ async fn admin_workspace_creation_records_projection_event_and_actor_atomically(
     assert_eq!(outbox_type, "workspace.projection_updated");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn admin_can_terminate_workspace_without_removing_its_history() {
+    let (router, pool) = support::setup_router_with_options(false, None).await;
+    let workspace_id = Uuid::from_u128(3);
+    insert_workspace(&pool, workspace_id).await;
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::post(format!("/v1/admin/workspaces/{workspace_id}/terminate"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let result = support::response_json(response).await;
+    assert_eq!(result["workspace_status"], "TERMINATED");
+    assert_eq!(result["external_sequence"], 3);
+
+    let history_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM integration_inbox WHERE workspace_id=$1 AND event_type='workspace.terminated' AND processing_status='PROCESSED'",
+    )
+    .bind(workspace_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history_count, 1);
+    let status: String = sqlx::query_scalar(
+        "SELECT operational_status FROM workspace_projections WHERE workspace_id=$1",
+    )
+    .bind(workspace_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "TERMINATED");
+
+    let repeated = router
+        .oneshot(
+            Request::post(format!("/v1/admin/workspaces/{workspace_id}/terminate"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(repeated.status(), StatusCode::CONFLICT);
+}
+
 async fn insert_workspace(pool: &sqlx::PgPool, id: Uuid) {
     sqlx::query("INSERT INTO workspace_projections (workspace_id,operational_status,external_sequence,external_occurred_at,last_event_id) VALUES ($1,'ACTIVE',2,now(),$2)")
         .bind(id).bind(Uuid::new_v4()).execute(pool).await.unwrap();

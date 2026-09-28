@@ -116,6 +116,9 @@ mod tests {
             .contains_key("/v1/admin/workspaces/{workspace_id}"));
         assert!(paths
             .paths
+            .contains_key("/v1/admin/workspaces/{workspace_id}/terminate"));
+        assert!(paths
+            .paths
             .contains_key("/v1/admin/workspaces/{workspace_id}/customer-plans"));
         assert!(paths
             .paths
