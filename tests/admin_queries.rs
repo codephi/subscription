@@ -4,6 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use serde_json::json;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -68,6 +69,51 @@ async fn admin_workspace_and_plan_reads_page_without_cross_workspace_data() {
         get_status(&router, &format!("/v1/admin/workspaces/{}", Uuid::new_v4())).await,
         StatusCode::NOT_FOUND
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn admin_workspace_creation_records_projection_event_and_actor_atomically() {
+    let (router, pool) = support::setup_router_with_options(false, None).await;
+    let response = router
+        .oneshot(
+            Request::post("/v1/admin/workspaces")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"actor_reference":"ops@example.com"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = support::response_json(response).await;
+    let workspace_id = created["workspace_id"].as_str().unwrap();
+    assert_eq!(created["operational_status"], "CREATED");
+    assert_eq!(created["external_sequence"], 1);
+    let audit_actor: String = sqlx::query_scalar(
+        "SELECT actor_reference FROM audit_events WHERE workspace_id=$1 AND action='workspace.admin_created'",
+    )
+    .bind(Uuid::parse_str(workspace_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_actor, "ops@example.com");
+    let inbox_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM integration_inbox WHERE workspace_id=$1 AND processing_status='PROCESSED'",
+    )
+    .bind(Uuid::parse_str(workspace_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(inbox_count, 1);
+    let outbox_type: String = sqlx::query_scalar(
+        "SELECT payload->>'event_type' FROM outbox_events WHERE workspace_id=$1",
+    )
+    .bind(Uuid::parse_str(workspace_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(outbox_type, "workspace.projection_updated");
 }
 
 async fn insert_workspace(pool: &sqlx::PgPool, id: Uuid) {

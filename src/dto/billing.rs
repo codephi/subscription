@@ -54,6 +54,23 @@ pub struct StripeIntegrationTestResponse {
     pub environment: String,
 }
 
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct UpdateDefaultStripeCredentialsRequest {
+    pub expected_version: i32,
+    pub secret_key: Option<String>,
+    pub webhook_secret: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct DefaultStripeCredentialsResponse {
+    pub configured: bool,
+    pub environment: Option<String>,
+    pub account_reference: Option<String>,
+    pub api_secret_configured: bool,
+    pub webhook_secret_configured: bool,
+    pub configuration_version: i32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct BillingConnectionResponse {
     pub billing_connection_id: Uuid,

@@ -20,6 +20,11 @@ pub struct WorkspaceProjectionResponse {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreateWorkspaceRequest {
+    pub actor_reference: String,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WorkspacePageResponse {
     pub items: Vec<WorkspaceProjectionResponse>,

@@ -1,5 +1,5 @@
 use crate::{
-    dto::events::{WorkspaceEventEnvelope, WorkspaceEventResponse},
+    dto::events::{WorkspaceEventEnvelope, WorkspaceEventResponse, WorkspaceEventType},
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
 };
@@ -9,7 +9,15 @@ pub async fn process_workspace_event(
     event: WorkspaceEventEnvelope,
 ) -> ApiResult<WorkspaceEventResponse> {
     validate_event(&event)?;
-    repository.apply_workspace_event(&event).await
+    let response = repository.apply_workspace_event(&event).await?;
+    if matches!(event.event_type, WorkspaceEventType::Created) {
+        crate::services::billing_integrations::provision_workspace_defaults(
+            repository,
+            event.workspace_id,
+        )
+        .await?;
+    }
+    Ok(response)
 }
 
 fn validate_event(event: &WorkspaceEventEnvelope) -> ApiResult<()> {

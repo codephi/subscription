@@ -8,8 +8,10 @@ use uuid::Uuid;
 
 use crate::{
     dto::billing::{
-        CreateStripeIntegrationRequest, IntegrationProviderResponse, StripeIntegrationTestResponse,
-        UpdateStripeIntegrationRequest, WorkspaceIntegrationResponse,
+        CreateStripeIntegrationRequest, DefaultStripeCredentialsResponse,
+        IntegrationProviderResponse, StripeIntegrationTestResponse,
+        UpdateDefaultStripeCredentialsRequest, UpdateStripeIntegrationRequest,
+        WorkspaceIntegrationResponse,
     },
     error::{ApiResult, ErrorResponse},
     services::billing_integrations as integrations,
@@ -19,11 +21,35 @@ use crate::{
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_providers))
+        .routes(routes!(get_default_stripe_credentials))
+        .routes(routes!(update_default_stripe_credentials))
         .routes(routes!(list_workspace_integrations))
         .routes(routes!(get_workspace_integration))
         .routes(routes!(create_workspace_integration))
         .routes(routes!(update_workspace_integration))
         .routes(routes!(test_workspace_integration))
+}
+
+#[utoipa::path(get, path = "/v1/admin/billing/stripe-defaults", tag = "Operations",
+    responses((status = 200, body = DefaultStripeCredentialsResponse)))]
+async fn get_default_stripe_credentials(
+    State(state): State<AppState>,
+) -> ApiResult<Json<DefaultStripeCredentialsResponse>> {
+    Ok(Json(
+        integrations::default_stripe_credentials(&state.database()).await?,
+    ))
+}
+
+#[utoipa::path(put, path = "/v1/admin/billing/stripe-defaults", tag = "Operations",
+    request_body = UpdateDefaultStripeCredentialsRequest,
+    responses((status = 200, body = DefaultStripeCredentialsResponse), (status = 409, body = ErrorResponse), (status = 422, body = ErrorResponse)))]
+async fn update_default_stripe_credentials(
+    State(state): State<AppState>,
+    Json(request): Json<UpdateDefaultStripeCredentialsRequest>,
+) -> ApiResult<Json<DefaultStripeCredentialsResponse>> {
+    Ok(Json(
+        integrations::update_default_stripe_credentials(&state.database(), request).await?,
+    ))
 }
 
 #[utoipa::path(get, path = "/v1/admin/integrations/providers", tag = "Operations",

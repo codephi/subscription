@@ -28,6 +28,7 @@ mod credit_rows;
 mod credit_writes;
 pub mod credits;
 pub mod database;
+pub mod default_stripe_credentials;
 pub mod inbox_admin;
 pub mod integrations;
 pub mod outbox;

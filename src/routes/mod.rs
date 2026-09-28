@@ -115,5 +115,8 @@ mod tests {
         assert!(paths
             .paths
             .contains_key("/v1/admin/workspaces/{workspace_id}/customer-plans"));
+        assert!(paths
+            .paths
+            .contains_key("/v1/admin/billing/stripe-defaults"));
     }
 }

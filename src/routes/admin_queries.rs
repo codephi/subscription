@@ -1,5 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
     Json,
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -7,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     dto::admin_queries::{
-        AdminPageQuery, CustomerPlanPageResponse, WorkspacePageResponse,
+        AdminPageQuery, CreateWorkspaceRequest, CustomerPlanPageResponse, WorkspacePageResponse,
         WorkspaceProjectionResponse,
     },
     error::{ApiResult, ErrorResponse},
@@ -17,9 +18,20 @@ use crate::{
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .routes(routes!(create_workspace))
         .routes(routes!(list_workspaces))
         .routes(routes!(get_workspace))
         .routes(routes!(list_customer_plans))
+}
+
+#[utoipa::path(post, path = "/v1/admin/workspaces", tag = "Operations", request_body = CreateWorkspaceRequest,
+    responses((status = 201, body = WorkspaceProjectionResponse), (status = 422, body = ErrorResponse)))]
+async fn create_workspace(
+    State(state): State<AppState>,
+    Json(request): Json<CreateWorkspaceRequest>,
+) -> ApiResult<(StatusCode, Json<WorkspaceProjectionResponse>)> {
+    let workspace = admin_queries::create_workspace(&state.database(), request).await?;
+    Ok((StatusCode::CREATED, Json(workspace)))
 }
 
 #[utoipa::path(get, path = "/v1/admin/workspaces", tag = "Operations", params(AdminPageQuery),

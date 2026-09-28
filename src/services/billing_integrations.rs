@@ -2,14 +2,109 @@ use uuid::Uuid;
 
 use crate::{
     dto::billing::{
-        CreateStripeIntegrationRequest, IntegrationProviderResponse, StripeIntegrationTestResponse,
-        UpdateStripeIntegrationRequest, WorkspaceIntegrationResponse,
+        CreateStripeIntegrationRequest, DefaultStripeCredentialsResponse,
+        IntegrationProviderResponse, StripeIntegrationTestResponse,
+        UpdateDefaultStripeCredentialsRequest, UpdateStripeIntegrationRequest,
+        WorkspaceIntegrationResponse,
     },
     error::{ApiError, ApiResult},
     repositories::{
         database::DatabaseRepository, integrations::IntegrationSecrets, stripe::StripeConnector,
     },
 };
+
+pub async fn default_stripe_credentials(
+    repository: &DatabaseRepository,
+) -> ApiResult<DefaultStripeCredentialsResponse> {
+    repository.default_stripe_credentials().await
+}
+
+pub async fn update_default_stripe_credentials(
+    repository: &DatabaseRepository,
+    request: UpdateDefaultStripeCredentialsRequest,
+) -> ApiResult<DefaultStripeCredentialsResponse> {
+    let current = repository.load_default_stripe_secrets().await?;
+    let (environment, account_reference) = match request.secret_key.as_deref() {
+        Some(secret) => {
+            let environment = split_stripe_key(secret)?.0;
+            let account = StripeConnector::new(secret.to_string(), None)
+                .identify_account()
+                .await
+                .map_err(invalid_stripe_credentials)?;
+            (environment, account)
+        }
+        None => {
+            let current = current.as_ref().ok_or_else(|| {
+                ApiError::unprocessable(
+                    "default_stripe_secret_required",
+                    "secret_key is required to configure default Stripe credentials",
+                )
+            })?;
+            (
+                if current.environment == "TEST" {
+                    "TEST"
+                } else {
+                    "LIVE"
+                },
+                current.account_reference.clone(),
+            )
+        }
+    };
+    validate_webhook_secret(request.webhook_secret.as_deref())?;
+    require_default_webhook(
+        &current,
+        environment,
+        &account_reference,
+        request.webhook_secret.as_deref(),
+    )?;
+    repository
+        .save_default_stripe_credentials(
+            request.expected_version,
+            environment,
+            &account_reference,
+            request.secret_key.as_deref(),
+            request.webhook_secret.as_deref(),
+        )
+        .await
+}
+
+fn require_default_webhook(
+    current: &Option<crate::repositories::default_stripe_credentials::DefaultStripeSecrets>,
+    environment: &str,
+    account_reference: &str,
+    replacement: Option<&str>,
+) -> ApiResult<()> {
+    let unchanged_scope = current.as_ref().is_some_and(|secrets| {
+        secrets.environment == environment && secrets.account_reference == account_reference
+    });
+    if replacement.is_some() || (unchanged_scope && current_has_webhook(current)) {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "default_stripe_webhook_secret_required",
+        "webhook_secret is required for new or changed Stripe account credentials",
+    ))
+}
+
+fn current_has_webhook(
+    current: &Option<crate::repositories::default_stripe_credentials::DefaultStripeSecrets>,
+) -> bool {
+    current
+        .as_ref()
+        .is_some_and(|secrets| secrets.webhook_secret.is_some())
+}
+
+pub async fn provision_workspace_defaults(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+) -> ApiResult<()> {
+    let Some(defaults) = repository.load_default_stripe_secrets().await? else {
+        return Ok(());
+    };
+    repository
+        .provision_workspace_default_stripe(workspace_id, &defaults)
+        .await
+}
 
 pub fn providers() -> Vec<IntegrationProviderResponse> {
     vec![IntegrationProviderResponse {
@@ -257,8 +352,10 @@ fn invalid_customer(customer_id: &str) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        split_stripe_key, validate_customer_id, validate_stripe_key, validate_webhook_secret,
+        require_default_webhook, split_stripe_key, validate_customer_id, validate_stripe_key,
+        validate_webhook_secret,
     };
+    use crate::repositories::default_stripe_credentials::DefaultStripeSecrets;
 
     #[test]
     fn stripe_environment_must_match_secret_key_prefix() {
@@ -275,5 +372,21 @@ mod tests {
         assert!(validate_webhook_secret(None).is_ok());
         assert!(validate_webhook_secret(Some("whsec_existing")).is_ok());
         assert!(validate_webhook_secret(Some("sk_test_example")).is_err());
+    }
+
+    #[test]
+    fn default_credentials_require_a_webhook_secret_before_first_save() {
+        assert!(require_default_webhook(&None, "TEST", "acct_example", None).is_err());
+        assert!(
+            require_default_webhook(&None, "TEST", "acct_example", Some("whsec_example")).is_ok()
+        );
+        let current = Some(DefaultStripeSecrets {
+            environment: "TEST".into(),
+            account_reference: "acct_example".into(),
+            api_secret: "sk_test_example".into(),
+            webhook_secret: Some("whsec_example".into()),
+        });
+        assert!(require_default_webhook(&current, "TEST", "acct_example", None).is_ok());
+        assert!(require_default_webhook(&current, "LIVE", "acct_example", None).is_err());
     }
 }

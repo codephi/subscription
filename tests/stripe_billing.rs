@@ -13,6 +13,7 @@ use subscription::{
             CreateBillingConnectionRequest, CreateInitialCollectionRequest,
             CreatePaymentMethodBindingRequest,
         },
+        events::{WorkspaceEventEnvelope, WorkspaceEventPayload, WorkspaceEventType},
         plans::{
             AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest,
             CreateSubscriptionPlanRequest, CreateSubscriptionRequest, PlanRecurrence,
@@ -27,12 +28,13 @@ use subscription::{
         },
         stripe::StripeConnector,
     },
-    services::{billing, plans, stripe_webhooks},
+    services::{billing, plans, stripe_webhooks, workspace_events::process_workspace_event},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
+use uuid::Uuid;
 
 use usage_fixture::setup_usage;
 
@@ -125,6 +127,80 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
     let public_summary = serde_json::to_string(&summaries).unwrap();
     assert!(!public_summary.contains("whsec_managed_test"));
     assert!(!public_summary.contains("sk_test_managed_secret"));
+
+    let defaults = repository
+        .save_default_stripe_credentials(
+            0,
+            "TEST",
+            "acct_default_test",
+            Some("sk_test_default_secret"),
+            Some("whsec_default_secret"),
+        )
+        .await
+        .unwrap();
+    assert!(defaults.configured);
+    assert!(defaults.webhook_secret_configured);
+    let stored_default: String = sqlx::query_scalar(
+        "SELECT api_secret_reference FROM billing_default_stripe_credentials WHERE singleton_id=1",
+    )
+    .fetch_one(&repository.pool())
+    .await
+    .unwrap();
+    assert!(!stored_default.contains("sk_test_default_secret"));
+    let loaded = repository
+        .load_default_stripe_secrets()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.api_secret, "sk_test_default_secret");
+    assert_eq!(
+        loaded.webhook_secret.as_deref(),
+        Some("whsec_default_secret")
+    );
+    repository
+        .provision_workspace_default_stripe(fixture.workspace_id, &loaded)
+        .await
+        .unwrap();
+    repository
+        .provision_workspace_default_stripe(fixture.workspace_id, &loaded)
+        .await
+        .unwrap();
+    let provisioned = repository
+        .find_test_stripe_integration(fixture.workspace_id, "acct_default_test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(provisioned.status, "ACTIVE");
+    let defaults_public = serde_json::to_string(&defaults).unwrap();
+    assert!(!defaults_public.contains("sk_test_default_secret"));
+    assert!(!defaults_public.contains("whsec_default_secret"));
+
+    let new_workspace = Uuid::new_v4();
+    process_workspace_event(
+        &repository,
+        WorkspaceEventEnvelope {
+            event_id: Uuid::new_v4(),
+            event_type: WorkspaceEventType::Created,
+            schema_version: 1,
+            aggregate_id: new_workspace,
+            sequence: 1,
+            occurred_at: Utc::now(),
+            workspace_id: new_workspace,
+            correlation_id: Uuid::new_v4(),
+            causation_id: None,
+            payload: WorkspaceEventPayload {
+                workspace_id: new_workspace,
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let new_workspace_integration = repository
+        .find_test_stripe_integration(new_workspace, "acct_default_test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(new_workspace_integration.status, "ACTIVE");
 }
 
 struct FakeStripeServer {
