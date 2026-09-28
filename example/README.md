@@ -2,6 +2,8 @@
 
 TaskLab é uma POC para testar uma aplicação cliente da Subscription. A aplicação local conhece somente a API da Subscription: o checkout envia o plano, o tipo da compra, o pacote quando aplicável, uma transação e uma chave de idempotência. Credenciais, cartão de pagamento, conexão do provedor, decisão de aprovação ou recusa e webhook ficam na Subscription.
 
+Veja a [documentação completa da integração com a Subscription](../docs/integracao-saas/tasklab.md) para os contratos remotos, provisionamento do workspace, catálogo, checkout, medição de uso e limites atuais.
+
 O frontend usa shadcn/ui com preset Base Nova e Base UI. Os controles visuais vêm dos componentes em `web/src/components/ui`; para consultar a configuração e adicionar novos componentes, use `npm run ui:info` e `npm run ui:add -- <componente>`.
 
 O produto de demonstração é uma tarefa nomeada que custa 1 crédito. O modo pré-pago oferece pacotes de 10, 25 ou 50 créditos por R$ 10,00, R$ 25,00 ou R$ 50,00; o checkout mostra o progresso enquanto a intenção é processada. O modo de assinatura custa R$ 29,90 por mês e concede 50 créditos depois que o ciclo é confirmado. Cada conta escolhe uma modalidade no primeiro acesso; a conta `admin` / `admin` é semeada como uma conta de demonstração comum.

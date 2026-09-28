@@ -153,6 +153,7 @@ async fn dashboard(
     let user = auth::current_user(&state, &headers).await?;
     let catalog = services::dashboard_catalog(&state).await?;
     let workspace = &user.workspace_id;
+    let (product_id, item_id) = dashboard_catalog_ids(&catalog)?;
     let wallet = state
         .subscription
         .get(&format!(
@@ -163,7 +164,7 @@ async fn dashboard(
         .subscription
         .get(&format!(
             "/v1/workspaces/{workspace}/products/{}/eligibility",
-            catalog["product_id"]
+            product_id
         ))
         .await
         .ok();
@@ -171,7 +172,7 @@ async fn dashboard(
         .subscription
         .get(&format!(
             "/v1/workspaces/{workspace}/items/{}/item-wallet",
-            catalog["item_id"]
+            item_id
         ))
         .await
         .ok();
@@ -179,7 +180,7 @@ async fn dashboard(
         .subscription
         .get(&format!(
             "/v1/workspaces/{workspace}/items/{}/item-wallet/statement?limit=50",
-            catalog["item_id"]
+            item_id
         ))
         .await
         .ok();
@@ -190,6 +191,26 @@ async fn dashboard(
     Ok(Json(
         json!({"account":auth::account_response(user)?,"catalog":catalog,"wallet_statement":wallet,
         "eligibility":eligibility,"meter":meter,"item_statement":item_statement,"checkouts":checkouts,"executions":executions}),
+    ))
+}
+
+fn dashboard_catalog_ids(catalog: &Value) -> Result<(&str, &str), AppError> {
+    let product_id = catalog
+        .get("product_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_catalog_id("product_id"))?;
+    Uuid::parse_str(product_id).map_err(|_| invalid_catalog_id("product_id"))?;
+    let item_id = catalog
+        .get("item_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_catalog_id("item_id"))?;
+    Uuid::parse_str(item_id).map_err(|_| invalid_catalog_id("item_id"))?;
+    Ok((product_id, item_id))
+}
+
+fn invalid_catalog_id(field: &str) -> AppError {
+    AppError::Integration(format!(
+        "TaskLab catalog field {field} is invalid: expected a UUID string"
     ))
 }
 
@@ -224,4 +245,42 @@ struct ExecutionRow {
     credits_debited: String,
     status: String,
     created_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dashboard_catalog_ids;
+    use serde_json::json;
+    use url::Url;
+
+    #[test]
+    fn dashboard_catalog_ids_build_unquoted_subscription_paths() {
+        let catalog = json!({
+            "product_id": "bca1a862-cb9a-4e2a-a20e-9787491d1059",
+            "item_id": "e8acb28f-f0b1-4a5f-847b-a1a18e9f2c26"
+        });
+        let (product_id, item_id) = dashboard_catalog_ids(&catalog).expect("catalog IDs");
+        let base = Url::parse("http://localhost:3000/").expect("base URL");
+        let eligibility = base
+            .join(&format!("v1/products/{product_id}/eligibility"))
+            .expect("eligibility URL");
+        let item_wallet = base
+            .join(&format!("v1/items/{item_id}/item-wallet"))
+            .expect("item wallet URL");
+
+        assert!(eligibility
+            .as_str()
+            .contains("/bca1a862-cb9a-4e2a-a20e-9787491d1059/"));
+        assert!(item_wallet
+            .as_str()
+            .contains("/e8acb28f-f0b1-4a5f-847b-a1a18e9f2c26/"));
+        assert!(!eligibility.as_str().contains("%22"));
+        assert!(!item_wallet.as_str().contains("%22"));
+
+        let quoted_id = json!({
+            "product_id": "\"bca1a862-cb9a-4e2a-a20e-9787491d1059\"",
+            "item_id": "e8acb28f-f0b1-4a5f-847b-a1a18e9f2c26"
+        });
+        assert!(dashboard_catalog_ids(&quoted_id).is_err());
+    }
 }

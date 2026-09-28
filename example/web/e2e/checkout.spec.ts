@@ -45,11 +45,12 @@ class FakeTaskLabOnboardingApi {
 }
 
 test("checkout keeps demo card fields in the browser and reports Subscription state", async ({ page }) => {
+  let checkoutPaid = false
   await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
   await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
     account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
     catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [{ credit_units: 10, price_amount_minor: 1000 }, { credit_units: 25, price_amount_minor: 2500 }, { credit_units: 50, price_amount_minor: 5000 }] },
-    wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
+    wallet_statement: { items: [] }, eligibility: { access_allowed: checkoutPaid, balance_credit_units: checkoutPaid ? "25" : "0" },
     meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
   } }))
   let checkoutBody: unknown
@@ -61,7 +62,10 @@ test("checkout keeps demo card fields in the browser and reports Subscription st
     await checkoutGate
     await route.fulfill({ status: 202, json: { checkout_id: "checkout-1", status: "PENDING" } })
   })
-  await page.route("**/api/checkouts/checkout-1", (route) => route.fulfill({ status: 200, json: { checkout_id: "checkout-1", status: "PAID" } }))
+  await page.route("**/api/checkouts/checkout-1", (route) => {
+    checkoutPaid = true
+    return route.fulfill({ status: 200, json: { checkout_id: "checkout-1", status: "PAID" } })
+  })
 
   await page.goto("/")
   await page.getByLabel("Cartão de demonstração").fill("qualquer-cartao")
@@ -73,6 +77,7 @@ test("checkout keeps demo card fields in the browser and reports Subscription st
   await expect.poll(() => checkoutBody).toEqual({ checkout_kind: "ON_DEMAND", topup_credits: 25 })
   releaseCheckout?.()
   await expect(page.getByText(/Checkout paid/i)).toBeVisible()
+  await expect(page.locator(".balance-value")).toHaveText("25")
 })
 
 test("onboarding sends a subscription intent without fictitious card fields", async ({ page }) => {

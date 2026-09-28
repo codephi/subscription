@@ -41,6 +41,10 @@ export default function App() {
 
   useEffect(() => syncPendingCheckout(dashboard.data, checkout, setCheckout), [dashboard.data?.checkouts, checkout?.checkout_id])
   useEffect(() => watchCheckout(checkout, user, setCheckout, checkoutKey, setError), [checkout?.checkout_id, checkout?.status, user?.username])
+  useEffect(() => {
+    if (checkout?.status !== "PAID" || !user) return
+    void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+  }, [checkout?.checkout_id, checkout?.status, queryClient, user?.username])
 
   const authMutation = useMutation({
     mutationFn: submitCredentials,
