@@ -107,7 +107,7 @@ impl DatabaseRepository {
             None => row
                 .as_ref()
                 .map(|current| current.get("api_secret_reference"))
-                .ok_or_else(|| missing_default_secret())?,
+                .ok_or_else(missing_default_secret)?,
         };
         let webhook_ciphertext = match webhook_secret {
             Some(secret) => Some(vault.seal(
