@@ -228,8 +228,8 @@ Rotas em `example/backend/src/routes.rs`:
 | `POST /api/auth/logout`, `GET /api/me` | Encerra ou consulta sessão |
 | `POST /api/plan` | Seleciona a opção pré-paga FREE |
 | `GET /api/dashboard` | Agrega carteira, catálogo, medidor e histórico |
-| `POST /api/payment-method-setup` | Cria CustomerPlan se necessário e inicia o Checkout Session hospedado |
-| `POST /api/payment-method-bindings` | Valida a Checkout Session na Subscription e salva a referência |
+| `POST /api/payment-method-setup` | Cria CustomerPlan se necessário e solicita à Subscription o início do cadastro hospedado |
+| `POST /api/payment-method-bindings` | Envia a referência opaca do setup à Subscription para validação e criação do vínculo |
 | `GET /api/payment-method-bindings` | Lista vínculos tokenizados ativos |
 | `POST /api/checkouts` | Cria checkout inicial ou recarga, com `Idempotency-Key` |
 | `GET /api/checkouts/{id}` | Atualiza o estado do checkout |
@@ -263,8 +263,9 @@ O Makefile inicia Subscription (`3000`), admin-ui (`5173`), TaskLab API
   oferece troca de plano, cancelamento pela interface, renovação automática ou
   recarga de conta assinante.
 - Pagamento só pode ser exercitado pelo sandbox Stripe configurado na
-  Subscription. O setup usa Stripe Checkout hospedado; PAN e CVC seguem do navegador
-  diretamente para a Stripe.
+  Subscription. A Subscription cria e valida o setup hospedado; TaskLab não
+  conhece Stripe, suas sessões ou credenciais. PAN e CVC seguem do navegador
+  diretamente ao provedor.
 - A TaskLab guarda estado em SQLite local; perder ou trocar o arquivo perde
   sessão, associação de plano, catálogo configurado e histórico local. Os
   lançamentos e pagamentos confirmados continuam na Subscription.

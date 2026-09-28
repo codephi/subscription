@@ -80,7 +80,7 @@ test("checkout sends the saved payment binding and reports Subscription state", 
   await expect(page.locator(".balance-value")).toHaveText("25")
 })
 
-test("card setup redirects to the payment provider and validates the returned setup", async ({ page }) => {
+test("a saved card is validated by Subscription and can immediately fund a top-up", async ({ page }) => {
   let bindingSaved = false
   await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
   await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
@@ -96,6 +96,11 @@ test("card setup redirects to the payment provider and validates the returned se
     bindingSaved = true
     await route.fulfill({ status: 201, json: { payment_method_binding_id: "binding-1" } })
   })
+  let checkoutBody: unknown
+  await page.route("**/api/checkouts", async (route) => {
+    checkoutBody = route.request().postDataJSON()
+    await route.fulfill({ status: 202, json: { checkout_id: "checkout-1", status: "PENDING" } })
+  })
   await page.route("https://payments.example.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "Hosted payment page" }))
 
   await page.goto("/")
@@ -107,6 +112,22 @@ test("card setup redirects to the payment provider and validates the returned se
   await page.goto("/?payment_setup=complete&payment_method_setup_id=11111111-1111-4111-8111-111111111111")
   await expect.poll(() => bindingBody).toEqual({ payment_method_setup_id: "11111111-1111-4111-8111-111111111111" })
   await expect(page.getByLabel("Cartão salvo")).toHaveValue("binding-1")
+  await page.getByRole("button", { name: "Iniciar recarga" }).click()
+  await expect.poll(() => checkoutBody).toEqual({ checkout_kind: "ON_DEMAND", topup_credits: 10, payment_method_binding_id: "binding-1" })
+})
+
+test("cancelled card setup explains that the card was not saved", async ({ page }) => {
+  await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
+  await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
+    account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
+    catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [] },
+    payment_methods: [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
+    meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
+  } }))
+
+  await page.goto("/?payment_setup=cancelled")
+  await expect(page.getByText("O cartão não foi salvo. Você pode tentar novamente quando quiser.")).toBeVisible()
+  await expect(page).not.toHaveURL(/payment_setup/)
 })
 
 test("onboarding sends a subscription intent with the saved payment binding", async ({ page }) => {

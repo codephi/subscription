@@ -124,10 +124,15 @@ function restoreSession(setUser: (user: User | null) => void, setChecked: (check
 function recoverPaymentSetup(user: User | null, queryClient: ReturnType<typeof useQueryClient>, setBinding: (id: string) => void, setUser: (user: User) => void, setError: (message: string) => void) {
   const url = new URL(window.location.href)
   const paymentMethodSetupId = url.searchParams.get("payment_method_setup_id")
-  if (!user || !paymentMethodSetupId) return
+  const paymentSetupStatus = url.searchParams.get("payment_setup")
+  if (!user || (!paymentMethodSetupId && !paymentSetupStatus)) return
   url.searchParams.delete("payment_method_setup_id")
   url.searchParams.delete("payment_setup")
   window.history.replaceState({}, "", url)
+  if (!paymentMethodSetupId) {
+    if (paymentSetupStatus === "cancelled") setError("O cartão não foi salvo. Você pode tentar novamente quando quiser.")
+    return
+  }
   void api<{ payment_method_binding_id: string }>("/payment-method-bindings", {
     method: "POST",
     body: JSON.stringify({ payment_method_setup_id: paymentMethodSetupId }),
