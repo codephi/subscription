@@ -85,6 +85,8 @@ async fn customer_payment_method_contract_hides_integration_identifiers() {
         ["/v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}"]
         .get("delete")
         .is_some());
+    let card_request = &document["components"]["schemas"]["CreatePaymentMethodFromCardRequest"];
+    assert!(card_request["properties"].get("card_name").is_some());
     let binding = &document["components"]["schemas"]["CreatePaymentMethodBindingRequest"];
     assert!(binding["properties"]
         .get("payment_method_setup_id")
@@ -97,6 +99,7 @@ async fn customer_payment_method_contract_hides_integration_identifiers() {
     assert!(response["properties"]
         .get("provider_payment_method_reference")
         .is_none());
+    assert!(response["properties"].get("display_name").is_some());
 }
 
 #[tokio::test]

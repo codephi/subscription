@@ -249,7 +249,7 @@ function SavedPaymentMethods({ methods, selectedId, onSelect, onRemove, removing
     <div className="flex flex-wrap gap-2">
     <select id="saved-payment-method" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" value={selectedId} onChange={(event) => onSelect(event.target.value)} disabled={!active.length || disabled || removing}>
       {!active.length && <option value="">Adicione um cartão para continuar</option>}
-      {active.map((method, index) => <option key={method.payment_method_binding_id} value={method.payment_method_binding_id}>Cartão salvo {index + 1}</option>)}
+      {active.map((method, index) => <option key={method.payment_method_binding_id} value={method.payment_method_binding_id}>{method.display_name ?? `Cartão salvo ${index + 1}`}</option>)}
     </select>
     {selected && <Button type="button" variant="outline" onClick={() => onRemove(selected.payment_method_binding_id)} disabled={disabled || removing}>
       {removing ? <Spinner data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}

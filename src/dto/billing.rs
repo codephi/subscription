@@ -103,6 +103,7 @@ pub struct CreatePaymentMethodBindingRequest {
 pub struct CreatePaymentMethodFromCardRequest {
     pub customer_plan_id: Uuid,
     pub cardholder_name: String,
+    pub card_name: Option<String>,
     pub card_number: String,
     pub exp_month: u8,
     pub exp_year: u16,
@@ -123,6 +124,7 @@ pub struct PaymentMethodBindingResponse {
     pub workspace_id: Uuid,
     pub customer_plan_id: Option<Uuid>,
     pub payment_method: String,
+    pub display_name: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
@@ -131,6 +133,7 @@ pub struct PaymentMethodBindingResponse {
 pub struct CustomerPaymentMethodBindingResponse {
     pub payment_method_binding_id: Uuid,
     pub payment_method: String,
+    pub display_name: Option<String>,
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
@@ -140,6 +143,7 @@ impl From<PaymentMethodBindingResponse> for CustomerPaymentMethodBindingResponse
         Self {
             payment_method_binding_id: binding.payment_method_binding_id,
             payment_method: binding.payment_method,
+            display_name: binding.display_name,
             status: binding.status,
             created_at: binding.created_at,
         }

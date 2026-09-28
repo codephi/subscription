@@ -49,6 +49,7 @@ pub struct SavePaymentMethodBindingRequest {
 #[derive(Clone, Deserialize)]
 pub struct CreatePaymentMethodFromCardRequest {
     pub cardholder_name: String,
+    pub card_name: Option<String>,
     pub card_number: String,
     pub exp_month: u8,
     pub exp_year: u16,

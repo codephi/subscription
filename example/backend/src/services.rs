@@ -204,6 +204,7 @@ pub async fn create_payment_method_setup(
             &json!({
                 "customer_plan_id":customer_plan_id,
                 "cardholder_name":request.cardholder_name,
+                "card_name":request.card_name,
                 "card_number":request.card_number,
                 "exp_month":request.exp_month,
                 "exp_year":request.exp_year,

@@ -12,6 +12,7 @@ type SetupResult = {
 };
 type CardSetupInput = {
   cardholder_name: string;
+  card_name?: string;
   card_number: string;
   exp_month: number;
   exp_year: number;
@@ -130,6 +131,19 @@ export function PaymentMethodSetup({
         />
         <span>Salvar este cartão para usar em próximas recargas.</span>
       </label>
+      {saved && (
+        <Field>
+          <FieldLabel htmlFor="card-display-name">
+            Nome para identificar o cartão (opcional)
+          </FieldLabel>
+          <Input
+            id="card-display-name"
+            name="card_name"
+            placeholder="Ex.: Cartão pessoal"
+            maxLength={50}
+          />
+        </Field>
+      )}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -162,6 +176,9 @@ function cardSetupInput(
 ): CardSetupInput {
   return {
     cardholder_name: String(form.get("cardholder_name") ?? "").trim(),
+    card_name: saveForFuture
+      ? String(form.get("card_name") ?? "").trim() || undefined
+      : undefined,
     card_number: String(form.get("card_number") ?? "").replace(/[ -]/g, ""),
     exp_month: Number(form.get("exp_month")),
     exp_year: Number(form.get("exp_year")),

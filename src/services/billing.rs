@@ -488,12 +488,14 @@ async fn save_card_binding(
     context: &CardSetupContext,
     prepared: &crate::repositories::stripe::PreparedStripePaymentMethod,
 ) -> ApiResult<CreatePaymentMethodFromCardResponse> {
+    let display_name = card_display_name(request);
     let binding = repository
-        .create_verified_payment_method_binding(
+        .create_verified_payment_method_binding_with_name(
             workspace_id,
             context.connection_id,
             Some(request.customer_plan_id),
             &prepared.payment_method_id,
+            Some(&display_name),
         )
         .await?;
     Ok(CreatePaymentMethodFromCardResponse {
@@ -504,9 +506,51 @@ async fn save_card_binding(
 
 fn validate_card_entry(request: &CreatePaymentMethodFromCardRequest) -> ApiResult<()> {
     validate_cardholder_name(&request.cardholder_name)?;
+    validate_card_display_name(request)?;
     validate_card_number(&request.card_number)?;
     validate_card_security_code(&request.cvc)?;
     validate_card_expiry(request.exp_month, request.exp_year)
+}
+
+fn validate_card_display_name(request: &CreatePaymentMethodFromCardRequest) -> ApiResult<()> {
+    let Some(name) = request
+        .card_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        return Ok(());
+    };
+    let has_control_character = name.chars().any(char::is_control);
+    if name.chars().count() <= 50 && !has_control_character {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_card_display_name",
+        format!("card_name {name:?} must contain at most 50 characters without control characters"),
+    ))
+}
+
+fn card_display_name(request: &CreatePaymentMethodFromCardRequest) -> String {
+    if let Some(name) = request
+        .card_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_string();
+    }
+    let last_four: String = request
+        .card_number
+        .chars()
+        .filter(char::is_ascii_digit)
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("Cartão •••• {last_four}")
 }
 
 fn validate_cardholder_name(name: &str) -> ApiResult<()> {

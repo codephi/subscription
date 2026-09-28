@@ -122,14 +122,17 @@ até sair de `PENDING` e então atualiza o painel.
 O valor submetido ao checkout não vem do formulário: Subscription resolve os
 termos a partir do plano e do pacote cadastrados. O formulário de cartão fica na
 TaskLab, que encaminha PAN/CVC pela sua API autenticada à Subscription. A
-Subscription envia os dados ao provedor, valida o SetupIntent e guarda apenas a
-referência tokenizada quando o usuário opta por salvar o cartão.
+Subscription envia os dados ao provedor, valida o SetupIntent e guarda a
+referência tokenizada e o nome de exibição quando o usuário opta por salvar o
+cartão. O nome é informado pelo usuário ou gerado com os últimos quatro dígitos;
+PAN e CVC não são persistidos.
 
 ### Fluxo de tokenização
 
-1. O frontend coleta nome, número, validade e CVC e pede autorização para salvar
-   o cartão em usos futuros. Ele envia os dados somente à rota autenticada da
-   API TaskLab, com uma chave `Idempotency-Key`.
+1. O frontend coleta nome, número, validade e CVC, além de um nome opcional para
+   identificar o cartão salvo, e pede autorização para reutilizá-lo. Ele envia
+   os dados somente à rota autenticada da API TaskLab, com uma chave
+   `Idempotency-Key`.
 2. A API TaskLab garante um `CustomerPlan` e encaminha os dados à
    `POST /v1/workspaces/{workspace_id}/payment-methods/from-card` da Subscription.
    O backend TaskLab não grava nem registra o corpo do cartão.

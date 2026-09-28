@@ -548,11 +548,12 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
     assert!(!serialized.contains("SECRET"));
     let binding = fixture
         .repository
-        .create_verified_payment_method_binding(
+        .create_verified_payment_method_binding_with_name(
             fixture.workspace_id,
             connection.billing_connection_id,
             None,
             "pm_tokenized_test",
+            Some("Cartão •••• 4242"),
         )
         .await
         .unwrap();
@@ -560,6 +561,10 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
         .await
         .unwrap();
     assert_eq!(bindings, vec![binding]);
+    assert_eq!(
+        bindings[0].display_name.as_deref(),
+        Some("Cartão •••• 4242")
+    );
     let columns: Vec<String> = sqlx::query_scalar(
         "SELECT column_name FROM information_schema.columns WHERE table_name='payment_method_bindings' ORDER BY column_name",
     )

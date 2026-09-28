@@ -86,6 +86,7 @@ fn direct_card_setup_validates_shape_and_never_echoes_card_values() {
     let valid = crate::dto::billing::CreatePaymentMethodFromCardRequest {
         customer_plan_id: uuid::Uuid::new_v4(),
         cardholder_name: "TaskLab Test".to_string(),
+        card_name: None,
         card_number: "4242424242424242".to_string(),
         exp_month: 12,
         exp_year: (chrono::Utc::now().year() + 2) as u16,
@@ -108,6 +109,7 @@ fn direct_card_setup_rejects_invalid_name_cvc_and_expiry_shape() {
     let valid = crate::dto::billing::CreatePaymentMethodFromCardRequest {
         customer_plan_id: uuid::Uuid::new_v4(),
         cardholder_name: "TaskLab Test".to_string(),
+        card_name: None,
         card_number: "4242424242424242".to_string(),
         exp_month: 12,
         exp_year: (chrono::Utc::now().year() + 2) as u16,
@@ -140,6 +142,37 @@ fn direct_card_setup_rejects_invalid_name_cvc_and_expiry_shape() {
 }
 
 #[test]
+fn saved_card_name_uses_custom_label_or_only_the_last_four_digits() {
+    let request = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        customer_plan_id: uuid::Uuid::new_v4(),
+        cardholder_name: "TaskLab Test".to_string(),
+        card_name: None,
+        card_number: "4242 4242 4242 4242".to_string(),
+        exp_month: 12,
+        exp_year: (chrono::Utc::now().year() + 2) as u16,
+        cvc: "123".to_string(),
+        save_for_future: true,
+    };
+    assert_eq!(card_display_name(&request), "Cartão •••• 4242");
+    let named = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        card_name: Some("Cartão de trabalho".to_string()),
+        ..request.clone()
+    };
+    assert_eq!(card_display_name(&named), "Cartão de trabalho");
+    assert!(validate_card_entry(&named).is_ok());
+
+    let invalid_name = crate::dto::billing::CreatePaymentMethodFromCardRequest {
+        card_name: Some("x".repeat(51)),
+        ..named
+    };
+    assert_eq!(
+        validate_card_entry(&invalid_name).unwrap_err().code(),
+        "invalid_card_display_name"
+    );
+    assert!(!card_display_name(&invalid_name).contains(&invalid_name.card_number));
+}
+
+#[test]
 fn direct_card_setup_only_accepts_test_credentials() {
     assert!(validate_raw_card_secret("sk_test_example").is_ok());
     let error = validate_raw_card_secret("sk_live_example").unwrap_err();
@@ -156,6 +189,7 @@ fn customer_payment_method_binding_hides_provider_integration_details() {
             workspace_id: uuid::Uuid::new_v4(),
             customer_plan_id: Some(uuid::Uuid::new_v4()),
             payment_method: "CARD".to_string(),
+            display_name: Some("Cartão •••• 4242".to_string()),
             status: "ACTIVE".to_string(),
             created_at: chrono::Utc::now(),
         }
@@ -163,6 +197,7 @@ fn customer_payment_method_binding_hides_provider_integration_details() {
     let body = serde_json::to_value(public).unwrap();
     assert!(body.get("billing_connection_id").is_none());
     assert!(body.get("provider_payment_method_reference").is_none());
+    assert_eq!(body["display_name"], "Cartão •••• 4242");
 }
 
 fn billing_capabilities(methods: Vec<BillingPaymentMethod>) -> BillingCapabilities {

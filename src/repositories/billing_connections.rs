@@ -276,6 +276,24 @@ impl DatabaseRepository {
         customer_plan_id: Option<Uuid>,
         provider_payment_method_reference: &str,
     ) -> ApiResult<PaymentMethodBindingResponse> {
+        self.create_verified_payment_method_binding_with_name(
+            workspace_id,
+            connection_id,
+            customer_plan_id,
+            provider_payment_method_reference,
+            None,
+        )
+        .await
+    }
+
+    pub async fn create_verified_payment_method_binding_with_name(
+        &self,
+        workspace_id: Uuid,
+        connection_id: Uuid,
+        customer_plan_id: Option<Uuid>,
+        provider_payment_method_reference: &str,
+        display_name: Option<&str>,
+    ) -> ApiResult<PaymentMethodBindingResponse> {
         validate_binding_reference(provider_payment_method_reference)?;
         if let Some(existing) = self
             .find_payment_method_binding(
@@ -289,9 +307,9 @@ impl DatabaseRepository {
         }
         let row = sqlx::query(
             "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-             workspace_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,status) \
-             SELECT $1,bc.billing_connection_id,$2,$2,$3,'CARD',$4,'ACTIVE' FROM billing_connections bc \
-             WHERE bc.billing_connection_id=$5 AND bc.workspace_id=$2 AND bc.status='ACTIVE' \
+             workspace_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,display_name,status) \
+             SELECT $1,bc.billing_connection_id,$2,$2,$3,'CARD',$4,$5,'ACTIVE' FROM billing_connections bc \
+             WHERE bc.billing_connection_id=$6 AND bc.workspace_id=$2 AND bc.status='ACTIVE' \
              AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM customer_plans cp \
                WHERE cp.customer_plan_id=$3 AND cp.customer_id=$2)) \
              ON CONFLICT (billing_connection_id,provider_payment_method_reference) DO NOTHING RETURNING *",
@@ -300,6 +318,7 @@ impl DatabaseRepository {
         .bind(workspace_id)
         .bind(customer_plan_id)
         .bind(provider_payment_method_reference)
+        .bind(display_name)
         .bind(connection_id)
         .fetch_optional(&self.pool())
         .await?;
@@ -428,6 +447,7 @@ fn binding_from_row(row: &sqlx::postgres::PgRow) -> PaymentMethodBindingResponse
         workspace_id: row.get("workspace_id"),
         customer_plan_id: row.get("customer_plan_id"),
         payment_method: row.get("payment_method"),
+        display_name: row.get("display_name"),
         status: row.get("status"),
         created_at: row.get("created_at"),
     }
