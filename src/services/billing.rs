@@ -120,11 +120,10 @@ pub async fn create_payment_method_setup_session(
         }
         false => configuration.external_account_reference.clone(),
     };
-    if let Some(customer_plan_id) = request.customer_plan_id {
-        repository
-            .ensure_customer_plan_workspace(configuration.workspace_id, customer_plan_id)
-            .await?;
-    }
+    repository
+        .ensure_customer_plan_workspace(configuration.workspace_id, request.customer_plan_id)
+        .await?;
+    validate_setup_return_urls(&request.success_url, &request.cancel_url)?;
     let connector = crate::repositories::stripe::StripeConnector::new(
         secret,
         (!configuration.managed)
@@ -132,12 +131,18 @@ pub async fn create_payment_method_setup_session(
             .flatten(),
     );
     let session = connector
-        .create_setup_session(&SetupSessionCommand { customer_reference })
+        .create_setup_session(&SetupSessionCommand {
+            customer_reference,
+            client_reference_id: request.customer_plan_id.to_string(),
+            billing_connection_id: connection_id.to_string(),
+            success_url: request.success_url.clone(),
+            cancel_url: request.cancel_url.clone(),
+        })
         .await
         .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
     Ok(PaymentMethodSetupSessionResponse {
         provider_setup_id: session.provider_setup_id,
-        client_secret: session.client_secret,
+        redirect_url: session.redirect_url,
     })
 }
 
@@ -231,15 +236,7 @@ pub async fn create_payment_method_binding(
     workspace_id: uuid::Uuid,
     request: &CreatePaymentMethodBindingRequest,
 ) -> ApiResult<PaymentMethodBindingResponse> {
-    if !request.setup_intent_id.starts_with("seti_") {
-        return Err(ApiError::unprocessable(
-            "invalid_setup_intent_reference",
-            format!(
-                "setup_intent_id {:?} must begin with seti_",
-                request.setup_intent_id
-            ),
-        ));
-    }
+    validate_checkout_session_reference(&request.checkout_session_id)?;
     let configuration = repository
         .billing_connector_configuration(request.billing_connection_id)
         .await?;
@@ -252,11 +249,10 @@ pub async fn create_payment_method_binding(
             format!("billing connection {} must be an ACTIVE STRIPE connection for workspace {workspace_id}", request.billing_connection_id),
         ));
     }
-    if let Some(customer_plan_id) = request.customer_plan_id {
-        repository
-            .ensure_customer_plan_workspace(workspace_id, customer_plan_id)
-            .await?;
-    }
+    let customer_plan_id = request.customer_plan_id;
+    repository
+        .ensure_customer_plan_workspace(workspace_id, customer_plan_id)
+        .await?;
     let secrets = if configuration.managed {
         Some(
             repository
@@ -287,7 +283,12 @@ pub async fn create_payment_method_binding(
             .flatten(),
     );
     let prepared = connector
-        .retrieve_setup_intent(&request.setup_intent_id)
+        .retrieve_checkout_setup_intent(
+            &request.checkout_session_id,
+            &expected_customer,
+            &customer_plan_id.to_string(),
+            &request.billing_connection_id.to_string(),
+        )
         .await
         .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
     if prepared.customer_id != expected_customer {
@@ -295,7 +296,7 @@ pub async fn create_payment_method_binding(
             "billing_setup_customer_mismatch",
             format!(
                 "SetupIntent {} belongs to customer {}, expected {expected_customer}",
-                request.setup_intent_id, prepared.customer_id
+                prepared.setup_intent_id, prepared.customer_id
             ),
         ));
     }
@@ -303,10 +304,56 @@ pub async fn create_payment_method_binding(
         .create_verified_payment_method_binding(
             workspace_id,
             request.billing_connection_id,
-            request.customer_plan_id,
+            Some(customer_plan_id),
             &prepared.payment_method_id,
         )
         .await
+}
+
+fn validate_checkout_session_reference(reference: &str) -> ApiResult<()> {
+    let id = reference.strip_prefix("cs_").unwrap_or_default();
+    if !id.is_empty() && id.len() <= 251 && id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable(
+        "invalid_checkout_session_reference",
+        format!(
+            "checkout_session_id {reference:?} must match cs_<alphanumeric ID> with at most 255 characters"
+        ),
+    ))
+}
+
+fn validate_setup_return_urls(success_url: &str, cancel_url: &str) -> ApiResult<()> {
+    let success = url::Url::parse(success_url)
+        .map_err(|error| invalid_setup_return_url(success_url, error))?;
+    let cancel =
+        url::Url::parse(cancel_url).map_err(|error| invalid_setup_return_url(cancel_url, error))?;
+    let same_origin = success.scheme() == cancel.scheme()
+        && success.host_str() == cancel.host_str()
+        && success.port_or_known_default() == cancel.port_or_known_default();
+    let secure = success.scheme() == "https"
+        || (success.scheme() == "http" && success.host_str().is_some_and(is_local_host));
+    let session_return = success_url.contains("session_id={CHECKOUT_SESSION_ID}");
+    if same_origin
+        && secure
+        && session_return
+        && success.fragment().is_none()
+        && cancel.fragment().is_none()
+    {
+        return Ok(());
+    }
+    Err(ApiError::unprocessable("invalid_payment_setup_return_urls", "success_url and cancel_url must share a secure origin and success_url must include session_id={CHECKOUT_SESSION_ID}"))
+}
+
+fn is_local_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn invalid_setup_return_url(url: &str, error: url::ParseError) -> ApiError {
+    ApiError::unprocessable(
+        "invalid_payment_setup_return_url",
+        format!("return URL {url:?} is invalid: {error}"),
+    )
 }
 
 pub async fn list_payment_method_bindings(

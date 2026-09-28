@@ -80,6 +80,35 @@ test("checkout sends the saved Stripe binding and reports Subscription state", a
   await expect(page.locator(".balance-value")).toHaveText("25")
 })
 
+test("card setup redirects to hosted Stripe Checkout and validates the returned session", async ({ page }) => {
+  let bindingSaved = false
+  await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" } }))
+  await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: {
+    account: { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" },
+    catalog: { prepaid_price_minor: 1000, prepaid_credits: 10, subscription_price_minor: 2990, subscription_credits: 50, task_cost: 1, topup_offers: [] },
+    payment_methods: bindingSaved ? [{ payment_method_binding_id: "binding-1", billing_connection_id: "connection-1", status: "ACTIVE", created_at: "2026-01-01T00:00:00Z" }] : [], wallet_statement: { items: [] }, eligibility: { access_allowed: false, balance_credit_units: "0" },
+    meter: { next_block_credit_units: "1" }, item_statement: { items: [] }, checkouts: [], executions: [],
+  } }))
+  await page.route("**/api/payment-method-setup", (route) => route.fulfill({ status: 200, json: { redirect_url: "https://checkout.stripe.com/c/pay/cs_test_setup" } }))
+  let bindingBody: unknown
+  await page.route("**/api/payment-method-bindings", async (route) => {
+    bindingBody = route.request().postDataJSON()
+    bindingSaved = true
+    await route.fulfill({ status: 201, json: { payment_method_binding_id: "binding-1" } })
+  })
+  await page.route("https://checkout.stripe.com/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "Hosted Stripe Checkout" }))
+
+  await page.goto("/")
+  await page.getByRole("button", { name: "Adicionar cartão" }).click()
+  await page.getByRole("checkbox").check()
+  await page.getByRole("button", { name: "Adicionar ou validar cartão" }).click()
+  await expect(page).toHaveURL(/checkout\.stripe\.com/)
+
+  await page.goto("/?payment_setup=complete&session_id=cs_test_setup")
+  await expect.poll(() => bindingBody).toEqual({ checkout_session_id: "cs_test_setup" })
+  await expect(page.getByLabel("Cartão salvo")).toHaveValue("binding-1")
+})
+
 test("onboarding sends a subscription intent with the saved Stripe binding", async ({ page }) => {
   const fakeApi = new FakeTaskLabOnboardingApi()
   await fakeApi.install(page)

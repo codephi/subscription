@@ -86,6 +86,7 @@ créditos por workspace interno no contrato atual.
 
 Referências Stripe: [chaves de API](https://docs.stripe.com/keys),
 [criar Customer](https://docs.stripe.com/api/customers/create),
+[Checkout Session](https://docs.stripe.com/api/checkout/sessions),
 [SetupIntent](https://docs.stripe.com/api/setup_intents),
 [PaymentIntent](https://docs.stripe.com/api/payment_intents/create) e
 [destinos de webhook](https://docs.stripe.com/api/webhook_endpoints).
@@ -95,21 +96,16 @@ Referências Stripe: [chaves de API](https://docs.stripe.com/keys),
 Os guias abaixo descrevem as chamadas disponíveis e o fluxo pretendido. Antes
 de cobrar clientes reais automaticamente, resolva e valide estes pontos:
 
-1. O adaptador envia `return_url` ao **criar** o SetupIntent sem `confirm=true`.
-   A [API Stripe](https://docs.stripe.com/api/setup_intents/create) aceita esse
-   parâmetro na criação somente com `confirm=true`. Ajuste o adaptador para
-   deixar o `return_url` na confirmação feita por Stripe.js, ou use um fluxo
-   de confirmação compatível, antes de contar com a sessão de setup.
-2. O adaptador cria `SetupIntent` com `customer=cus_...`, mas cria
-   `PaymentIntent` com `payment_method` **sem `customer`**. O Stripe exige o
-   Customer correspondente quando o método já está anexado a ele. Acrescentar
-   o Customer ao comando e ao adaptador é necessário para o cartão salvo.
-3. `POST /payment-method-bindings` aceita uma referência `pm_...` e não valida
-   no Stripe se o SetupIntent terminou com sucesso ou se o método pertence ao
-   Customer. O SaaS deve verificar o resultado no Stripe; a API deve ganhar a
-   validação/ingestão confiável antes do uso desassistido. O webhook atual
-   processa eventos de `payment_intent.*` e `charge.refunded`, não efetiva
-   `setup_intent.succeeded` para planos FREE que exigem cartão.
+1. Subscription cria uma Checkout Session hospedada em modo `setup`; TaskLab
+   redireciona o navegador e envia de volta somente o ID `cs_...`.
+2. `POST /payment-method-bindings` consulta Checkout Session e SetupIntent na API Stripe e só
+   aceita estado `succeeded`, `usage=off_session`, método `pm_...` e o Customer
+   Stripe esperado para o workspace. O cadastro repetido do mesmo método é
+   idempotente.
+3. O conector inclui o Customer Stripe ao criar PaymentIntent off-session com
+   cartão salvo. O webhook ainda não efetiva `setup_intent.succeeded` para
+   planos FREE que exigem cartão; esse fluxo permanece separado do cadastro
+   de método documentado para TaskLab.
 4. Cada `BillingConnection` devolve um caminho de webhook próprio. O Stripe
    precisa de um destino que entregue nesse caminho; criar um destino manual
    por conta não escala. Destinos registrados na mesma conta Stripe para os

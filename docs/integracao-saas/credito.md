@@ -154,25 +154,20 @@ e a adesão do cliente ao plano ainda exige API.
 
 ## 4. Salvar cartão e comprar créditos
 
-1. Seu backend chama a sessão de setup com uma `return_url` HTTPS do SaaS.
-   Envie o `client_secret` somente à sessão do cliente correspondente. O
-   frontend usa [Stripe.js/Elements para confirmar o SetupIntent](https://docs.stripe.com/payments/save-and-reuse?platform=web&ui=embedded-form);
-   PAN/CVV não passam pelo SaaS nem pela Subscription API.
-   **No código atual, a criação da sessão precisa de correção:** o adaptador
-   envia `return_url` em uma criação sem `confirm=true`, combinação rejeitada
-   pela API Stripe. Esse requisito está no [índice](README.md).
-2. Após o sucesso, o backend verifica no Stripe que o SetupIntent é
-   `succeeded`, que seu `customer` é o `cus_...` esperado e obtém o `pm_...`.
-   Crie o vínculo na API. Hoje a API confere somente o formato `pm_...` e o
-   vínculo com a conexão: a verificação Stripe precisa ser feita no seu backend
-   até ser incorporada à API.
+1. Seu backend chama a sessão de setup associada ao CustomerPlan. A Subscription
+   cria uma Checkout Session hospedada em modo `setup`; o frontend redireciona o
+   cliente à URL devolvida. PAN/CVV são enviados diretamente à Stripe.
+2. Após o retorno, envie o `checkout_session_id` à API. A Subscription consulta
+   a sessão e o SetupIntent na Stripe e valida sucesso, Customer esperado,
+   `usage=off_session` e PaymentMethod associado antes de persistir o vínculo.
+   O cliente não fornece o `pm_...` diretamente.
 
 ```http
 POST /v1/workspaces/<WORKSPACE_ID>/billing-connections/<CONNECTION_ID>/payment-method-setup-sessions
-{"return_url":"https://seu-saas.example/billing/return"}
+{"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?session_id={CHECKOUT_SESSION_ID}","cancel_url":"https://app.example/return?payment_setup=cancelled"}
 
 POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
-{"billing_connection_id":"<CONNECTION_ID>","customer_plan_id":"<CUSTOMER_PLAN_ID>","provider_payment_method_reference":"pm_..."}
+{"billing_connection_id":"<CONNECTION_ID>","customer_plan_id":"<CUSTOMER_PLAN_ID>","checkout_session_id":"cs_..."}
 ```
 
 3. Quando o cliente escolher um pacote, gere uma intenção de compra única no

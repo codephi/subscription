@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         pool,
         api,
         config.accounts_webhook_secret,
-        config.stripe_publishable_key,
+        config.tasklab_web_url,
     );
     if std::env::args().nth(1).as_deref() == Some("setup") {
         services::setup_catalog(&state).await?;

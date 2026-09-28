@@ -43,12 +43,16 @@ pub struct ConnectorCollectionResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SetupSessionCommand {
     pub customer_reference: String,
+    pub client_reference_id: String,
+    pub billing_connection_id: String,
+    pub success_url: String,
+    pub cancel_url: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SetupSessionResult {
     pub provider_setup_id: String,
-    pub client_secret: String,
+    pub redirect_url: String,
 }
 
 #[derive(Clone, Debug, thiserror::Error)]

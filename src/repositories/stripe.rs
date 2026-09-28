@@ -106,6 +106,38 @@ impl StripeConnector {
         Ok(setup)
     }
 
+    pub async fn retrieve_checkout_setup_intent(
+        &self,
+        checkout_session_id: &str,
+        expected_customer: &str,
+        expected_client_reference: &str,
+        expected_connection_id: &str,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let mut request = self
+            .client
+            .get(format!(
+                "{}/v1/checkout/sessions/{checkout_session_id}?expand%5B%5D=setup_intent",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""));
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        validate_checkout_session(
+            &body,
+            checkout_session_id,
+            expected_customer,
+            expected_client_reference,
+            expected_connection_id,
+        )
+    }
+
     pub async fn create_workspace_customer(
         &self,
         workspace_id: &str,
@@ -177,6 +209,35 @@ impl StripeConnector {
     }
 }
 
+fn validate_checkout_session(
+    session: &Value,
+    expected_session_id: &str,
+    expected_customer: &str,
+    expected_client_reference: &str,
+    expected_connection_id: &str,
+) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+    let setup = session
+        .get("setup_intent")
+        .ok_or_else(|| invalid_response("CheckoutSession.setup_intent", &session.to_string()))?;
+    let shape_is_valid = required_string(session, "id")? == expected_session_id
+        && required_string(session, "mode")? == "setup"
+        && required_string(session, "status")? == "complete"
+        && required_string(session, "customer")? == expected_customer
+        && required_string(session, "client_reference_id")? == expected_client_reference
+        && session
+            .pointer("/metadata/billing_connection_id")
+            .and_then(Value::as_str)
+            == Some(expected_connection_id);
+    if !shape_is_valid {
+        return Err(invalid_response("CheckoutSession", &session.to_string()));
+    }
+    let prepared = prepared_payment_method(setup, expected_customer)?;
+    if setup.get("usage").and_then(Value::as_str) != Some("off_session") {
+        return Err(invalid_response("SetupIntent.usage", &setup.to_string()));
+    }
+    Ok(prepared)
+}
+
 fn prepared_payment_method(
     value: &Value,
     expected_customer: &str,
@@ -246,14 +307,24 @@ impl BillingConnector for StripeConnector {
     ) -> SetupSessionFuture<'a> {
         Box::pin(async move {
             let fields = vec![
+                ("mode", "setup".to_string()),
                 ("customer", command.customer_reference.clone()),
+                ("client_reference_id", command.client_reference_id.clone()),
+                (
+                    "metadata[billing_connection_id]",
+                    command.billing_connection_id.clone(),
+                ),
+                ("success_url", command.success_url.clone()),
+                ("cancel_url", command.cancel_url.clone()),
                 ("payment_method_types[]", "card".to_string()),
-                ("usage", "off_session".to_string()),
+                ("setup_intent_data[usage]", "off_session".to_string()),
             ];
-            let value = self.post_form("/v1/setup_intents", &fields, None).await?;
+            let value = self
+                .post_form("/v1/checkout/sessions", &fields, None)
+                .await?;
             Ok(SetupSessionResult {
                 provider_setup_id: required_string(&value, "id")?,
-                client_secret: required_string(&value, "client_secret")?,
+                redirect_url: required_string(&value, "url")?,
             })
         })
     }

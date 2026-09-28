@@ -18,7 +18,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/me", get(me))
         .route("/api/plan", post(choose_plan))
         .route("/api/payment-method-setup", post(payment_method_setup))
-        .route("/api/payment-method-bindings", get(payment_method_bindings).post(save_payment_method_binding))
+        .route(
+            "/api/payment-method-bindings",
+            get(payment_method_bindings).post(save_payment_method_binding),
+        )
         .route("/api/dashboard", get(dashboard))
         .route("/api/checkouts", post(checkout))
         .route("/api/checkouts/{id}", get(checkout_status))
@@ -130,7 +133,9 @@ async fn payment_method_setup(
     headers: HeaderMap,
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
-    Ok(Json(services::create_payment_method_setup(&state, &user).await?))
+    Ok(Json(
+        services::create_payment_method_setup(&state, &user).await?,
+    ))
 }
 
 async fn save_payment_method_binding(
@@ -139,7 +144,9 @@ async fn save_payment_method_binding(
     Json(request): Json<crate::models::SavePaymentMethodBindingRequest>,
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
-    Ok(Json(services::save_payment_method_binding(&state, &user, request.setup_intent_id).await?))
+    Ok(Json(
+        services::save_payment_method_binding(&state, &user, request.checkout_session_id).await?,
+    ))
 }
 
 async fn payment_method_bindings(
@@ -147,7 +154,9 @@ async fn payment_method_bindings(
     headers: HeaderMap,
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
-    Ok(Json(services::list_payment_method_bindings(&state, &user).await?))
+    Ok(Json(
+        services::list_payment_method_bindings(&state, &user).await?,
+    ))
 }
 
 async fn checkout_status(

@@ -43,7 +43,7 @@ pub struct CreateCheckoutRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct SavePaymentMethodBindingRequest {
-    pub setup_intent_id: String,
+    pub checkout_session_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]

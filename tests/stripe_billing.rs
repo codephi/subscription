@@ -9,9 +9,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use subscription::{
     dto::{
-        billing::{
-            CreateBillingConnectionRequest, CreateInitialCollectionRequest,
-        },
+        billing::{CreateBillingConnectionRequest, CreateInitialCollectionRequest},
         events::{WorkspaceEventEnvelope, WorkspaceEventPayload, WorkspaceEventType},
         plans::{
             AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest,
@@ -523,49 +521,72 @@ async fn stripe_payment_intent_uses_stable_idempotency_and_domain_metadata() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
     let server = FakeStripeServer::responding_with(
-        r#"{"id":"seti_test","client_secret":"seti_test_secret"}"#,
+        r#"{"id":"cs_test_01","url":"https://checkout.stripe.com/c/pay/cs_test_01"}"#,
     )
     .await;
     let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
     let setup = connector
         .create_setup_session(&SetupSessionCommand {
             customer_reference: "cus_test".into(),
+            client_reference_id: "plan_test".into(),
+            billing_connection_id: "connection_test".into(),
+            success_url: "http://localhost:5174/?session_id={CHECKOUT_SESSION_ID}".into(),
+            cancel_url: "http://localhost:5174/?payment_setup=cancelled".into(),
         })
         .await
         .unwrap();
     let request = server.finish().await;
-    assert_eq!(setup.provider_setup_id, "seti_test");
-    assert_eq!(setup.client_secret, "seti_test_secret");
-    assert!(request.starts_with("POST /v1/setup_intents "));
+    assert_eq!(setup.provider_setup_id, "cs_test_01");
+    assert_eq!(
+        setup.redirect_url,
+        "https://checkout.stripe.com/c/pay/cs_test_01"
+    );
+    assert!(request.starts_with("POST /v1/checkout/sessions "));
+    assert!(request.contains("mode=setup"));
     assert!(request.contains("customer=cus_test"));
+    assert!(request.contains("client_reference_id=plan_test"));
+    assert!(request.contains("metadata%5Bbilling_connection_id%5D=connection_test"));
+    assert!(request.contains("success_url=http%3A%2F%2Flocalhost%3A5174"));
+    assert!(request.contains("cancel_url=http%3A%2F%2Flocalhost%3A5174"));
     assert!(request.contains("payment_method_types%5B%5D=card"));
-    assert!(request.contains("usage=off_session"));
+    assert!(request.contains("setup_intent_data%5Busage%5D=off_session"));
     assert!(!request.contains("return_url"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stripe_setup_verification_reads_provider_state_and_requires_off_session_use() {
     let server = FakeStripeServer::responding_with(
-        r#"{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"off_session"}"#,
+        r#"{"id":"cs_test_verified","mode":"setup","status":"complete","customer":"cus_verified","client_reference_id":"plan_verified","metadata":{"billing_connection_id":"connection_verified"},"setup_intent":{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"off_session"}}"#,
     )
     .await;
     let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
     let payment_method = connector
-        .retrieve_setup_intent("seti_verified")
+        .retrieve_checkout_setup_intent(
+            "cs_test_verified",
+            "cus_verified",
+            "plan_verified",
+            "connection_verified",
+        )
         .await
         .unwrap();
     let request = server.finish().await;
-    assert!(request.starts_with("GET /v1/setup_intents/seti_verified "));
+    assert!(request
+        .starts_with("GET /v1/checkout/sessions/cs_test_verified?expand%5B%5D=setup_intent "));
     assert_eq!(payment_method.customer_id, "cus_verified");
     assert_eq!(payment_method.payment_method_id, "pm_verified");
 
     let server = FakeStripeServer::responding_with(
-        r#"{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"on_session"}"#,
+        r#"{"id":"cs_test_verified","mode":"setup","status":"complete","customer":"cus_verified","client_reference_id":"plan_verified","metadata":{"billing_connection_id":"connection_verified"},"setup_intent":{"id":"seti_verified","status":"succeeded","customer":"cus_verified","payment_method":"pm_verified","usage":"on_session"}}"#,
     )
     .await;
     let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
     assert!(connector
-        .retrieve_setup_intent("seti_verified")
+        .retrieve_checkout_setup_intent(
+            "cs_test_verified",
+            "cus_verified",
+            "plan_verified",
+            "connection_verified"
+        )
         .await
         .is_err());
     let _ = server.finish().await;

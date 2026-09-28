@@ -50,33 +50,28 @@ conceder no máximo uma franquia por cobrança confirmada.
 
 ## Pendências comuns aos dois modelos
 
-### 1. Completar o fluxo de cartão salvo
+### 1. Fluxo de cartão salvo
 
-1. Corrigir a criação do SetupIntent: hoje o adaptador envia `return_url` na
-   criação sem confirmação, combinação rejeitada pela Stripe. Definir e
-   implementar onde o `return_url` entra no fluxo de confirmação usado pelo
-   Stripe.js/Elements.
-2. No frontend do SaaS, criar a tela de cartão com Stripe.js/Elements. O
-   backend cria a sessão e entrega o `client_secret` somente ao cliente e à
-   sessão que iniciaram aquela operação. Dados de cartão não passam nem ficam
-   armazenados no SaaS ou na Subscription API.
-3. Tratar estados do SetupIntent no cliente, incluindo autenticação adicional,
-   cancelamento e falha; o redirect de retorno não é prova de sucesso.
-4. Depois da confirmação, o backend consulta a Stripe e valida que o
-   SetupIntent está `succeeded`, pertence ao `cus_...` esperado e identifica o
-   PaymentMethod associado.
-5. Só depois dessa validação registrar o PaymentMethod na
-   `/payment-method-bindings`. A API hoje valida o formato da referência, mas
-   não prova junto à Stripe que o método foi configurado com sucesso e pertence
-   ao Customer da conexão.
-6. Confirmar que o Customer da BillingConnection é propagado até toda cobrança
-   PaymentIntent e que o PaymentMethod vinculado pertence a esse Customer. A
-   integração Stripe em desenvolvimento já cria/associa Customer à conexão e
-   o adaptador atual aceita `customer_reference`; manter essa associação como
-   invariável e cobri-la no fluxo completo.
-7. Definir troca e remoção de cartão, método padrão, cartões expirados e
-   notificação ao usuário. O contrato atual lista vínculos, mas não oferece um
-   fluxo completo de gestão de cartões pelo cliente.
+Subscription cria uma Checkout Session hospedada em modo `setup`; TaskLab só
+redireciona o navegador e envia de volta o ID `cs_...`. Subscription recupera
+Checkout Session e SetupIntent na API Stripe, valida `succeeded`, `off_session`,
+Customer esperado e PaymentMethod associado antes de persistir o token. Uma
+repetição retorna o mesmo vínculo. PAN/CVC seguem do navegador diretamente à
+Stripe.
+
+Ainda é necessário validar no ambiente Stripe de teste o ciclo com autenticação
+adicional e cobranças futuras; a autorização de setup não garante aprovação de
+cobranças subsequentes.
+
+O Customer provisionado para a conexão também é enviado ao PaymentIntent
+off-session. Ainda faltam troca e remoção de cartão, método padrão, cartões
+expirados e notificação ao usuário; a TaskLab hoje lista e seleciona cartões,
+mas não oferece toda a gestão do ciclo de vida.
+
+Cobranças que retornam `requires_action` ainda precisam de uma ação segura no
+frontend para o cliente concluir autenticação adicional do PaymentIntent. O
+SetupIntent protege a autorização para uso futuro, mas não garante aprovação
+das próximas cobranças.
 
 ### 2. Tornar webhooks escaláveis e confiáveis
 

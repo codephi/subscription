@@ -46,7 +46,8 @@ versões do plano. A adesão de um cliente específico ainda é feita pela API.
 ## 2. Preparar Stripe para cobrança recorrente
 
 1. No [Dashboard Stripe](https://dashboard.stripe.com/), obtenha a chave
-   secreta para a Subscription API e a chave publicável para Stripe.js no SaaS.
+   secreta para a Subscription API; a Subscription cria Checkout Sessions
+   hospedadas para coleta dos cartões.
    Configure `STRIPE_SECRET_KEY` no ambiente do serviço e mantenha ambientes
    de teste e produção independentes. Não crie Stripe Product/Price/Subscription
    para representar esta oferta: o domínio comercial e o calendário ficam na
@@ -111,26 +112,24 @@ Idempotency-Key: account:<WORKSPACE_ID>:pro-plan
 {"plan_version_id":"<PLAN_VERSION_ID>","transaction_id":"account:<WORKSPACE_ID>:pro-plan"}
 ```
 
-2. Seu backend chama a sessão de setup com `return_url` HTTPS. Entregue o
-   `client_secret` ao cliente certo; o frontend usa
-   [Stripe.js/Elements para confirmar o SetupIntent](https://docs.stripe.com/payments/save-and-reuse?platform=web&ui=embedded-form).
-   O cartão é coletado pelo Stripe. Depois do resultado `succeeded`, o backend
-   verifica no Stripe o Customer e o PaymentMethod `pm_...` e registra o vínculo
-   com o CustomerPlan.
-   A criação de SetupIntent da API precisa de correção antes deste passo: ela
-   envia `return_url` sem `confirm=true`, que o Stripe não aceita na criação.
+2. Seu backend chama a sessão de setup da Subscription, que cria uma Checkout
+   Session hospedada em modo `setup` usando a credencial Stripe. Redirecione o
+   cliente autenticado à URL devolvida; o cartão é informado diretamente na
+   página Stripe Checkout.
 
 ```http
 POST /v1/workspaces/<WORKSPACE_ID>/billing-connections/<CONNECTION_ID>/payment-method-setup-sessions
-{"return_url":"https://seu-saas.example/billing/return"}
+{"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?session_id={CHECKOUT_SESSION_ID}","cancel_url":"https://app.example/return?payment_setup=cancelled"}
 
 POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
-{"billing_connection_id":"<CONNECTION_ID>","customer_plan_id":"<CUSTOMER_PLAN_ID>","provider_payment_method_reference":"pm_..."}
+{"billing_connection_id":"<CONNECTION_ID>","customer_plan_id":"<CUSTOMER_PLAN_ID>","checkout_session_id":"cs_..."}
 ```
 
-3. A API atual não valida o SetupIntent ao criar o binding. Não trate apenas
-   o `pm_...` ou o redirect como confirmação. O fluxo de webhook atual também
-   não ativa plano FREE que exija cartão; este guia usa plano PAID.
+3. Subscription recupera a Checkout Session e o SetupIntent usando a credencial
+   privada da conexão e valida conclusão, Customer esperado, `usage=off_session`
+   e método associado antes de criar o vínculo. O redirect sozinho não é confirmação. O fluxo de
+   webhook atual também não ativa plano FREE que exija cartão; este guia usa
+   plano PAID.
 
 **Admin-ui atual:** visualiza o CustomerPlan, mas não cria adesão, sessão de
 setup ou vínculo de método de pagamento.

@@ -2,7 +2,8 @@
 
 Este documento descreve o que falta para o operador configurar ofertas,
 Stripe e contas pelo painel interno. O checkout e a confirmação de cartão
-continuam sendo feitos pelo cliente no **frontend do SaaS**, com Stripe.js.
+continuam sendo feitos pelo cliente no **frontend do SaaS**, redirecionado à
+página hospedada pelo Stripe Checkout.
 O `admin-ui` é um painel operacional, não uma página pública de pagamento.
 Consulte os fluxos completos de [créditos](credito.md) e
 [assinatura](assinatura.md).
@@ -25,11 +26,10 @@ Consulte os fluxos completos de [créditos](credito.md) e
    papéis, escopo por `workspace_id` e trilha de ator verificado. O painel
    atual não tem login e as rotas gerais/admin não têm middleware de
    autenticação; não o exponha diretamente à internet.
-2. **Identidade Stripe por conta.** Automatizar a criação ou associação de
-   um `cus_...` por conta pagante e persistir a relação com o UUID da conta.
-   `BillingConnection.external_account_reference` hoje alimenta o parâmetro
-   `customer` do SetupIntent; uma conexão para cartão salvo deve apontar ao
-   Customer certo.
+2. **Identidade Stripe por conta.** A integração gerenciada já cria ou associa
+   um Customer Stripe por workspace e persiste essa relação na conexão. O
+   SetupIntent e as cobranças futuras usam esse Customer; mantenha o vínculo
+   com o workspace como autoridade.
 3. **Webhook escalável.** A resposta da conexão fornece
    `/v1/billing/webhooks/{connection_id}`. Definir e implementar entrada
    compartilhada que identifique a conexão com segurança, ou provisionar e
@@ -37,12 +37,10 @@ Consulte os fluxos completos de [créditos](credito.md) e
    estado `pronto` quando o destino e o segredo correspondentes funcionarem.
    Validar que a conexão da rota corresponde à cobrança antes de aplicar o
    evento; essa comparação não existe no caminho atual de confirmação.
-4. **Contrato de cartão salvo.** Corrigir a criação do SetupIntent, que hoje
-   envia `return_url` sem `confirm=true`, e enviar `customer` no PaymentIntent; validar
-   que o `pm_...` anexado pertence ao Customer da conta e que o SetupIntent
-   terminou com sucesso. O cadastro de binding atual valida apenas o prefixo
-   `pm_`. Acrescentar tratamento seguro de autenticação adicional do mesmo
-   PaymentIntent e uma ação consumível pelo frontend do SaaS.
+4. **Autenticação adicional de cobrança.** O cadastro tokenizado confirma o
+   SetupIntent no Stripe antes de criar o vínculo. Falta permitir ao cliente
+   concluir com segurança `requires_action` de PaymentIntents após cobranças
+   off-session.
 5. **Renovação paga.** Criar a solicitação `RENEWAL` única por ciclo na data
    de vencimento. O worker atual despacha apenas solicitações existentes.
    Validar restart, concorrência, falha, expiração e regularização.
@@ -110,9 +108,9 @@ orquestração e a revisão da oferta, não a criação de um segundo catálogo.
 ### 4. Checkout e pagamento do cliente
 
 1. O operador configura o pacote/plano no admin-ui; o cliente escolhe a oferta
-   no SaaS. O backend do SaaS chama a API para criar sessão de setup. O
-   frontend do SaaS usa Stripe.js/Elements e envia apenas a referência
-   `pm_...` validada ao backend.
+   no SaaS. O backend do SaaS pede à Subscription uma Checkout Session
+   hospedada, redireciona o cliente e envia o ID `cs_...` de retorno para
+   validação server-side.
 2. O backend registra o binding e cria a intenção `INITIAL` ou `ON_DEMAND`
    com idempotência. O painel mostra `collection_request_id`, valor, moeda,
    tipo, estado, prazo e PaymentIntent correlato.

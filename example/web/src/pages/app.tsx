@@ -6,7 +6,7 @@ import { OnboardingScreen } from "@/components/onboarding-screen"
 import { WorkspaceDashboard } from "@/components/workspace-dashboard"
 import { LoadingScreen } from "@/components/loading-screen"
 import { AppFrame } from "@/components/app-frame"
-import { StripeCardSetup } from "@/components/stripe-card-setup"
+import { PaymentMethodSetup } from "@/components/payment-method-setup"
 
 type PlanModel = "PREPAID" | "SUBSCRIPTION"
 type CheckoutKind = "INITIAL" | "ON_DEMAND"
@@ -30,7 +30,7 @@ export default function App() {
 
   useEffect(() => restoreSession(setUser, setAuthChecked), [])
   useEffect(() => restorePendingExecution(user, setTaskName, setPendingExecution, executionTransaction), [user?.username])
-  useEffect(() => recoverStripeSetup(user, queryClient, setPaymentMethodBindingId, setError), [user?.username])
+  useEffect(() => recoverPaymentSetup(user, queryClient, setPaymentMethodBindingId, setUser, setError), [user?.username])
 
   const dashboard = useQuery({
     queryKey: ["dashboard", user?.username],
@@ -85,12 +85,7 @@ export default function App() {
       onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : paymentMethodBindingId
         ? startCheckout("INITIAL", user, 10, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
         : setError("Adicione e valide um cartão antes de iniciar a assinatura.")}
-    />{showCardSetup && <StripeCardSetup onSaved={(id) => {
-      setPaymentMethodBindingId(id)
-      setShowCardSetup(false)
-      setError("")
-      void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
-    }} />}</AppFrame>
+    />{showCardSetup && <PaymentMethodSetup />}</AppFrame>
   }
 
   return <AppFrame><WorkspaceDashboard
@@ -117,12 +112,7 @@ export default function App() {
       ? startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
       : setError("Adicione e valide um cartão antes de iniciar o checkout.")}
     onExecute={() => startExecution(user, taskName, setPendingExecution, executionTransaction, executeMutation.mutate)}
-  />{showCardSetup && <StripeCardSetup onSaved={(id) => {
-    setPaymentMethodBindingId(id)
-    setShowCardSetup(false)
-    setError("")
-    void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
-  }} />}</AppFrame>
+  />{showCardSetup && <PaymentMethodSetup />}</AppFrame>
 }
 
 function restoreSession(setUser: (user: User | null) => void, setChecked: (checked: boolean) => void) {
@@ -131,20 +121,23 @@ function restoreSession(setUser: (user: User | null) => void, setChecked: (check
   return () => { active = false }
 }
 
-function recoverStripeSetup(user: User | null, queryClient: ReturnType<typeof useQueryClient>, setBinding: (id: string) => void, setError: (message: string) => void) {
+function recoverPaymentSetup(user: User | null, queryClient: ReturnType<typeof useQueryClient>, setBinding: (id: string) => void, setUser: (user: User) => void, setError: (message: string) => void) {
   const url = new URL(window.location.href)
-  const setupIntentId = url.searchParams.get("setup_intent")
-  if (!user || !setupIntentId?.startsWith("seti_")) return
-  url.searchParams.delete("setup_intent")
-  url.searchParams.delete("setup_intent_client_secret")
+  const checkoutSessionId = url.searchParams.get("session_id")
+  if (!user || !checkoutSessionId?.startsWith("cs_")) return
+  url.searchParams.delete("session_id")
+  url.searchParams.delete("payment_setup")
   window.history.replaceState({}, "", url)
   void api<{ payment_method_binding_id: string }>("/payment-method-bindings", {
     method: "POST",
-    body: JSON.stringify({ setup_intent_id: setupIntentId }),
+    body: JSON.stringify({ checkout_session_id: checkoutSessionId }),
   }).then((binding) => {
     setBinding(binding.payment_method_binding_id)
     setError("")
-    return queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] }),
+      api<User>("/me").then(setUser),
+    ])
   }).catch((error: Error) => setError(error.message))
 }
 

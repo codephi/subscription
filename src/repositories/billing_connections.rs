@@ -181,7 +181,7 @@ impl DatabaseRepository {
             )
             .await?
         {
-            return Ok(existing);
+            return active_binding(existing);
         }
         let row = sqlx::query(
             "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
@@ -189,7 +189,8 @@ impl DatabaseRepository {
              SELECT $1,bc.billing_connection_id,$2,$2,$3,'CARD',$4,'ACTIVE' FROM billing_connections bc \
              WHERE bc.billing_connection_id=$5 AND bc.workspace_id=$2 AND bc.status='ACTIVE' \
              AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM customer_plans cp \
-               WHERE cp.customer_plan_id=$3 AND cp.customer_id=$2)) RETURNING *",
+               WHERE cp.customer_plan_id=$3 AND cp.customer_id=$2)) \
+             ON CONFLICT (billing_connection_id,provider_payment_method_reference) DO NOTHING RETURNING *",
         )
         .bind(Uuid::new_v4())
         .bind(workspace_id)
@@ -197,9 +198,21 @@ impl DatabaseRepository {
         .bind(provider_payment_method_reference)
         .bind(connection_id)
         .fetch_optional(&self.pool())
-        .await?
-        .ok_or_else(|| missing_connection(workspace_id, connection_id))?;
-        Ok(binding_from_row(&row))
+        .await?;
+        if let Some(row) = row {
+            return Ok(binding_from_row(&row));
+        }
+        if let Some(existing) = self
+            .find_payment_method_binding(
+                workspace_id,
+                connection_id,
+                provider_payment_method_reference,
+            )
+            .await?
+        {
+            return active_binding(existing);
+        }
+        Err(missing_connection(workspace_id, connection_id))
     }
 
     pub async fn list_payment_method_bindings(
@@ -214,6 +227,21 @@ impl DatabaseRepository {
         .await?;
         Ok(rows.iter().map(binding_from_row).collect())
     }
+}
+
+fn active_binding(
+    binding: PaymentMethodBindingResponse,
+) -> ApiResult<PaymentMethodBindingResponse> {
+    if binding.status == "ACTIVE" {
+        return Ok(binding);
+    }
+    Err(ApiError::conflict(
+        "payment_method_binding_inactive",
+        format!(
+            "payment method binding {} is {}",
+            binding.payment_method_binding_id, binding.status
+        ),
+    ))
 }
 
 async fn ensure_active_workspace(pool: &sqlx::PgPool, workspace_id: Uuid) -> ApiResult<()> {

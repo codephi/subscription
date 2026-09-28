@@ -1665,12 +1665,15 @@ export interface components {
         CreatePaymentMethodBindingRequest: {
             /** Format: uuid */
             billing_connection_id: string;
+            checkout_session_id: string;
             /** Format: uuid */
-            customer_plan_id?: string | null;
-            provider_payment_method_reference: string;
+            customer_plan_id: string;
         };
         CreatePaymentMethodSetupSessionRequest: {
-            return_url: string;
+            cancel_url: string;
+            /** Format: uuid */
+            customer_plan_id: string;
+            success_url: string;
         };
         CreatePlanTransitionRequest: {
             actor_reference: string;
@@ -2063,8 +2066,8 @@ export interface components {
             workspace_id: string;
         };
         PaymentMethodSetupSessionResponse: {
-            client_secret: string;
             provider_setup_id: string;
+            redirect_url: string;
         };
         PendingUsageTransactionResponse: {
             /** Format: date-time */

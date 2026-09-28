@@ -120,51 +120,48 @@ criação `PENDING` é devolvida como HTTP 202 pela API TaskLab; o frontend cons
 até sair de `PENDING` e então atualiza o painel.
 
 O valor submetido ao checkout não vem do formulário: Subscription resolve os
-termos a partir do plano e do pacote cadastrados. No sandbox, a Subscription
-cria um SetupIntent e a TaskLab usa Stripe Elements para enviar os dados do
-cartão de teste diretamente à Stripe. Após a validação, TaskLab envia à
-Subscription somente o ID do SetupIntent; Subscription confirma o cliente e
-cria o vínculo com a referência tokenizada do método de pagamento. PAN e CVC
-não passam nem ficam armazenados no backend da TaskLab ou da Subscription.
+termos a partir do plano e do pacote cadastrados. Para salvar um cartão, a
+Subscription cria uma Checkout Session em modo `setup` e direciona o usuário à
+página hospedada da Stripe. TaskLab só inicia o fluxo e, no retorno, envia à
+Subscription o ID da Checkout Session para verificação server-side. PAN e CVC
+seguem diretamente do navegador para a Stripe.
 
 ### Fluxo de tokenização
 
-1. O frontend autenticado pede `POST /api/payment-method-setup` à TaskLab. O
-   backend garante um `CustomerPlan`, localiza a integração Stripe ativa da
-   conta e pede à Subscription uma sessão de SetupIntent para esse cliente.
-2. TaskLab devolve ao navegador somente `client_secret` e
-   `STRIPE_PUBLISHABLE_KEY`. O Stripe.js monta o `PaymentElement`; os campos
-   sensíveis são iframes servidos pelo Stripe e os dados seguem do navegador ao
-   Stripe. O SetupIntent é criado com `usage=off_session` para permitir cobrança
-   futura com a autorização do cliente.
-3. Stripe.js confirma o SetupIntent. Se o banco exigir autenticação, o usuário
-   pode voltar à TaskLab após o desafio; a aplicação envia o `setup_intent`
-   retornado no URL para `POST /api/payment-method-bindings`.
-4. A TaskLab envia `setup_intent_id`, `billing_connection_id` e
-   `customer_plan_id` à Subscription. A Subscription consulta o SetupIntent com
-   a chave secreta da conexão, exige `status=succeeded`, `usage=off_session`, um
-   `pm_...` e o Customer Stripe esperado para o workspace; só então grava o
-   vínculo ativo. Reenvios retornam o vínculo já criado.
-5. O checkout envia o `payment_method_binding_id` selecionado. A Subscription
-   valida escopo e status do vínculo antes de criar a cobrança. A listagem
-   aparece no dashboard da TaskLab; ela não expõe o token do provedor.
+1. O frontend pede autorização explícita para salvar o cartão e chama
+   `POST /api/payment-method-setup`. O backend TaskLab garante um `CustomerPlan`
+   e pede à Subscription uma Checkout Session de setup para o Customer Stripe.
+2. Subscription cria a sessão `mode=setup`, com `usage=off_session`, usando sua
+   própria credencial Stripe, e devolve a URL hospedada. TaskLab redireciona o
+   navegador para essa URL. Não usa Stripe.js, chave publicável ou credencial
+   Stripe.
+3. Após o usuário informar o cartão e concluir eventuais desafios bancários,
+   Stripe redireciona à TaskLab com `session_id=cs_...`. O frontend envia esse
+   identificador a `POST /api/payment-method-bindings`.
+4. TaskLab envia `checkout_session_id`, `billing_connection_id` e
+   `customer_plan_id` à Subscription. Subscription consulta a Checkout Session
+   expandindo o SetupIntent com a chave secreta da conexão, valida que a sessão
+   foi concluída, pertence ao Customer e plano esperados e contém um SetupIntent
+   `succeeded`, `usage=off_session` e um `pm_...`; só então grava o vínculo.
+   Reenvios retornam o vínculo já criado.
 
 As rotas da Subscription são `POST
 /v1/workspaces/{workspace_id}/billing-connections/{connection_id}/payment-method-setup-sessions`,
 `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET` na mesma
-rota de vínculos. O primeiro endpoint recebe o `customer_plan_id`; o segundo
-recebe `billing_connection_id`, `customer_plan_id` e `setup_intent_id`. Não
-envie PAN, validade ou CVC em JSON, logs, analytics ou banco da aplicação.
+rota de vínculos. O primeiro endpoint recebe `customer_plan_id`, `success_url` e
+`cancel_url`; o segundo recebe `billing_connection_id`, `customer_plan_id` e
+`checkout_session_id`. Não envie PAN, validade ou CVC em JSON, logs, analytics
+ou banco da aplicação.
 
-Para pagamento de teste, informe um cartão de teste no PaymentElement.
+Para pagamento de teste, informe um cartão de teste na página Stripe Checkout.
 `BILLING_SANDBOX_PAYMENT_SCENARIO` controla somente o método interno de
 demonstração quando o checkout não informa um vínculo tokenizado.
 
 Para sandbox, configure `BILLING_SANDBOX_ENABLED=true`, `STRIPE_SECRET_KEY`
 `sk_test_...`, `STRIPE_WEBHOOK_SECRET` `whsec_...` e
 `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED` no ambiente da
-Subscription. Na TaskLab, configure `STRIPE_PUBLISHABLE_KEY=pk_test_...` para
-Stripe Elements. `make run` inicia o Stripe CLI quando o sandbox está ligado; o
+Subscription. Configure `TASKLAB_WEB_URL` na TaskLab para definir os URLs de
+retorno permitidos. `make run` inicia o Stripe CLI quando o sandbox está ligado; o
 script valida o segredo do listener e entrega webhooks a
 `/v1/billing/webhooks/stripe` da Subscription. Stripe CLI e credenciais são
 opcionais quando não se está testando checkout.
@@ -234,8 +231,8 @@ Rotas em `example/backend/src/routes.rs`:
 | `POST /api/auth/logout`, `GET /api/me` | Encerra ou consulta sessão |
 | `POST /api/plan` | Seleciona a opção pré-paga FREE |
 | `GET /api/dashboard` | Agrega carteira, catálogo, medidor e histórico |
-| `POST /api/payment-method-setup` | Cria CustomerPlan se necessário e inicia o SetupIntent |
-| `POST /api/payment-method-bindings` | Confirma o SetupIntent na Subscription e salva a referência |
+| `POST /api/payment-method-setup` | Cria CustomerPlan se necessário e inicia o Checkout Session hospedado |
+| `POST /api/payment-method-bindings` | Valida a Checkout Session na Subscription e salva a referência |
 | `GET /api/payment-method-bindings` | Lista vínculos tokenizados ativos |
 | `POST /api/checkouts` | Cria checkout inicial ou recarga, com `Idempotency-Key` |
 | `GET /api/checkouts/{id}` | Atualiza o estado do checkout |
@@ -256,6 +253,7 @@ desenvolvimento encaminha à API local.
 | `DATABASE_URL` | SQLite local da TaskLab |
 | `SUBSCRIPTION_API_URL` | Endereço HTTP da Subscription; local padrão `:3000` |
 | `ACCOUNTS_WEBHOOK_SECRET` | Segredo compartilhado para assinar eventos de workspace |
+| `TASKLAB_WEB_URL` | Origin web usado nos retornos do Stripe Checkout; padrão `http://127.0.0.1:5174` |
 
 Copie para `example/.env`, use o mesmo segredo de webhook nos dois serviços,
 rode `npm install`, `npm run setup` dentro de `example/` e `make run` na raiz.
@@ -268,8 +266,8 @@ O Makefile inicia Subscription (`3000`), admin-ui (`5173`), TaskLab API
   oferece troca de plano, cancelamento pela interface, renovação automática ou
   recarga de conta assinante.
 - Pagamento só pode ser exercitado pelo sandbox Stripe configurado na
-  Subscription. O checkout usa Stripe Elements e aceita cartões de teste;
-  PAN e CVC são enviados diretamente do navegador à Stripe.
+  Subscription. O setup usa Stripe Checkout hospedado; PAN e CVC seguem do navegador
+  diretamente para a Stripe.
 - A TaskLab guarda estado em SQLite local; perder ou trocar o arquivo perde
   sessão, associação de plano, catálogo configurado e histórico local. Os
   lançamentos e pagamentos confirmados continuam na Subscription.

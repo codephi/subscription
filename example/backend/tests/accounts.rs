@@ -59,7 +59,7 @@ async fn session_cookie_is_http_only_and_revocation_ends_the_session() {
         pool.clone(),
         SubscriptionClient::new("http://127.0.0.1:3000").expect("API URL"),
         "fake-secret".into(),
-        None,
+        "http://127.0.0.1:5174".into(),
     );
     assert_eq!(
         auth::current_user(&state, &headers)
