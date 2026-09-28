@@ -6,6 +6,13 @@ recargas avulsas, o [modelo de assinatura](assinatura.md) para cobrança
 recorrente e o [plano do admin-ui](admin-ui-futuro.md) para a operação futura
 pelo painel.
 
+Para as regras e rotas de [vouchers e cupons](promocoes.md), incluindo resgate,
+cotação e recuperação de checkout, consulte o guia de promoções.
+
+Para a POC executável já presente neste repositório, consulte a
+[documentação completa da integração TaskLab](tasklab.md), incluindo seus
+contratos, identidade de workspace, catálogo, checkout, uso e limitações.
+
 ## Identidades e recursos
 
 | No SaaS | Na Subscription API | Regra |

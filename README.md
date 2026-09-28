@@ -35,6 +35,9 @@ resolução da tentativa. O painel usa apenas referências de ator digitadas pel
 operador; isso não representa autenticação.
 
 O cadastro de produtos conecta produto, itens e preços sem exigir cópia de IDs.
+Produtos cadastrados e seus itens podem ser editados no detalhe, incluindo nome,
+descrição, modelo de uso, status, unidade, escala e hierarquia dos itens; as
+alterações validam a compatibilidade do modelo e impedem ciclos na hierarquia.
 O caminho comum pede nome, unidade de consumo e créditos por cobrança; unidade,
 quantidade por cobrança e vigência começam com padrões úteis, e opções como
 faixas, hierarquia e escala ficam em configurações avançadas. Os cadastros
@@ -43,6 +46,11 @@ preços como rascunho e publicar depois, ou revisar e publicar o conjunto,
 ativando itens e produto em sequência. A sessão guarda o progresso confirmado
 para retomar falhas conhecidas; criações sem resposta confirmada exigem conferir
 o catálogo antes de uma nova tentativa.
+
+A seção **Promoções** administra vouchers de créditos persistentes e cupons
+aplicáveis à contratação inicial ou compra avulsa de créditos. Cotação é sem
+efeitos; checkout reserva o uso do cupom, cobra apenas o valor líquido e conclui
+um total zero sem criar cobrança. Veja o [guia de promoções](docs/integracao-saas/promocoes.md).
 
 O [plano do frontend](docs/plano-frontend-administrativo.md) registra o escopo
 entregue e os limites operacionais atuais. Para o inventário detalhado de telas,
@@ -58,6 +66,9 @@ Para integrar um SaaS de infraestrutura, consulte os guias de
 [plano para operar tudo pelo admin-ui](docs/integracao-saas/admin-ui-futuro.md).
 O [índice da integração](docs/integracao-saas/README.md) reúne o mapeamento de
 identidades, pré-requisitos e bloqueios atuais antes de cobrar clientes reais.
+O documento de [pendências de implementação](docs/integracao-saas/pendencias-implementacao.md)
+consolida o trabalho necessário para cartão, recargas, consumo por execução e
+recorrência controlada pela Stripe ou pela Subscription API.
 
 Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 
@@ -434,7 +445,7 @@ Default credentials are never returned by the API, and require
 - Unit tests: `cargo test`
 - MCP tests: `cargo test --features mcp mcp`
 - Integration tests: `cargo test --test integration`
-  - Requires Docker; tests spin up `pgvector/pgvector:pg18` and, unless `OTEL_ENABLED=false`, a Jaeger collector via testcontainers.
+  - Requires Docker; tests spin up disposable `pgvector/pgvector:pg18` containers. OpenTelemetry is disabled unless a collector endpoint is explicitly configured, so the test suite does not leave a Jaeger container running.
 
 ## Architecture
 
