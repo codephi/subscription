@@ -9,10 +9,17 @@ use opentelemetry_otlp::{
 use opentelemetry_sdk::{
     propagation::TraceContextPropagator, resource::Resource, trace::SdkTracerProvider,
 };
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing::Subscriber;
+use tracing_subscriber::{
+    layer::{Layer, Layered, SubscriberExt},
+    registry::LookupSpan,
+    util::SubscriberInitExt,
+    EnvFilter,
+};
 
 pub(crate) mod ecs;
 mod ecs_fields;
+mod log_format;
 
 pub struct TelemetryGuard {
     tracer_provider: Option<SdkTracerProvider>,
@@ -38,6 +45,7 @@ impl TelemetryGuard {
 
 /// Install ECS stdout logs and optional OTLP traces; e.g. `init_tracing(false)?`.
 pub fn init_tracing(enabled: bool) -> Result<TelemetryGuard> {
+    let log_format = log_format::LogFormat::from_environment()?;
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"))
         .add_directive("otel::tracing=info".parse().expect("valid directive"));
@@ -47,15 +55,42 @@ pub fn init_tracing(enabled: bool) -> Result<TelemetryGuard> {
     let tracer_provider = enabled
         .then(|| build_tracer_provider(resource))
         .transpose()?;
-    let otel_layer = tracer_provider.as_ref().map(|provider| {
-        tracing_opentelemetry::layer().with_tracer(provider.tracer(env!("CARGO_PKG_NAME")))
-    });
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(ecs_logs)
-        .with(otel_layer)
-        .init();
+    let subscriber = tracing_subscriber::registry().with(env_filter);
+    match log_format {
+        log_format::LogFormat::EcsJson => {
+            initialize_subscriber(subscriber.with(ecs_logs), tracer_provider.as_ref());
+        }
+        log_format::LogFormat::Text => {
+            initialize_subscriber(
+                subscriber.with(
+                    tracing_subscriber::fmt::layer()
+                        .with_target(false)
+                        .compact(),
+                ),
+                tracer_provider.as_ref(),
+            );
+        }
+    }
     Ok(TelemetryGuard { tracer_provider })
+}
+
+fn initialize_subscriber<S, L>(
+    subscriber: Layered<L, S>,
+    tracer_provider: Option<&SdkTracerProvider>,
+) where
+    S: Subscriber + for<'span> LookupSpan<'span> + Send + Sync + 'static,
+    L: Layer<S> + Send + Sync + 'static,
+    Layered<L, S>: Subscriber + for<'span> LookupSpan<'span> + Send + Sync + 'static,
+{
+    if let Some(provider) = tracer_provider {
+        subscriber
+            .with(
+                tracing_opentelemetry::layer().with_tracer(provider.tracer(env!("CARGO_PKG_NAME"))),
+            )
+            .init();
+        return;
+    }
+    subscriber.init();
 }
 
 fn build_tracer_provider(resource: Resource) -> Result<SdkTracerProvider> {
