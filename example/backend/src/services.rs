@@ -189,27 +189,21 @@ pub async fn create_checkout(
 pub async fn create_payment_method_setup(
     state: &AppState,
     user: &AuthenticatedUser,
-    idempotency_key: &str,
-    request: crate::models::CreatePaymentMethodFromCardRequest,
 ) -> Result<Value, AppError> {
     let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
+    let (success_url, cancel_url) = payment_setup_return_urls(&state.app_public_url)?;
     let session = state
         .subscription
         .post(
             &format!(
-                "/v1/workspaces/{}/payment-methods/from-card",
+                "/v1/workspaces/{}/payment-method-setup-sessions",
                 user.workspace_id
             ),
-            Some(idempotency_key),
+            None,
             &json!({
                 "customer_plan_id":customer_plan_id,
-                "cardholder_name":request.cardholder_name,
-                "card_name":request.card_name,
-                "card_number":request.card_number,
-                "exp_month":request.exp_month,
-                "exp_year":request.exp_year,
-                "cvc":request.cvc,
-                "save_for_future":request.save_for_future,
+                "success_url":success_url,
+                "cancel_url":cancel_url,
             }),
         )
         .await?;
@@ -220,6 +214,7 @@ pub async fn save_payment_method_binding(
     state: &AppState,
     user: &AuthenticatedUser,
     payment_method_setup_id: Uuid,
+    card_name: Option<String>,
 ) -> Result<Value, AppError> {
     let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
     state
@@ -227,9 +222,18 @@ pub async fn save_payment_method_binding(
         .post(
             &format!("/v1/workspaces/{}/payment-method-bindings", user.workspace_id),
             None,
-            &json!({"customer_plan_id":customer_plan_id,"payment_method_setup_id":payment_method_setup_id}),
+            &json!({"customer_plan_id":customer_plan_id,"payment_method_setup_id":payment_method_setup_id,"card_name":card_name}),
         )
         .await
+}
+
+fn payment_setup_return_urls(public_app_url: &str) -> Result<(String, String), AppError> {
+    let base = url::Url::parse(public_app_url).map_err(|error| AppError::Internal(error.into()))?;
+    let mut success = base.clone();
+    success.set_query(Some("payment_setup=success"));
+    let mut cancel = base;
+    cancel.set_query(Some("payment_setup=cancelled"));
+    Ok((success.to_string(), cancel.to_string()))
 }
 
 pub async fn list_payment_method_bindings(
@@ -554,5 +558,21 @@ mod topup_tests {
         assert_eq!(topup_plan_setting_key(25).unwrap(), "topup_25_plan_id");
         assert_eq!(topup_plan_setting_key(50).unwrap(), "topup_50_plan_id");
         assert!(topup_plan_setting_key(11).is_err());
+    }
+}
+
+#[cfg(test)]
+mod payment_setup_tests {
+    use super::payment_setup_return_urls;
+
+    #[test]
+    fn setup_return_urls_use_the_configured_tasklab_origin() {
+        assert_eq!(
+            payment_setup_return_urls("https://tasklab.example").expect("return URLs"),
+            (
+                "https://tasklab.example/?payment_setup=success".into(),
+                "https://tasklab.example/?payment_setup=cancelled".into(),
+            )
+        );
     }
 }

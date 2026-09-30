@@ -9,6 +9,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use subscription::{
     dto::{
+        admin_queries::CreateWorkspaceRequest,
         billing::{CreateBillingConnectionRequest, CreateInitialCollectionRequest},
         events::{WorkspaceEventEnvelope, WorkspaceEventPayload, WorkspaceEventType},
         plans::{
@@ -25,7 +26,10 @@ use subscription::{
         },
         stripe::StripeConnector,
     },
-    services::{billing, plans, stripe_webhooks, workspace_events::process_workspace_event},
+    services::{
+        admin_queries, billing, billing_integrations, plans, stripe_webhooks,
+        workspace_events::process_workspace_event,
+    },
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -125,6 +129,14 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
     assert!(!public_summary.contains("whsec_managed_test"));
     assert!(!public_summary.contains("sk_test_managed_secret"));
 
+    let delayed_workspace = admin_queries::create_workspace(
+        &repository,
+        CreateWorkspaceRequest {
+            actor_reference: "stripe-billing-test".into(),
+        },
+    )
+    .await
+    .unwrap();
     let defaults = repository
         .save_default_stripe_credentials(
             0,
@@ -154,6 +166,17 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
         loaded.webhook_secret.as_deref(),
         Some("whsec_default_secret")
     );
+    let recovered_connection = billing_integrations::active_or_provision_default_stripe(
+        &repository,
+        delayed_workspace.workspace_id,
+    )
+    .await
+    .unwrap();
+    let recovered = repository
+        .get_integration(delayed_workspace.workspace_id, recovered_connection)
+        .await
+        .unwrap();
+    assert_eq!(recovered.status, "ACTIVE");
     repository
         .provision_workspace_default_stripe(fixture.workspace_id, &loaded)
         .await

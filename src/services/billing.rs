@@ -166,12 +166,28 @@ pub async fn create_payment_method_setup_session(
 
 pub async fn create_workspace_payment_method_setup_session(
     repository: &DatabaseRepository,
+    sandbox_config: Option<&crate::services::billing_checkout::BillingCheckoutConfig>,
     workspace_id: uuid::Uuid,
     request: &CreatePaymentMethodSetupSessionRequest,
 ) -> ApiResult<PaymentMethodSetupSessionResponse> {
-    let connection_id = repository
-        .active_stripe_billing_connection(workspace_id)
-        .await?;
+    let connection_id = match sandbox_config {
+        Some(config) => {
+            crate::services::billing_checkout::ensure_sandbox_integration(
+                repository,
+                config,
+                workspace_id,
+            )
+            .await?
+            .billing_connection_id
+        }
+        None => {
+            crate::services::billing_integrations::active_or_provision_default_stripe(
+                repository,
+                workspace_id,
+            )
+            .await?
+        }
+    };
     create_payment_method_setup_session(repository, workspace_id, connection_id, request).await
 }
 
@@ -336,18 +352,21 @@ pub async fn create_payment_method_binding(
             ),
         ));
     }
+    let display_name = validate_payment_method_display_name(request.card_name.as_deref())?;
     repository
-        .create_verified_payment_method_binding(
+        .create_verified_payment_method_binding_with_name(
             workspace_id,
             connection_id,
             Some(customer_plan_id),
             &prepared.payment_method_id,
+            display_name,
         )
         .await
 }
 
 pub async fn create_payment_method_from_card(
     repository: &DatabaseRepository,
+    sandbox_config: Option<&crate::services::billing_checkout::BillingCheckoutConfig>,
     workspace_id: uuid::Uuid,
     idempotency_key: &str,
     request: &CreatePaymentMethodFromCardRequest,
@@ -356,7 +375,7 @@ pub async fn create_payment_method_from_card(
     repository
         .ensure_customer_plan_workspace(workspace_id, request.customer_plan_id)
         .await?;
-    let context = card_setup_context(repository, workspace_id).await?;
+    let context = card_setup_context(repository, sandbox_config, workspace_id).await?;
     let prepared = confirm_card_setup(&context, request, idempotency_key).await?;
     finish_card_setup(repository, workspace_id, request, &context, &prepared).await
 }
@@ -369,17 +388,33 @@ struct CardSetupContext {
 
 async fn card_setup_context(
     repository: &DatabaseRepository,
+    sandbox_config: Option<&crate::services::billing_checkout::BillingCheckoutConfig>,
     workspace_id: uuid::Uuid,
 ) -> ApiResult<CardSetupContext> {
-    let connection_id = repository
-        .active_stripe_billing_connection(workspace_id)
-        .await?;
+    let connection_id = match sandbox_config {
+        Some(config) => {
+            crate::services::billing_checkout::ensure_sandbox_integration(
+                repository,
+                config,
+                workspace_id,
+            )
+            .await?
+            .billing_connection_id
+        }
+        None => {
+            crate::services::billing_integrations::active_or_provision_default_stripe(
+                repository,
+                workspace_id,
+            )
+            .await?
+        }
+    };
     let configuration = repository
         .billing_connector_configuration(connection_id)
         .await?;
+    let connector = card_setup_connector(repository, workspace_id, connection_id, &configuration)?;
     let customer_id =
         card_setup_customer(repository, workspace_id, connection_id, &configuration).await?;
-    let connector = card_setup_connector(repository, workspace_id, connection_id, &configuration)?;
     Ok(CardSetupContext {
         connection_id,
         connector,
@@ -513,17 +548,16 @@ fn validate_card_entry(request: &CreatePaymentMethodFromCardRequest) -> ApiResul
 }
 
 fn validate_card_display_name(request: &CreatePaymentMethodFromCardRequest) -> ApiResult<()> {
-    let Some(name) = request
-        .card_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-    else {
-        return Ok(());
+    validate_payment_method_display_name(request.card_name.as_deref()).map(|_| ())
+}
+
+fn validate_payment_method_display_name(name: Option<&str>) -> ApiResult<Option<&str>> {
+    let Some(name) = name.map(str::trim).filter(|name| !name.is_empty()) else {
+        return Ok(None);
     };
     let has_control_character = name.chars().any(char::is_control);
     if name.chars().count() <= 50 && !has_control_character {
-        return Ok(());
+        return Ok(Some(name));
     }
     Err(ApiError::unprocessable(
         "invalid_card_display_name",

@@ -13,11 +13,12 @@ type OnboardingScreenProps = {
   selectedPaymentMethodId: string
   busy: boolean
   error: string
+  cardSetupForm: React.ReactNode
   onAddPaymentMethod: () => void
   onChoose: (model: PlanModel) => void
 }
 
-export function OnboardingScreen({ username, selectedPaymentMethodId, busy, error, onAddPaymentMethod, onChoose }: OnboardingScreenProps) {
+export function OnboardingScreen({ username, selectedPaymentMethodId, busy, error, cardSetupForm, onAddPaymentMethod, onChoose }: OnboardingScreenProps) {
   const [plan, setPlan] = useState<PlanModel>("PREPAID")
 
   return <main className="app-shell onboarding-shell">
@@ -40,8 +41,9 @@ export function OnboardingScreen({ username, selectedPaymentMethodId, busy, erro
         </RadioGroup>
       </FieldSet>
       {plan === "SUBSCRIPTION" && <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">{selectedPaymentMethodId ? "Cartão de teste validado." : "Valide um cartão de teste antes de iniciar a assinatura."}</p>
-        <Button type="button" variant="outline" onClick={onAddPaymentMethod}>Adicionar ou validar cartão</Button>
+        <p className="text-sm text-muted-foreground">{selectedPaymentMethodId ? "Cartão salvo para cobranças futuras." : "Adicione um cartão antes de iniciar a assinatura."}</p>
+        <Button type="button" variant="outline" onClick={onAddPaymentMethod}>Adicionar cartão</Button>
+        {cardSetupForm}
       </div>}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Button onClick={() => onChoose(plan)} disabled={busy}>

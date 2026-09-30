@@ -245,6 +245,18 @@ async fn ensure_integration(
     configure_integration(repository, workspace_id, &integration, config).await
 }
 
+pub(crate) async fn ensure_sandbox_integration(
+    repository: &DatabaseRepository,
+    config: &BillingCheckoutConfig,
+    workspace_id: Uuid,
+) -> ApiResult<crate::dto::billing::WorkspaceIntegrationResponse> {
+    let account_id = StripeConnector::new(config.api_secret.clone(), None)
+        .identify_account()
+        .await
+        .map_err(stripe_error)?;
+    ensure_integration(repository, config, workspace_id, &account_id).await
+}
+
 async fn create_integration(
     repository: &DatabaseRepository,
     workspace_id: Uuid,

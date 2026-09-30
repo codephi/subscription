@@ -1,6 +1,6 @@
 # TaskLab
 
-TaskLab é uma POC para testar uma aplicação cliente da Subscription. O checkout envia o plano, o pacote, uma referência de cartão tokenizado e uma chave de idempotência. O formulário encaminha dados à Subscription para validação e salvamento opcional, permite nomear os cartões salvos e exibe o nome junto dos últimos quatro dígitos; cartões salvos também podem ser removidos pela mesma integração. A TaskLab não integra diretamente com Stripe.
+TaskLab é uma POC para testar uma aplicação cliente da Subscription. O checkout envia o plano, o pacote, uma referência de cartão tokenizado e uma chave de idempotência. Para adicionar cartão, a TaskLab redireciona à página hospedada da Stripe nos ambientes de teste e produção; PAN/CVC são enviados diretamente à Stripe, sem passar pela API TaskLab. O nome opcional do cartão fica no navegador até a Subscription confirmar o vínculo; cartões salvos também podem ser removidos pela mesma integração.
 
 Veja a [documentação completa da integração com a Subscription](../docs/integracao-saas/tasklab.md) para os contratos remotos, provisionamento do workspace, catálogo, checkout, medição de uso e limites atuais.
 
@@ -11,8 +11,8 @@ O produto de demonstração é uma tarefa nomeada que custa 1 crédito. O modo p
 ## Preparar
 
 1. Configure na Subscription `ACCOUNTS_WEBHOOK_SECRET` e o segredo de criptografia das conexões de cobrança. O sandbox de checkout é opcional e permanece desligado por padrão.
-2. Para exercitar pagamentos, habilite o sandbox **somente no ambiente da Subscription** com `BILLING_SANDBOX_ENABLED=true`, credenciais de teste do provedor, o segredo de assinatura de webhook e `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED`. Para enviar dados de cartão direto no formulário de teste, a conta Stripe também deve ter habilitado acesso à API de dados brutos de cartão. Essa opção serve apenas para sandbox; PAN/CVC passam transitoriamente pela API TaskLab e não são armazenados.
-3. Copie `.env.example` para `.env` e defina `ACCOUNTS_WEBHOOK_SECRET` com o mesmo segredo configurado na Subscription. `DATABASE_URL` já aponta para um arquivo SQLite local.
+2. Para exercitar pagamentos, habilite o sandbox **somente no ambiente da Subscription** com `BILLING_SANDBOX_ENABLED=true`, credenciais de teste do provedor, o segredo de assinatura de webhook e `BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED`. O setup de cartão abre a página hospedada da Stripe e aceita os cartões de teste padrão.
+3. Copie `.env.example` para `.env` e defina `ACCOUNTS_WEBHOOK_SECRET` com o mesmo segredo configurado na Subscription. Configure `APP_PUBLIC_URL` com o origin público da TaskLab (HTTPS em produção); `DATABASE_URL` já aponta para um arquivo SQLite local.
 4. Execute `npm install` e depois `npm run setup`. O setup cria o catálogo e as ofertas por HTTP e grava os identificadores em `catalog_settings`; repeti-lo reutiliza os identificadores já persistidos.
 5. Na raiz do repositório, rode `make run`. O comando inicia os backends da Subscription e TaskLab e os frontends admin-ui e TaskLab juntos. Abra o admin em [http://localhost:5173](http://localhost:5173) e a TaskLab em [http://localhost:5174](http://localhost:5174).
 

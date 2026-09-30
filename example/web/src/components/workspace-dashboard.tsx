@@ -202,7 +202,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
   return <Card>
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><Sparkles />Simular checkout</CardTitle>
-      <CardDescription>Escolha um cartão salvo ou digite outro. A Subscription valida os dados e mantém apenas a referência tokenizada.</CardDescription>
+      <CardDescription>Escolha um cartão salvo ou adicione outro na página segura do provedor. A Subscription mantém a referência tokenizada.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
       {prepaid && <Field>
@@ -229,7 +229,7 @@ function CheckoutCard(props: WorkspaceDashboardProps) {
       </Alert>}
       <Item variant="muted" size="sm">
         <ItemMedia variant="icon"><CreditCard /></ItemMedia>
-        <ItemContent><ItemTitle>Dados protegidos</ItemTitle><ItemDescription>A TaskLab encaminha os dados à Subscription sem armazená-los; a Subscription gerencia a validação e o token.</ItemDescription></ItemContent>
+        <ItemContent><ItemTitle>Dados protegidos</ItemTitle><ItemDescription>Os dados do cartão são informados na página segura do provedor; TaskLab recebe somente a confirmação do vínculo.</ItemDescription></ItemContent>
       </Item>
     </CardContent>
     <CardFooter>

@@ -67,6 +67,30 @@ fn payment_setup_return_urls_require_same_secure_origin() {
 }
 
 #[test]
+fn hosted_payment_binding_display_name_is_trimmed_and_bounded() {
+    assert_eq!(
+        validate_payment_method_display_name(Some(" Cartão pessoal ")).unwrap(),
+        Some("Cartão pessoal")
+    );
+    assert_eq!(
+        validate_payment_method_display_name(Some("  ")).unwrap(),
+        None
+    );
+    assert_eq!(
+        validate_payment_method_display_name(Some(&"x".repeat(51)))
+            .expect_err("long label")
+            .code(),
+        "invalid_card_display_name"
+    );
+    assert_eq!(
+        validate_payment_method_display_name(Some("nome\ninválido"))
+            .expect_err("control character")
+            .code(),
+        "invalid_card_display_name"
+    );
+}
+
+#[test]
 fn payment_setup_return_reference_is_added_by_subscription() {
     let setup_id = uuid::Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
     assert_eq!(

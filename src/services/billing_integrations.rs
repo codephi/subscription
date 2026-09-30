@@ -106,6 +106,25 @@ pub async fn provision_workspace_defaults(
         .await
 }
 
+pub async fn active_or_provision_default_stripe(
+    repository: &DatabaseRepository,
+    workspace_id: Uuid,
+) -> ApiResult<Uuid> {
+    match repository
+        .active_stripe_billing_connection(workspace_id)
+        .await
+    {
+        Ok(connection_id) => Ok(connection_id),
+        Err(error) if error.code() == "billing_connection_not_usable" => {
+            provision_workspace_defaults(repository, workspace_id).await?;
+            repository
+                .active_stripe_billing_connection(workspace_id)
+                .await
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn providers() -> Vec<IntegrationProviderResponse> {
     vec![IntegrationProviderResponse {
         provider: "STRIPE".into(),

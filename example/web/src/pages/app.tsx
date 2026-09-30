@@ -12,6 +12,9 @@ type PlanModel = "PREPAID" | "SUBSCRIPTION"
 type CheckoutKind = "INITIAL" | "ON_DEMAND"
 type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null; transaction_id?: string }
 type CheckoutKey = { scope: string; value: string }
+type PaymentMethodSetupSession = { payment_method_setup_id: string; redirect_url: string }
+type PaymentMethodBinding = { payment_method_binding_id?: string }
+const paymentMethodNameKeyPrefix = "tasklab_payment_method_name_"
 
 export default function App() {
   const queryClient = useQueryClient()
@@ -27,9 +30,11 @@ export default function App() {
   const [topupCredits, setTopupCredits] = useState(10)
   const checkoutKey = useRef<CheckoutKey | null>(null)
   const executionTransaction = useRef<string | null>(null)
+  const handledPaymentSetup = useRef<string | null>(null)
 
   useEffect(() => restoreSession(setUser, setAuthChecked), [])
   useEffect(() => restorePendingExecution(user, setTaskName, setPendingExecution, executionTransaction), [user?.username])
+  useEffect(() => handlePaymentMethodSetupReturn(user, handledPaymentSetup, setError, setPaymentMethodBindingId, setShowCardSetup, queryClient), [user?.username, queryClient])
 
   const dashboard = useQuery({
     queryKey: ["dashboard", user?.username],
@@ -85,11 +90,9 @@ export default function App() {
     onError: reportError(setError),
   })
 
-  function finishPaymentMethodSetup(result: { payment_method_binding_id?: string | null; saved: boolean }) {
-    setShowCardSetup(false)
-    if (result.payment_method_binding_id) setPaymentMethodBindingId(result.payment_method_binding_id)
-    setError(result.saved ? "" : "Cartão validado, mas não salvo. Marque a opção para reutilizá-lo em recargas.")
-    if (user) void queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+  function startPaymentMethodSetup(session: PaymentMethodSetupSession, cardName: string) {
+    sessionStorage.setItem(paymentMethodNameKey(session.payment_method_setup_id), cardName)
+    window.location.assign(session.redirect_url)
   }
 
   if (!authChecked) return <AppFrame><LoadingScreen /></AppFrame>
@@ -98,13 +101,14 @@ export default function App() {
     return <AppFrame><OnboardingScreen
       username={user.username}
       selectedPaymentMethodId={paymentMethodBindingId ?? ""}
+      cardSetupForm={showCardSetup ? <PaymentMethodSetup onComplete={startPaymentMethodSetup} onClose={() => setShowCardSetup(false)} /> : null}
       onAddPaymentMethod={() => setShowCardSetup(true)}
       busy={planMutation.isPending || checkoutMutation.isPending}
       error={error}
       onChoose={(model) => model === "PREPAID" ? planMutation.mutate(model) : paymentMethodBindingId
         ? startCheckout("INITIAL", user, 10, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
         : setError("Adicione e valide um cartão antes de iniciar a assinatura.")}
-    />{showCardSetup && <PaymentMethodSetup onComplete={finishPaymentMethodSetup} onClose={() => setShowCardSetup(false)} />}</AppFrame>
+    /></AppFrame>
   }
 
   return <AppFrame><WorkspaceDashboard
@@ -129,7 +133,7 @@ export default function App() {
     onAddPaymentMethod={() => setShowCardSetup(true)}
     onRemovePaymentMethod={(bindingId) => removePaymentMethodMutation.mutate(bindingId)}
     removingPaymentMethod={removePaymentMethodMutation.isPending}
-    cardSetupForm={showCardSetup ? <PaymentMethodSetup onComplete={finishPaymentMethodSetup} onClose={() => setShowCardSetup(false)} /> : null}
+    cardSetupForm={showCardSetup ? <PaymentMethodSetup onComplete={startPaymentMethodSetup} onClose={() => setShowCardSetup(false)} /> : null}
     onCheckout={(credits) => paymentMethodBindingId
       ? startCheckout(user.plan_model === "PREPAID" ? "ON_DEMAND" : "INITIAL", user, credits, paymentMethodBindingId, checkoutKey, checkoutMutation.mutate)
       : setError("Adicione e valide um cartão antes de iniciar o checkout.")}
@@ -141,6 +145,75 @@ function restoreSession(setUser: (user: User | null) => void, setChecked: (check
   let active = true
   api<User>("/me").then((account) => active && setUser(account)).catch(() => undefined).finally(() => active && setChecked(true))
   return () => { active = false }
+}
+
+function handlePaymentMethodSetupReturn(
+  user: User | null,
+  handledSetup: React.MutableRefObject<string | null>,
+  setError: (message: string) => void,
+  setBindingId: (bindingId: string | null) => void,
+  setSetupVisible: (visible: boolean) => void,
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  const params = new URLSearchParams(window.location.search)
+  const setupId = params.get("payment_method_setup_id")
+  const result = params.get("payment_setup")
+  if (result === "cancelled") {
+    clearPaymentSetupReturnUrl(params)
+    clearPendingPaymentMethodNames()
+    setError("Configuração do cartão cancelada.")
+    return
+  }
+  if (!user || !setupId || handledSetup.current === setupId) return
+  handledSetup.current = setupId
+  const nameKey = paymentMethodNameKey(setupId)
+  const cardName = sessionStorage.getItem(nameKey)?.trim() || undefined
+  void saveReturnedPaymentMethod(setupId, nameKey, cardName, user, setError, setBindingId, setSetupVisible, queryClient)
+}
+
+function paymentMethodNameKey(setupId: string) {
+  return `${paymentMethodNameKeyPrefix}${setupId}`
+}
+
+function clearPendingPaymentMethodNames() {
+  for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = sessionStorage.key(index)
+    if (key?.startsWith(paymentMethodNameKeyPrefix)) sessionStorage.removeItem(key)
+  }
+}
+
+function clearPaymentSetupReturnUrl(params: URLSearchParams) {
+  params.delete("payment_method_setup_id")
+  params.delete("payment_setup")
+  const query = params.toString()
+  const suffix = query ? `?${query}` : ""
+  window.history.replaceState(null, "", `${window.location.pathname}${suffix}${window.location.hash}`)
+}
+
+async function saveReturnedPaymentMethod(
+  setupId: string,
+  nameKey: string,
+  cardName: string | undefined,
+  user: User,
+  setError: (message: string) => void,
+  setBindingId: (bindingId: string | null) => void,
+  setSetupVisible: (visible: boolean) => void,
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  try {
+    const binding = await api<PaymentMethodBinding>("/payment-method-bindings", {
+      method: "POST",
+      body: JSON.stringify({ payment_method_setup_id: setupId, card_name: cardName }),
+    })
+    clearPaymentSetupReturnUrl(new URLSearchParams(window.location.search))
+    sessionStorage.removeItem(nameKey)
+    setSetupVisible(false)
+    if (binding.payment_method_binding_id) setBindingId(binding.payment_method_binding_id)
+    setError("")
+    await queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] })
+  } catch (reason) {
+    setError(reason instanceof Error ? reason.message : "Não foi possível salvar o cartão.")
+  }
 }
 
 function restorePendingExecution(user: User | null, setTask: (task: string) => void, setPending: (pending: boolean) => void, transaction: React.MutableRefObject<string | null>) {

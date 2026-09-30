@@ -97,6 +97,7 @@ pub struct BillingCapabilitiesResponse {
 pub struct CreatePaymentMethodBindingRequest {
     pub customer_plan_id: Uuid,
     pub payment_method_setup_id: Uuid,
+    pub card_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]

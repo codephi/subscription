@@ -212,8 +212,10 @@ async fn create_workspace_payment_method_setup_session(
     Path(workspace_id): Path<Uuid>,
     Json(request): Json<CreatePaymentMethodSetupSessionRequest>,
 ) -> ApiResult<(StatusCode, Json<PaymentMethodSetupSessionResponse>)> {
+    let sandbox_config = state.billing_checkout_config();
     let response = billing::create_workspace_payment_method_setup_session(
         &state.database(),
+        sandbox_config.as_ref(),
         workspace_id,
         &request,
     )
@@ -233,6 +235,7 @@ async fn create_payment_method_from_card(
 ) -> ApiResult<(StatusCode, Json<CreatePaymentMethodFromCardResponse>)> {
     let response = billing::create_payment_method_from_card(
         &state.database(),
+        state.billing_checkout_config().as_ref(),
         workspace_id,
         idempotency_key(&headers)?,
         &request,
