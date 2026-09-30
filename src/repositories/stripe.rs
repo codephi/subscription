@@ -432,7 +432,6 @@ impl BillingConnector for StripeConnector {
                 ("success_url", command.success_url.clone()),
                 ("cancel_url", command.cancel_url.clone()),
                 ("payment_method_types[]", "card".to_string()),
-                ("setup_intent_data[usage]", "off_session".to_string()),
             ];
             let value = self
                 .post_form("/v1/checkout/sessions", &fields, None)

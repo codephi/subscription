@@ -742,7 +742,7 @@ async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
     assert!(request.contains("success_url=http%3A%2F%2Flocalhost%3A5174"));
     assert!(request.contains("cancel_url=http%3A%2F%2Flocalhost%3A5174"));
     assert!(request.contains("payment_method_types%5B%5D=card"));
-    assert!(request.contains("setup_intent_data%5Busage%5D=off_session"));
+    assert!(!request.contains("setup_intent_data"));
     assert!(!request.contains("return_url"));
 }
 
