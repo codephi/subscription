@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use serde_json::{json, Value};
@@ -17,15 +17,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/logout", post(logout))
         .route("/api/me", get(me))
         .route("/api/plan", post(choose_plan))
-        .route("/api/payment-method-setup", post(payment_method_setup))
-        .route(
-            "/api/payment-method-bindings",
-            get(payment_method_bindings).post(save_payment_method_binding),
-        )
-        .route(
-            "/api/payment-method-bindings/{binding_id}",
-            delete(remove_payment_method_binding),
-        )
+        .route("/api/plan/cancel", post(cancel_plan))
+        .route("/api/plan/regularize", post(regularize_plan))
         .route("/api/dashboard", get(dashboard))
         .route("/api/checkouts", post(checkout))
         .route("/api/checkouts/{id}", get(checkout_status))
@@ -45,7 +38,7 @@ async fn register(
     AppError,
 > {
     let user = auth::register(&state.pool, &request.username, &request.password).await?;
-    services::provision_workspace(&state, &user).await?;
+    let user = services::provision_workspace(&state, &user).await?;
     let cookie = auth::create_session(&state.pool, &user).await?;
     Ok((
         StatusCode::CREATED,
@@ -65,7 +58,7 @@ async fn login(
     AppError,
 > {
     let user = auth::authenticate(&state.pool, &request.username, &request.password).await?;
-    services::provision_workspace(&state, &user).await?;
+    let user = services::provision_workspace(&state, &user).await?;
     let cookie = auth::create_session(&state.pool, &user).await?;
     Ok((
         [(header::SET_COOKIE, cookie)],
@@ -101,6 +94,25 @@ async fn choose_plan(
     ))
 }
 
+async fn cancel_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    Ok(Json(services::cancel_plan(&state, &user).await?))
+}
+
+async fn regularize_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateRegularizationRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    Ok(Json(
+        services::regularize_plan(&state, &user, &request.transaction_id).await?,
+    ))
+}
+
 async fn checkout(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -121,6 +133,7 @@ async fn checkout(
         request.checkout_kind,
         request.topup_credits,
         request.payment_method_binding_id,
+        request.target_plan_version_id,
         transaction,
     )
     .await?;
@@ -130,43 +143,6 @@ async fn checkout(
         StatusCode::OK
     };
     Ok((status, Json(response)))
-}
-
-async fn payment_method_setup(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, AppError> {
-    let user = auth::current_user(&state, &headers).await?;
-    Ok(Json(
-        services::create_payment_method_setup(&state, &user).await?,
-    ))
-}
-
-async fn save_payment_method_binding(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(request): Json<crate::models::SavePaymentMethodBindingRequest>,
-) -> Result<Json<Value>, AppError> {
-    let user = auth::current_user(&state, &headers).await?;
-    Ok(Json(
-        services::save_payment_method_binding(
-            &state,
-            &user,
-            request.payment_method_setup_id,
-            request.card_name,
-        )
-        .await?,
-    ))
-}
-
-async fn payment_method_bindings(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, AppError> {
-    let user = auth::current_user(&state, &headers).await?;
-    Ok(Json(
-        services::list_payment_method_bindings(&state, &user).await?,
-    ))
 }
 
 async fn checkout_status(
@@ -193,23 +169,12 @@ async fn execute(
     ))
 }
 
-async fn remove_payment_method_binding(
-    State(state): State<AppState>,
-    Path(binding_id): Path<Uuid>,
-    headers: HeaderMap,
-) -> Result<StatusCode, AppError> {
-    let user = auth::current_user(&state, &headers).await?;
-    services::remove_payment_method_binding(&state, &user, binding_id).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 async fn dashboard(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
     let catalog = services::dashboard_catalog(&state).await?;
-    let payment_methods = services::list_payment_method_bindings(&state, &user).await?;
     let workspace = &user.workspace_id;
     let (product_id, item_id) = dashboard_catalog_ids(&catalog)?;
     let wallet = state
@@ -242,13 +207,23 @@ async fn dashboard(
         ))
         .await
         .ok();
+    let customer_plan = match user.customer_plan_id.as_deref() {
+        Some(plan_id) => state
+            .subscription
+            .get(&format!(
+                "/v1/workspaces/{workspace}/customer-plans/{plan_id}"
+            ))
+            .await
+            .ok(),
+        None => None,
+    };
     let checkouts=sqlx::query_as::<_,CheckoutRow>("SELECT checkout_id,checkout_kind,status,amount_minor,currency,granted_credit_units,transaction_id,created_at FROM checkouts WHERE user_id=? ORDER BY created_at DESC,checkout_id DESC LIMIT 20")
         .bind(&user.user_id).fetch_all(&state.pool).await?;
     let executions=sqlx::query_as::<_,ExecutionRow>("SELECT execution_id,task_name,result_text,credits_debited,status,created_at FROM executions WHERE user_id=? ORDER BY created_at DESC LIMIT 20")
         .bind(&user.user_id).fetch_all(&state.pool).await?;
     Ok(Json(
-        json!({"account":auth::account_response(user)?,"catalog":catalog,"payment_methods":payment_methods,"wallet_statement":wallet,
-        "eligibility":eligibility,"meter":meter,"item_statement":item_statement,"checkouts":checkouts,"executions":executions}),
+        json!({"account":auth::account_response(user)?,"catalog":catalog,"wallet_statement":wallet,
+        "eligibility":eligibility,"meter":meter,"item_statement":item_statement,"customer_plan":customer_plan,"checkouts":checkouts,"executions":executions}),
     ))
 }
 

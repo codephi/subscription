@@ -4,8 +4,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::{
-    activate_item, activate_product, create_plan, create_subscription, save_setting, setting,
-    stored_id_or,
+    activate_item, activate_product, create_plan, create_subscription, save_setting, stored_id_or,
 };
 use crate::{api::required_uuid, state::AppState};
 
@@ -24,17 +23,10 @@ pub async fn setup_catalog(state: &AppState) -> Result<()> {
     publish_price(state, price_id).await?;
     ensure_item_active(state, item_id).await?;
     ensure_product_active(state, product_id).await?;
-    let prepaid = stored_id_or(
-        &state.pool,
-        "prepaid_subscription_id",
-        create_subscription(&state.subscription, "TaskLab pré-pago"),
-    )
-    .await?;
-    save_setting(&state.pool, "prepaid_subscription_id", &prepaid.to_string()).await?;
     let subscription = stored_id_or(
         &state.pool,
         "subscription_id",
-        create_subscription(&state.subscription, "TaskLab mensal"),
+        create_subscription(&state.subscription, "Créditos TaskLab"),
     )
     .await?;
     save_setting(&state.pool, "subscription_id", &subscription.to_string()).await?;
@@ -43,40 +35,32 @@ pub async fn setup_catalog(state: &AppState) -> Result<()> {
         "free_plan_id",
         create_plan(
             &state.subscription,
-            prepaid,
+            subscription,
             json!({
-                "name":"Conta pré-paga", "commercial_model":"FREE", "price_amount_minor":null,
+                "name":"Teste grátis", "commercial_model":"FREE", "price_amount_minor":null,
                 "currency":null,"recurrence":"NONE","admission_policy":"OPEN",
-                "accepted_payment_methods":[],"granted_credit_units":"0","product_ids":[product_id]
+                "accepted_payment_methods":[],"granted_credit_units":"10","product_ids":[product_id]
             }),
         ),
     )
     .await?;
     save_setting(&state.pool, "free_plan_id", &free_plan.to_string()).await?;
-    let paid_plan = stored_id_or(&state.pool, "paid_plan_id", create_plan(&state.subscription, subscription, json!({
-        "name":"TaskLab mensal", "commercial_model":"PAID", "price_amount_minor":2990,
-        "currency":"BRL","recurrence":"MONTHLY","admission_policy":"OPEN",
-        "accepted_payment_methods":["CARD"],"granted_credit_units":"50","product_ids":[product_id]
-    }))).await?;
-    save_setting(&state.pool, "paid_plan_id", &paid_plan.to_string()).await?;
-    let topup10 = match setting(&state.pool, "topup_plan_id").await? {
-        Some(existing) => Uuid::parse_str(&existing)?,
-        None => {
-            stored_id_or(
-                &state.pool,
-                "topup_10_plan_id",
-                create_topup(state, prepaid, 10),
-            )
-            .await?
-        }
-    };
-    save_setting(&state.pool, "topup_10_plan_id", &topup10.to_string()).await?;
-    save_setting(&state.pool, "topup_plan_id", &topup10.to_string()).await?;
-    for credits in [25_i64, 50_i64] {
-        let key = format!("topup_{credits}_plan_id");
-        let topup = stored_id_or(&state.pool, &key, create_topup(state, prepaid, credits)).await?;
-        save_setting(&state.pool, &key, &topup.to_string()).await?;
+    for (price_minor, credits) in [(2000_i64, 100_i64), (4000, 200), (6000, 400)] {
+        let key = format!("paid_plan_{credits}_id");
+        let plan = stored_id_or(&state.pool, &key, create_plan(&state.subscription, subscription, json!({
+            "name":format!("Plano {credits}"), "commercial_model":"PAID", "price_amount_minor":price_minor,
+            "currency":"BRL","recurrence":"MONTHLY","admission_policy":"OPEN",
+            "accepted_payment_methods":["CARD"],"granted_credit_units":credits.to_string(),"product_ids":[product_id]
+        }))).await?;
+        save_setting(&state.pool, &key, &plan.to_string()).await?;
     }
+    let topup = stored_id_or(
+        &state.pool,
+        "topup_unit_plan_id",
+        create_topup(state, subscription, 1),
+    )
+    .await?;
+    save_setting(&state.pool, "topup_unit_plan_id", &topup.to_string()).await?;
     Ok(())
 }
 
@@ -139,7 +123,7 @@ async fn ensure_product_active(state: &AppState, id: Uuid) -> Result<()> {
 }
 async fn create_topup(state: &AppState, prepaid: Uuid, credits: i64) -> Result<Uuid> {
     let body=state.subscription.post(&format!("/v1/subscriptions/{prepaid}/on-demand-plans"),None,&json!({
-        "name":format!("Recarga de {credits} créditos"), "price_amount_minor":credits * 100,"currency":"BRL","credit_units":credits.to_string()
+        "name":"Crédito avulso", "price_amount_minor":100,"currency":"BRL","credit_units":credits.to_string()
     })).await?;
     Ok(required_uuid(&body, "on_demand_plan_id")?)
 }

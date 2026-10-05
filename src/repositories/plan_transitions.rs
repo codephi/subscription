@@ -133,6 +133,21 @@ pub(super) async fn apply_confirmed_upgrade(
 ) -> ApiResult<Uuid> {
     let current = lock_transition_source(transaction, workspace_id, customer_plan_id).await?;
     validate_transition_source(customer_plan_id, &current, target_plan)?;
+    let incremental_credits = target_plan
+        .response
+        .granted_credit_units
+        .value()
+        .checked_sub(current.granted_credit_units)
+        .filter(|credits| *credits > 0)
+        .ok_or_else(|| {
+            ApiError::conflict(
+                "plan_upgrade_not_higher",
+                format!(
+                    "target plan {} must grant more credits",
+                    target_plan.response.plan_version_id
+                ),
+            )
+        })?;
     let transition_id = Uuid::new_v4();
     let request = CreatePlanTransitionRequest {
         new_plan_version_id: target_plan.response.plan_version_id,
@@ -164,7 +179,7 @@ pub(super) async fn apply_confirmed_upgrade(
         transaction,
         customer_plan_id,
         current.next_cycle_ordinal,
-        target_plan,
+        incremental_credits,
         effective_at,
         new_period_end,
     )
@@ -184,14 +199,16 @@ pub(super) async fn apply_confirmed_upgrade(
         effective_at,
     )
     .await?;
-    if target_plan.response.granted_credit_units.value() > 0 {
+    if incremental_credits > 0 {
+        let mut grant_plan = target_plan.clone();
+        grant_plan.response.granted_credit_units = CreditUnits::new(incremental_credits);
         grant_cycle_credit(
             transaction,
             wallet,
             workspace_id,
             customer_plan_id,
             cycle_id,
-            target_plan,
+            &grant_plan,
             new_period_end,
             Some(transaction_id),
         )
@@ -225,7 +242,7 @@ async fn insert_upgrade_cycle(
     transaction: &mut Transaction<'_, Postgres>,
     customer_plan_id: Uuid,
     ordinal: i64,
-    target_plan: &PlanRecord,
+    incremental_credits: i64,
     effective_at: DateTime<Utc>,
     period_end: Option<DateTime<Utc>>,
 ) -> Result<Uuid, sqlx::Error> {
@@ -233,7 +250,7 @@ async fn insert_upgrade_cycle(
     sqlx::query("INSERT INTO customer_plan_cycles (customer_plan_cycle_id,customer_plan_id,cycle_ordinal, \
          current_period_start,current_period_end,granted_credit_units,status) VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')")
         .bind(cycle_id).bind(customer_plan_id).bind(ordinal).bind(effective_at)
-        .bind(period_end).bind(target_plan.response.granted_credit_units.value())
+        .bind(period_end).bind(incremental_credits)
         .execute(&mut **transaction).await?;
     Ok(cycle_id)
 }
@@ -260,6 +277,7 @@ struct TransitionSource {
     period_end: Option<DateTime<Utc>>,
     version: i64,
     next_cycle_ordinal: i64,
+    granted_credit_units: i64,
 }
 
 async fn reserve_transition_keys(
@@ -287,8 +305,10 @@ async fn lock_transition_source(
 ) -> ApiResult<TransitionSource> {
     let row = sqlx::query(
         "SELECT c.plan_version_id,c.anchor_at,c.version,c.commercial_status,c.activation_status, \
+         current_plan.granted_credit_units, \
          p.subscription_id,cy.current_period_end,COALESCE(cy.cycle_ordinal,0)+1 next_cycle_ordinal \
          FROM customer_plans c JOIN subscription_plan_versions p ON p.plan_version_id=c.plan_version_id \
+         JOIN subscription_plan_versions current_plan ON current_plan.plan_version_id=c.plan_version_id \
          LEFT JOIN customer_plan_cycles cy ON cy.customer_plan_id=c.customer_plan_id AND cy.status='ACTIVE' \
          WHERE c.customer_id=$1 AND c.customer_plan_id=$2 FOR UPDATE OF c",
     )
@@ -314,6 +334,7 @@ async fn lock_transition_source(
         period_end: row.get("current_period_end"),
         version: row.get("version"),
         next_cycle_ordinal: row.get("next_cycle_ordinal"),
+        granted_credit_units: row.get("granted_credit_units"),
     })
 }
 

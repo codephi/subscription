@@ -41,6 +41,8 @@ impl DatabaseRepository {
         } else {
             sqlx::query("UPDATE customer_plans SET cancel_at_period_end=true,renewal_status='RENEWAL_INACTIVE',version=version+1 WHERE customer_plan_id=$1")
                 .bind(customer_plan_id).execute(&mut *transaction).await?;
+            sqlx::query("INSERT INTO subscription_calendar_jobs (customer_plan_cycle_id,due_at) SELECT customer_plan_cycle_id,current_period_end FROM customer_plan_cycles WHERE customer_plan_id=$1 AND status='ACTIVE' AND current_period_end IS NOT NULL ON CONFLICT (customer_plan_cycle_id) DO UPDATE SET due_at=EXCLUDED.due_at,retry_at='-infinity',completed_at=NULL")
+                .bind(customer_plan_id).execute(&mut *transaction).await?;
         }
         insert_plan_outbox(
             &mut transaction,

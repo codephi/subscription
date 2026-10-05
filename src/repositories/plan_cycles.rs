@@ -198,7 +198,8 @@ async fn lock_due_cycle(
          c.cancel_at_period_end FROM customer_plans c \
          JOIN customer_plan_cycles cy ON cy.customer_plan_id=c.customer_plan_id \
          WHERE c.customer_plan_id=$1 AND cy.customer_plan_cycle_id=$2 \
-           AND c.commercial_status='ACTIVE' AND cy.status='ACTIVE' \
+           AND (c.commercial_status='ACTIVE' OR (c.commercial_status='ACTIVE_PAID' AND c.cancel_at_period_end)) \
+           AND cy.status='ACTIVE' \
            AND cy.current_period_end IS NOT NULL AND cy.current_period_end<=$3 FOR UPDATE OF c,cy",
     )
     .bind(customer_plan_id)

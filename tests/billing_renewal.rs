@@ -69,6 +69,78 @@ async fn concurrent_paid_renewal_preserves_anchor_and_grants_one_cycle_allowance
     assert_renewal_effects(&fixture, renewal_request_id, anchor_at, first_period_end).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paid_renewal_scheduler_creates_one_due_collection_for_the_active_cycle() {
+    let fixture = setup_paid_plan().await;
+    let initial_at = Utc::now();
+    let initial_request_id = insert_pending_collection(&fixture, "INITIAL", initial_at).await;
+    billing::apply_confirmed_webhook(
+        &fixture.repository,
+        &confirmed_webhook(initial_request_id, initial_at),
+    )
+    .await
+    .unwrap();
+    let boundary = Utc::now() - Duration::seconds(1);
+    sqlx::query("UPDATE customer_plan_cycles SET current_period_start=$2-interval '1 month',current_period_end=$2 WHERE customer_plan_id=$1 AND status='ACTIVE'")
+        .bind(fixture.customer_plan_id).bind(boundary).execute(&fixture.repository.pool()).await.unwrap();
+
+    assert_eq!(
+        fixture
+            .repository
+            .schedule_due_paid_renewals(Utc::now())
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        fixture
+            .repository
+            .schedule_due_paid_renewals(Utc::now())
+            .await
+            .unwrap(),
+        0
+    );
+    let row: (String, i64, i64) = sqlx::query_as("SELECT status,amount_minor,granted_credit_units FROM collection_requests WHERE customer_plan_id=$1 AND request_kind='RENEWAL'")
+        .bind(fixture.customer_plan_id).fetch_one(&fixture.repository.pool()).await.unwrap();
+    assert_eq!(row, ("SCHEDULED".into(), 1_500, 100));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn paid_period_end_cancellation_is_durable_and_closes_the_cycle() {
+    let fixture = setup_paid_plan().await;
+    let initial_at = Utc::now();
+    let initial_request_id = insert_pending_collection(&fixture, "INITIAL", initial_at).await;
+    billing::apply_confirmed_webhook(
+        &fixture.repository,
+        &confirmed_webhook(initial_request_id, initial_at),
+    )
+    .await
+    .unwrap();
+    let boundary = Utc::now() - Duration::seconds(1);
+    sqlx::query("UPDATE customer_plan_cycles SET current_period_start=$2-interval '1 month',current_period_end=$2 WHERE customer_plan_id=$1 AND status='ACTIVE'")
+        .bind(fixture.customer_plan_id).bind(boundary).execute(&fixture.repository.pool()).await.unwrap();
+    sqlx::query("UPDATE customer_plan_entitlements SET effective_from=$2-interval '1 month' WHERE customer_plan_id=$1 AND effective_until IS NULL")
+        .bind(fixture.customer_plan_id).bind(boundary).execute(&fixture.repository.pool()).await.unwrap();
+    plans::cancel_customer_plan(
+        &fixture.repository,
+        fixture.workspace_id,
+        fixture.customer_plan_id,
+    )
+    .await
+    .unwrap();
+    let outcome =
+        subscription::services::subscription_calendar::dispatch_once(&fixture.repository, boundary)
+            .await
+            .unwrap();
+    assert_eq!(
+        outcome,
+        subscription::services::subscription_calendar::CalendarDispatchOutcome::Advanced
+    );
+    let state: (String, String, i64) = sqlx::query_as("SELECT commercial_status,renewal_status,(SELECT count(*) FROM customer_plan_cycles WHERE customer_plan_id=$1 AND status='ACTIVE') FROM customer_plans WHERE customer_plan_id=$1")
+        .bind(fixture.customer_plan_id).fetch_one(&fixture.repository.pool()).await.unwrap();
+    assert_eq!(state, ("CANCELED".into(), "RENEWAL_INACTIVE".into(), 0));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn manual_regularization_is_idempotent_and_restarts_cycle_only_after_confirmation() {
     let fixture = setup_paid_plan().await;
@@ -99,7 +171,7 @@ async fn manual_regularization_is_idempotent_and_restarts_cycle_only_after_confi
     .await
     .unwrap();
     let request = Arc::new(CreateRenewalRegularizationRequest {
-        payment_method_binding_id: fixture.binding_id,
+        payment_method_binding_id: None,
         transaction_id: format!("regularization-{}", Uuid::new_v4()),
     });
     let first = spawn_regularization(&fixture, "same-regularization-key", Arc::clone(&request));
@@ -108,12 +180,13 @@ async fn manual_regularization_is_idempotent_and_restarts_cycle_only_after_confi
     let second = second.await.unwrap().unwrap();
     assert_eq!(first, second);
     assert_eq!(first.status, "SCHEDULED");
+    assert_eq!(first.payment_method_binding_id, fixture.binding_id);
     assert_eq!(
         first.payment_expires_at,
         first.scheduled_at + Duration::minutes(15)
     );
     let mut changed_request = (*request).clone();
-    changed_request.payment_method_binding_id = Uuid::new_v4();
+    changed_request.payment_method_binding_id = Some(Uuid::new_v4());
     let changed = billing::create_renewal_regularization(
         &fixture.repository,
         fixture.workspace_id,

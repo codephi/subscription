@@ -11,6 +11,7 @@ use crate::{
         billing_confirmation::{ConfirmationResult, ConfirmedBillingWebhook},
         billing_status_webhooks::PaymentStatusWebhookResult,
         database::DatabaseRepository,
+        stripe::StripeConnector,
     },
     services::billing,
 };
@@ -85,7 +86,15 @@ pub async fn process_stripe_webhook(
         configuration.managed,
     )?;
     verify_stripe_signature(signature, payload, &secret, Utc::now())?;
-    let event: StripeEvent = serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
+    let event_value: serde_json::Value =
+        serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
+    if event_value.get("type").and_then(serde_json::Value::as_str)
+        == Some("checkout.session.completed")
+    {
+        return process_hosted_checkout_webhook(repository, connection_id, event_value, payload)
+            .await;
+    }
+    let event: StripeEvent = serde_json::from_value(event_value).map_err(ApiError::invalid_json)?;
     if event.event_type == "charge.refunded" {
         let inserted = repository
             .record_external_refund(
@@ -148,18 +157,140 @@ pub async fn process_shared_stripe_webhook(
     shared_secret: &str,
 ) -> ApiResult<BillingWebhookResponse> {
     verify_stripe_signature(signature, payload, shared_secret, Utc::now())?;
-    let event: StripeEvent = serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
-    if !is_payment_event(&event.event_type) {
+    let event: serde_json::Value =
+        serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
+    let event_type = event
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if event_type != "checkout.session.completed" && !is_payment_event(event_type) {
         return Ok(webhook_result("IGNORED"));
     }
-    let Some(collection_id) = event.data.object.metadata.collection_request_id else {
+    let Some(collection_id) = event
+        .pointer("/data/object/metadata/collection_request_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| Uuid::parse_str(value).ok())
+    else {
         return Ok(webhook_result("IGNORED"));
     };
     let Some(scope) = find_webhook_scope(repository, collection_id).await? else {
         return Ok(webhook_result("IGNORED"));
     };
-    validate_webhook_scope(&event, &scope)?;
+    if event_type != "checkout.session.completed" {
+        let typed: StripeEvent = serde_json::from_value(event).map_err(ApiError::invalid_json)?;
+        validate_webhook_scope(&typed, &scope)?;
+    }
     process_stripe_webhook(repository, scope.billing_connection_id, signature, payload).await
+}
+
+async fn process_hosted_checkout_webhook(
+    repository: &DatabaseRepository,
+    connection_id: Uuid,
+    event: serde_json::Value,
+    payload: &[u8],
+) -> ApiResult<BillingWebhookResponse> {
+    let event_id = json_string(&event, "/id")?;
+    let session = event.pointer("/data/object").ok_or_else(|| {
+        ApiError::unprocessable(
+            "stripe_checkout_session_missing",
+            "checkout.session.completed has no session object",
+        )
+    })?;
+    if session
+        .get("payment_status")
+        .and_then(serde_json::Value::as_str)
+        != Some("paid")
+    {
+        return Ok(webhook_result("IGNORED"));
+    }
+    let session_id = json_string(session, "/id")?;
+    let checkout_ref = json_string(session, "/client_reference_id")?;
+    let checkout_id = Uuid::parse_str(&checkout_ref).map_err(|error| {
+        ApiError::unprocessable(
+            "invalid_hosted_checkout_reference",
+            format!("checkout reference {checkout_ref:?} must be a UUID: {error}"),
+        )
+    })?;
+    let customer_id = json_string(session, "/customer")?;
+    let checkout = repository.checkout(checkout_id, None).await?;
+    let integration = repository
+        .integration_secrets(checkout.workspace_id, connection_id)
+        .await?;
+    let managed = integration.secret_reference.starts_with("v1:");
+    let api_secret = billing::resolve_connection_secret(
+        repository,
+        checkout.workspace_id,
+        connection_id,
+        "stripe_api",
+        &integration.secret_reference,
+        managed,
+    )?;
+    let connected_account = integration
+        .external_account_reference
+        .starts_with("acct_")
+        .then_some(integration.external_account_reference);
+    let receipt = StripeConnector::new(api_secret, connected_account)
+        .retrieve_hosted_payment(&session_id, &customer_id, &checkout_id.to_string())
+        .await
+        .map_err(|error| {
+            ApiError::external("stripe_hosted_payment_retrieval_failed", error.to_string())
+        })?;
+    let snapshot = repository
+        .confirm_hosted_payment(
+            checkout_id,
+            &session_id,
+            &receipt.payment_intent_id,
+            &receipt.payment_method_id,
+            receipt.amount_minor,
+            &receipt.currency,
+        )
+        .await?;
+    let created = event
+        .get("created")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let occurred_at = Utc.timestamp_opt(created, 0).single().ok_or_else(|| {
+        ApiError::unprocessable(
+            "invalid_stripe_event_time",
+            format!("Stripe event {event_id} has invalid created value {created}"),
+        )
+    })?;
+    let webhook = ConfirmedBillingWebhook {
+        provider: "STRIPE".to_string(),
+        provider_event_id: event_id,
+        event_type: "payment.confirmed".to_string(),
+        payload_sha256: sha256_hex(payload),
+        collection_request_id: snapshot.collection_request_id,
+        provider_payment_id: receipt.payment_intent_id,
+        amount_minor: snapshot.amount_minor,
+        currency: snapshot.currency,
+        occurred_at,
+    };
+    match billing::apply_confirmed_webhook(repository, &webhook).await {
+        Ok(outcome) => Ok(webhook_result(match outcome.result {
+            ConfirmationResult::Applied => "APPLIED",
+            ConfirmationResult::Duplicate => "DUPLICATE",
+            ConfirmationResult::Rejected => "REJECTED",
+        })),
+        Err(error) if error.code() == "collection_request_not_found" => {
+            billing::record_unmatched_payment(repository, connection_id, &webhook).await?;
+            Ok(webhook_result("UNMATCHED"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn json_string(value: &serde_json::Value, path: &str) -> ApiResult<String> {
+    value
+        .pointer(path)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            ApiError::unprocessable(
+                "invalid_stripe_checkout_session",
+                format!("Stripe field {path} must be a string"),
+            )
+        })
 }
 
 async fn find_webhook_scope(

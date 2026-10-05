@@ -19,6 +19,7 @@ pub async fn run_billing_dispatcher(repository: DatabaseRepository) {
 
 async fn dispatch_once(repository: &DatabaseRepository) -> crate::error::ApiResult<()> {
     let now = repository.current_time().await?;
+    repository.schedule_due_paid_renewals(now).await?;
     billing::expire_collections(repository, now).await?;
     let Some(due) = repository.find_due_collection_attempt().await? else {
         return Ok(());

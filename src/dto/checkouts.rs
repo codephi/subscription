@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub enum CheckoutKind {
     Initial,
     OnDemand,
+    PlanUpgrade,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -16,6 +17,12 @@ pub struct CreateCheckoutRequest {
     pub customer_plan_id: Uuid,
     pub checkout_kind: CheckoutKind,
     pub on_demand_plan_id: Option<Uuid>,
+    #[serde(default)]
+    pub target_plan_version_id: Option<Uuid>,
+    #[serde(default)]
+    pub quantity: Option<i64>,
+    pub success_url: Option<String>,
+    pub cancel_url: Option<String>,
     pub transaction_id: String,
     pub coupon_code: Option<String>,
     pub payment_method_binding_id: Option<Uuid>,
@@ -26,6 +33,10 @@ pub struct CheckoutQuoteRequest {
     pub customer_plan_id: Uuid,
     pub checkout_kind: CheckoutKind,
     pub on_demand_plan_id: Option<Uuid>,
+    #[serde(default)]
+    pub target_plan_version_id: Option<Uuid>,
+    #[serde(default)]
+    pub quantity: Option<i64>,
     pub coupon_code: String,
 }
 
@@ -60,6 +71,7 @@ pub struct CheckoutResponse {
     pub discount_amount_minor: i64,
     pub coupon_code: Option<String>,
     pub payment_required: bool,
+    pub redirect_url: Option<String>,
 }
 
 pub fn checkout_request_hash(request: &CreateCheckoutRequest) -> String {
@@ -86,6 +98,10 @@ mod tests {
             customer_plan_id: Uuid::nil(),
             checkout_kind: CheckoutKind::OnDemand,
             on_demand_plan_id: Some(Uuid::from_u128(1)),
+            target_plan_version_id: None,
+            quantity: Some(1),
+            success_url: None,
+            cancel_url: None,
             transaction_id: "operation-1".to_string(),
             coupon_code: None,
             payment_method_binding_id: None,

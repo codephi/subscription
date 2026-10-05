@@ -140,6 +140,7 @@ fn validate_existing(
     if existing.customer_plan_id == customer_plan_id
         && existing.payment_method_binding_id == request.payment_method_binding_id
         && existing.request_kind == "ON_DEMAND"
+        && existing.quantity == request.quantity
         && existing.transaction_id == request.transaction_id
     {
         return Ok(());
@@ -159,6 +160,15 @@ async fn lock_purchase_terms(
     customer_plan_id: Uuid,
     request: &CreateOnDemandPurchaseRequest,
 ) -> ApiResult<PurchaseTerms> {
+    if !(1..=10_000).contains(&request.quantity) {
+        return Err(ApiError::unprocessable(
+            "invalid_credit_quantity",
+            format!(
+                "credit quantity {} must be between 1 and 10000",
+                request.quantity
+            ),
+        ));
+    }
     let row = sqlx::query(
         "SELECT cp.plan_version_id,cp.commercial_status,cp.activation_status,cp.renewal_status, \
          sp.recurrence,sp.revoked_at plan_revoked_at,sp.subscription_id, \
@@ -179,11 +189,31 @@ async fn lock_purchase_terms(
         request.on_demand_plan_id, request.payment_method_binding_id
     )))?;
     validate_purchase_state(customer_plan_id, &row)?;
+    let unit_amount: i64 = row.get("price_amount_minor");
+    let unit_credits: i64 = row.get("credit_units");
+    let amount_minor = unit_amount.checked_mul(request.quantity).ok_or_else(|| {
+        ApiError::unprocessable(
+            "credit_quantity_overflow",
+            format!(
+                "unit amount {unit_amount} multiplied by quantity {} overflows",
+                request.quantity
+            ),
+        )
+    })?;
+    let credit_units = unit_credits.checked_mul(request.quantity).ok_or_else(|| {
+        ApiError::unprocessable(
+            "credit_quantity_overflow",
+            format!(
+                "unit credits {unit_credits} multiplied by quantity {} overflows",
+                request.quantity
+            ),
+        )
+    })?;
     Ok(PurchaseTerms {
         plan_version_id: row.get("plan_version_id"),
-        amount_minor: row.get("price_amount_minor"),
+        amount_minor,
         currency: row.get("currency"),
-        credit_units: row.get("credit_units"),
+        credit_units,
         scheduled_at: row.get("scheduled_at"),
         payment_expires_at: row.get("payment_expires_at"),
     })
@@ -248,13 +278,13 @@ async fn insert_purchase(
     let row = sqlx::query(
         "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id,customer_plan_id, \
          plan_version_id,on_demand_plan_id,payment_method_binding_id,request_kind,amount_minor,currency, \
-         granted_credit_units,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at,
+         granted_credit_units,credit_quantity,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at,
          coupon_id,coupon_code,base_amount_minor,discount_amount_minor,coupon_version) \
-         VALUES ($1,$2,$2,$3,$4,$5,$6,'ON_DEMAND',$7,$8,$9,'SCHEDULED',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *",
+         VALUES ($1,$2,$2,$3,$4,$5,$6,'ON_DEMAND',$7,$8,$9,$10,'SCHEDULED',$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *",
     ).bind(collection_id).bind(workspace_id).bind(customer_plan_id).bind(terms.plan_version_id)
       .bind(request.on_demand_plan_id).bind(request.payment_method_binding_id)
       .bind(coupon.map_or(terms.amount_minor, |value| value.final_amount_minor))
-      .bind(&terms.currency).bind(terms.credit_units).bind(&request.transaction_id).bind(key)
+      .bind(&terms.currency).bind(terms.credit_units).bind(request.quantity).bind(&request.transaction_id).bind(key)
       .bind(Uuid::new_v4()).bind(terms.scheduled_at).bind(terms.payment_expires_at)
       .bind(coupon.map(|value| value.coupon_id)).bind(coupon.map(|value| value.code.as_str()))
       .bind(coupon.map(|value| value.base_amount_minor))

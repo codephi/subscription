@@ -470,6 +470,9 @@ Guidelines:
 
 ## Implementation planning
 
+- [Generic SaaS integration guide](docs/integracao-saas/README.md): subscription setup,
+  client application workflow, API examples, and end-to-end acceptance criteria.
+
 - [MVP readiness](docs/mvp-readiness.md): current scope, release blockers,
   deferred features, and the recommended path to a paid MVP.
 - [Technical plan](docs/plano-tecnico-api-assinaturas-rust.md): normative domain,

@@ -164,6 +164,7 @@ async fn on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_pl
         &format!("on-demand-key-{}", Uuid::new_v4()),
         &CreateOnDemandPurchaseRequest {
             on_demand_plan_id: offer.on_demand_plan_id,
+            quantity: 3,
             payment_method_binding_id: binding_id,
             transaction_id: format!("on-demand-transaction-{}", Uuid::new_v4()),
         },
@@ -188,7 +189,7 @@ async fn on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_pl
             "fake-payment-collection:{}:attempt:1",
             purchase.collection_request_id
         ),
-        amount_minor: 500,
+        amount_minor: 1_500,
         currency: "BRL".into(),
         occurred_at: Utc::now(),
     };
@@ -210,7 +211,7 @@ async fn on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_pl
     .fetch_one(&fixture.repository.pool())
     .await
     .unwrap();
-    assert_eq!(state, (plan_version_id, 140, 1, 1, 1));
+    assert_eq!(state, (plan_version_id, 220, 1, 1, 1));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -292,7 +293,7 @@ async fn paid_upgrade_changes_plan_and_cycle_only_after_full_confirmation() {
             "fake-payment-collection:{}:attempt:1",
             upgrade.collection_request_id
         ),
-        amount_minor: 2_000,
+        amount_minor: 500,
         currency: "BRL".into(),
         occurred_at: Utc::now(),
     };
@@ -312,7 +313,7 @@ async fn paid_upgrade_changes_plan_and_cycle_only_after_full_confirmation() {
     .fetch_one(&fixture.repository.pool())
     .await
     .unwrap();
-    assert_eq!(after, (target.plan_version_id, 300, 2, 1, 1));
+    assert_eq!(after, (target.plan_version_id, 200, 2, 1, 1));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

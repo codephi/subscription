@@ -55,6 +55,29 @@ pub struct SetupSessionResult {
     pub redirect_url: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostedPaymentSessionCommand {
+    pub customer_reference: String,
+    pub client_reference_id: String,
+    pub collection_request_id: String,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub success_url: String,
+    pub cancel_url: String,
+    pub expires_at: i64,
+    pub provider_idempotency_key: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostedPaymentSessionResult {
+    pub provider_session_id: String,
+    pub redirect_url: String,
+}
+
+pub type HostedPaymentSessionFuture<'a> = Pin<
+    Box<dyn Future<Output = Result<HostedPaymentSessionResult, BillingConnectorError>> + Send + 'a>,
+>;
+
 #[derive(Clone, Debug, thiserror::Error)]
 #[error("billing connector rejected collection: {code}: {message}")]
 pub struct BillingConnectorError {
@@ -86,6 +109,20 @@ pub trait BillingConnector: Send + Sync {
             Err(BillingConnectorError {
                 code: "setup_session_not_supported".to_string(),
                 message: "connector does not implement setup sessions".to_string(),
+                retryable: false,
+                outcome_uncertain: false,
+            })
+        })
+    }
+
+    fn create_hosted_payment_session<'a>(
+        &'a self,
+        _command: &'a HostedPaymentSessionCommand,
+    ) -> HostedPaymentSessionFuture<'a> {
+        Box::pin(async {
+            Err(BillingConnectorError {
+                code: "hosted_payment_not_supported".to_string(),
+                message: "connector does not implement hosted payments".to_string(),
                 retryable: false,
                 outcome_uncertain: false,
             })

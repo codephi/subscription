@@ -22,7 +22,7 @@ use subscription::{
     repositories::{
         billing_connector::{
             BillingConnector, BillingPaymentMethod, CollectionCommand, ConnectorCollectionResult,
-            ConnectorCollectionState, SetupSessionCommand,
+            ConnectorCollectionState, HostedPaymentSessionCommand, SetupSessionCommand,
         },
         stripe::StripeConnector,
     },
@@ -744,6 +744,63 @@ async fn stripe_setup_intent_uses_tokenized_card_and_off_session_contract() {
     assert!(request.contains("payment_method_types%5B%5D=card"));
     assert!(!request.contains("setup_intent_data"));
     assert!(!request.contains("return_url"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hosted_payment_collects_and_saves_the_card_in_the_same_checkout() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"cs_test_pay","url":"https://checkout.stripe.com/c/pay/cs_test_pay"}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let session = connector
+        .create_hosted_payment_session(&HostedPaymentSessionCommand {
+            customer_reference: "cus_test".into(),
+            client_reference_id: "checkout_test".into(),
+            collection_request_id: "collection_test".into(),
+            amount_minor: 2_500,
+            currency: "BRL".into(),
+            success_url: "https://client.example/done?session_id={CHECKOUT_SESSION_ID}".into(),
+            cancel_url: "https://client.example/cancel".into(),
+            expires_at: 1_900_000_000,
+            provider_idempotency_key: "checkout:checkout_test:hosted-session:v2".into(),
+        })
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert_eq!(session.provider_session_id, "cs_test_pay");
+    assert!(request.contains("mode=payment"));
+    assert!(request.contains("line_items%5B0%5D%5Bprice_data%5D%5Bunit_amount%5D=2500"));
+    assert!(request.contains("payment_intent_data%5Bsetup_future_usage%5D=off_session"));
+    assert!(request.contains("metadata%5Bcollection_request_id%5D=collection_test"));
+    assert!(
+        request.contains("session_id%3D{CHECKOUT_SESSION_ID}"),
+        "Stripe form must keep its checkout macro literal: {request}"
+    );
+    assert!(request.contains("idempotency-key: checkout:checkout_test:hosted-session:v2"));
+    assert!(!request.contains("mode=setup"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hosted_payment_retrieval_requires_paid_session_and_saved_method() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"cs_test_pay","customer":"cus_test","client_reference_id":"checkout_test","mode":"payment","payment_status":"paid","amount_total":2500,"currency":"brl","payment_intent":{"id":"pi_test_pay","status":"succeeded","payment_method":{"id":"pm_saved_test"}}}"#,
+    ).await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    let receipt = connector
+        .retrieve_hosted_payment("cs_test_pay", "cus_test", "checkout_test")
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert!(request.starts_with(
+        "GET /v1/checkout/sessions/cs_test_pay?expand%5B%5D=payment_intent.payment_method HTTP/1.1"
+    ));
+    assert_eq!(receipt.payment_intent_id, "pi_test_pay");
+    assert_eq!(receipt.payment_method_id, "pm_saved_test");
+    assert_eq!(
+        (receipt.amount_minor, receipt.currency.as_str()),
+        (2_500, "BRL")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

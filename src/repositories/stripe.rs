@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::repositories::billing_connector::{
     BillingCapabilities, BillingConnector, BillingConnectorError, BillingPaymentMethod,
     CollectionCommand, ConnectorCollectionResult, ConnectorCollectionState, ConnectorFuture,
+    HostedPaymentSessionCommand, HostedPaymentSessionFuture, HostedPaymentSessionResult,
     SetupSessionCommand, SetupSessionFuture, SetupSessionResult,
 };
 
@@ -11,6 +12,14 @@ pub struct PreparedStripePaymentMethod {
     pub setup_intent_id: String,
     pub payment_method_id: String,
     pub customer_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostedPaymentReceipt {
+    pub payment_intent_id: String,
+    pub payment_method_id: String,
+    pub amount_minor: i64,
+    pub currency: String,
 }
 
 pub struct StripeConnector {
@@ -104,6 +113,68 @@ impl StripeConnector {
             return Err(invalid_response("SetupIntent", &body.to_string()));
         }
         Ok(setup)
+    }
+
+    pub async fn retrieve_hosted_payment(
+        &self,
+        session_id: &str,
+        expected_customer: &str,
+        expected_client_reference: &str,
+    ) -> Result<HostedPaymentReceipt, BillingConnectorError> {
+        let response = self
+            .client
+            .get(format!(
+                "{}/v1/checkout/sessions/{session_id}?expand%5B%5D=payment_intent.payment_method",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        if body.get("id").and_then(Value::as_str) != Some(session_id)
+            || body.get("customer").and_then(Value::as_str) != Some(expected_customer)
+            || body.get("client_reference_id").and_then(Value::as_str)
+                != Some(expected_client_reference)
+            || body.get("mode").and_then(Value::as_str) != Some("payment")
+            || body.get("payment_status").and_then(Value::as_str) != Some("paid")
+        {
+            return Err(invalid_response("checkout_session", &body.to_string()));
+        }
+        let intent = body
+            .get("payment_intent")
+            .ok_or_else(|| invalid_response("payment_intent", &body.to_string()))?;
+        let intent_id = intent
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_response("payment_intent.id", &intent.to_string()))?;
+        let method_id = intent
+            .get("payment_method")
+            .and_then(Value::as_object)
+            .and_then(|method| method.get("id"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid_response("payment_intent.payment_method.id", &intent.to_string())
+            })?;
+        if intent.get("status").and_then(Value::as_str) != Some("succeeded") {
+            return Err(invalid_response(
+                "payment_intent.status",
+                &intent.to_string(),
+            ));
+        }
+        Ok(HostedPaymentReceipt {
+            payment_intent_id: intent_id.to_string(),
+            payment_method_id: method_id.to_string(),
+            amount_minor: body
+                .get("amount_total")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| invalid_response("amount_total", &body.to_string()))?,
+            currency: required_string(&body, "currency")?.to_ascii_uppercase(),
+        })
     }
 
     pub async fn retrieve_checkout_setup_intent(
@@ -303,11 +374,16 @@ impl StripeConnector {
         fields: &[(&str, String)],
         idempotency_key: Option<&str>,
     ) -> Result<Value, BillingConnectorError> {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(fields.iter().map(|(key, value)| (*key, value.as_str())))
+            .finish()
+            .replace("%7BCHECKOUT_SESSION_ID%7D", "{CHECKOUT_SESSION_ID}");
         let mut request = self
             .client
             .post(format!("{}{}", self.api_base, path))
             .basic_auth(&self.secret_key, Some(""))
-            .form(fields);
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body);
         if let Some(key) = idempotency_key {
             request = request.header("Idempotency-Key", key);
         }
@@ -438,6 +514,55 @@ impl BillingConnector for StripeConnector {
                 .await?;
             Ok(SetupSessionResult {
                 provider_setup_id: required_string(&value, "id")?,
+                redirect_url: required_string(&value, "url")?,
+            })
+        })
+    }
+
+    fn create_hosted_payment_session<'a>(
+        &'a self,
+        command: &'a HostedPaymentSessionCommand,
+    ) -> HostedPaymentSessionFuture<'a> {
+        Box::pin(async move {
+            let fields = vec![
+                ("mode", "payment".to_string()),
+                ("customer", command.customer_reference.clone()),
+                ("client_reference_id", command.client_reference_id.clone()),
+                ("success_url", command.success_url.clone()),
+                ("cancel_url", command.cancel_url.clone()),
+                ("expires_at", command.expires_at.to_string()),
+                ("payment_method_types[]", "card".to_string()),
+                ("line_items[0][quantity]", "1".to_string()),
+                (
+                    "line_items[0][price_data][currency]",
+                    command.currency.to_ascii_lowercase(),
+                ),
+                (
+                    "line_items[0][price_data][unit_amount]",
+                    command.amount_minor.to_string(),
+                ),
+                (
+                    "line_items[0][price_data][product_data][name]",
+                    "Créditos".to_string(),
+                ),
+                (
+                    "payment_intent_data[setup_future_usage]",
+                    "off_session".to_string(),
+                ),
+                (
+                    "metadata[collection_request_id]",
+                    command.collection_request_id.clone(),
+                ),
+            ];
+            let value = self
+                .post_form(
+                    "/v1/checkout/sessions",
+                    &fields,
+                    Some(&command.provider_idempotency_key),
+                )
+                .await?;
+            Ok(HostedPaymentSessionResult {
+                provider_session_id: required_string(&value, "id")?,
                 redirect_url: required_string(&value, "url")?,
             })
         })

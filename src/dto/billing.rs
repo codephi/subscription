@@ -181,7 +181,7 @@ pub struct BillingOperationsResponse {
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreateRenewalRegularizationRequest {
-    pub payment_method_binding_id: Uuid,
+    pub payment_method_binding_id: Option<Uuid>,
     pub transaction_id: String,
 }
 
@@ -194,8 +194,14 @@ pub struct CreateInitialCollectionRequest {
 #[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreateOnDemandPurchaseRequest {
     pub on_demand_plan_id: Uuid,
+    #[serde(default = "one_credit_quantity")]
+    pub quantity: i64,
     pub payment_method_binding_id: Uuid,
     pub transaction_id: String,
+}
+
+fn one_credit_quantity() -> i64 {
+    1
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
@@ -207,6 +213,7 @@ pub struct CollectionRequestResponse {
     pub amount_minor: i64,
     pub currency: String,
     pub granted_credit_units: i64,
+    pub quantity: i64,
     pub status: String,
     pub transaction_id: String,
     pub idempotency_key: String,

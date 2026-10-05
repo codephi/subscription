@@ -15,6 +15,34 @@ use crate::{
 };
 
 impl DatabaseRepository {
+    pub async fn schedule_due_paid_renewals(&self, as_of: DateTime<Utc>) -> ApiResult<u64> {
+        let result = sqlx::query(
+            "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id,customer_plan_id, \
+             plan_version_id,payment_method_binding_id,request_kind,amount_minor,currency,granted_credit_units, \
+             status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
+             SELECT gen_random_uuid(),cp.customer_id,cp.customer_id,cp.customer_plan_id,cp.plan_version_id, \
+               pmb.payment_method_binding_id,'RENEWAL',p.price_amount_minor,p.currency,p.granted_credit_units, \
+               'SCHEDULED', 'renewal:'||cp.customer_plan_id::text||':'||cy.customer_plan_cycle_id::text, \
+               'renewal:'||cp.customer_plan_id::text||':'||cy.customer_plan_cycle_id::text,gen_random_uuid(),$1, \
+               $1+s.payment_completion_window \
+             FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) \
+             JOIN subscriptions s USING(subscription_id) JOIN customer_plan_cycles cy \
+               ON cy.customer_plan_id=cp.customer_plan_id AND cy.status='ACTIVE' \
+             JOIN payment_method_bindings pmb ON pmb.customer_id=cp.customer_id AND pmb.workspace_id=cp.customer_id \
+               AND pmb.customer_plan_id=cp.customer_plan_id AND pmb.status='ACTIVE' \
+             WHERE cp.commercial_status='ACTIVE_PAID' AND cp.activation_status='ACTIVATED' \
+               AND cp.renewal_status='CURRENT' AND p.commercial_model='PAID' AND p.revoked_at IS NULL \
+               AND p.recurrence='MONTHLY' AND cy.current_period_end<=$1 \
+               AND NOT EXISTS (SELECT 1 FROM collection_requests cr WHERE cr.customer_plan_id=cp.customer_plan_id \
+                 AND cr.request_kind='RENEWAL' AND cr.transaction_id='renewal:'||cp.customer_plan_id::text||':'||cy.customer_plan_cycle_id::text) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(as_of)
+        .execute(&self.pool())
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn confirmation_schedule(
         &self,
         collection_request_id: Uuid,

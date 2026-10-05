@@ -69,6 +69,7 @@ impl DatabaseRepository {
 }
 
 struct RegularizationTerms {
+    payment_method_binding_id: Uuid,
     plan_version_id: Uuid,
     amount_minor: i64,
     currency: String,
@@ -110,7 +111,9 @@ fn validate_existing_request(
     request: &CreateRenewalRegularizationRequest,
 ) -> ApiResult<()> {
     if existing.customer_plan_id == customer_plan_id
-        && existing.payment_method_binding_id == request.payment_method_binding_id
+        && request
+            .payment_method_binding_id
+            .is_none_or(|binding| existing.payment_method_binding_id == binding)
         && existing.request_kind == "RENEWAL_REGULARIZATION"
         && existing.transaction_id == request.transaction_id
     {
@@ -129,16 +132,19 @@ async fn lock_regularization_terms(
     transaction: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
     customer_plan_id: Uuid,
-    binding_id: Uuid,
+    binding_id: Option<Uuid>,
 ) -> ApiResult<RegularizationTerms> {
     let row = sqlx::query(
         "SELECT cp.plan_version_id,cp.commercial_status,cp.activation_status,cp.renewal_status, \
          p.price_amount_minor,p.currency,p.granted_credit_units,p.revoked_at, \
          statement_timestamp() scheduled_at,statement_timestamp()+s.payment_completion_window payment_expires_at, \
-         pmb.status binding_status \
+         pmb.status binding_status,pmb.payment_method_binding_id \
          FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) \
          JOIN subscriptions s USING(subscription_id) JOIN payment_method_bindings pmb \
-           ON pmb.payment_method_binding_id=$3 AND pmb.workspace_id=$1 AND pmb.customer_id=$1 \
+           ON pmb.payment_method_binding_id=COALESCE($3,(SELECT pmb2.payment_method_binding_id \
+             FROM payment_method_bindings pmb2 WHERE pmb2.customer_plan_id=cp.customer_plan_id \
+             AND pmb2.workspace_id=$1 AND pmb2.customer_id=$1 AND pmb2.status='ACTIVE' \
+             ORDER BY pmb2.created_at DESC LIMIT 1)) AND pmb.workspace_id=$1 AND pmb.customer_id=$1 \
          WHERE cp.customer_plan_id=$2 AND cp.customer_id=$1 FOR UPDATE OF cp,pmb",
     )
     .bind(workspace_id)
@@ -147,10 +153,11 @@ async fn lock_regularization_terms(
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| ApiError::not_found("billing_binding_not_found", format!(
-        "customer plan {customer_plan_id} and payment binding {binding_id} must belong to workspace {workspace_id}"
+        "customer plan {customer_plan_id} and payment binding {binding_id:?} must belong to workspace {workspace_id}"
     )))?;
     validate_regularization_state(customer_plan_id, &row)?;
     Ok(RegularizationTerms {
+        payment_method_binding_id: row.get("payment_method_binding_id"),
         plan_version_id: row.get("plan_version_id"),
         amount_minor: row.get("price_amount_minor"),
         currency: row.get("currency"),
@@ -204,7 +211,7 @@ async fn insert_regularization(
     .bind(workspace_id)
     .bind(customer_plan_id)
     .bind(terms.plan_version_id)
-    .bind(request.payment_method_binding_id)
+    .bind(terms.payment_method_binding_id)
     .bind(terms.amount_minor)
     .bind(&terms.currency)
     .bind(terms.granted_credit_units)
@@ -262,5 +269,6 @@ pub(crate) fn collection_from_row(row: &sqlx::postgres::PgRow) -> CollectionRequ
         base_amount_minor: row.try_get("base_amount_minor").ok().flatten(),
         discount_amount_minor: row.try_get("discount_amount_minor").unwrap_or(0),
         coupon_version: row.try_get("coupon_version").ok().flatten(),
+        quantity: row.try_get("credit_quantity").unwrap_or(1),
     }
 }

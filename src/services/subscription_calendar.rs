@@ -49,7 +49,7 @@ pub async fn dispatch_once(
         repository
             .defer_calendar_job(due.cycle_id, token, error.code())
             .await?;
-        tracing::warn!(cycle_id=%due.cycle_id, error_code=error.code(), "subscription calendar job deferred");
+        tracing::warn!(cycle_id=%due.cycle_id, error_code=error.code(), error=%error, "subscription calendar job deferred");
         return Ok(CalendarDispatchOutcome::Deferred);
     }
     Ok(CalendarDispatchOutcome::Advanced)

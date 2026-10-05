@@ -21,7 +21,7 @@ pub use catalog_setup::setup_catalog;
 pub async fn provision_workspace(
     state: &AppState,
     user: &AuthenticatedUser,
-) -> Result<(), AppError> {
+) -> Result<AuthenticatedUser, AppError> {
     let workspace =
         Uuid::parse_str(&user.workspace_id).map_err(|error| AppError::Internal(error.into()))?;
     let correlation =
@@ -62,7 +62,23 @@ pub async fn provision_workspace(
             )
             .await?;
     }
-    Ok(())
+    if user.customer_plan_id.is_none() {
+        let plan_id = setting(&state.pool, "free_plan_id")
+            .await?
+            .ok_or_else(catalog_missing)?;
+        let transaction = format!("tasklab-trial:{}", user.workspace_id);
+        let customer_plan = create_customer_plan(state, user, &plan_id, &transaction).await?;
+        sqlx::query("UPDATE users SET plan_model='PREPAID',customer_plan_id=? WHERE user_id=? AND customer_plan_id IS NULL")
+            .bind(customer_plan.to_string())
+            .bind(&user.user_id)
+            .execute(&state.pool)
+            .await?;
+    }
+    sqlx::query_as::<_, AuthenticatedUser>("SELECT * FROM users WHERE user_id=?")
+        .bind(&user.user_id)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(AppError::from)
 }
 
 pub async fn choose_plan(
@@ -101,7 +117,8 @@ pub async fn create_checkout(
     user: &AuthenticatedUser,
     kind: CheckoutKind,
     topup_credits: Option<i64>,
-    payment_method_binding_id: Uuid,
+    payment_method_binding_id: Option<Uuid>,
+    target_plan_version_id: Option<Uuid>,
     transaction: String,
 ) -> Result<CheckoutResponse, AppError> {
     if transaction.trim().is_empty() || transaction.len() > 128 {
@@ -149,17 +166,31 @@ pub async fn create_checkout(
             };
             (customer_plan.to_string(), Some("SUBSCRIPTION"))
         }
+        CheckoutKind::PlanUpgrade => (
+            user.customer_plan_id.clone().ok_or_else(|| {
+                AppError::Conflict("conta ainda não tem plano para atualizar".into())
+            })?,
+            Some("SUBSCRIPTION"),
+        ),
     };
     let key = format!("tasklab-checkout:{}:{transaction}", user.user_id);
+    let (success_url, cancel_url) = checkout_return_urls(&state.app_public_url)?;
     let request = match kind {
         CheckoutKind::Initial => {
-            json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id})
+            json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"success_url":success_url,"cancel_url":cancel_url})
         }
         CheckoutKind::OnDemand => {
-            let credits = topup_credits.unwrap_or(10);
-            let topup_plan = topup_plan_id(&state.pool, credits).await?;
-            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id})
+            let topup_plan = setting(&state.pool, "topup_unit_plan_id")
+                .await?
+                .ok_or_else(catalog_missing)?;
+            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"quantity":topup_credits.unwrap_or(1),"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"success_url":success_url,"cancel_url":cancel_url})
         }
+        CheckoutKind::PlanUpgrade => json!({
+            "checkout_kind":"PLAN_UPGRADE", "customer_plan_id":plan_id,
+            "target_plan_version_id":target_plan_version_id.ok_or_else(|| AppError::Invalid("informe o plano de destino".into()))?,
+            "transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,
+            "success_url":success_url,"cancel_url":cancel_url
+        }),
     };
     let body = state
         .subscription
@@ -177,6 +208,7 @@ pub async fn create_checkout(
         currency: body["currency"].as_str().map(str::to_owned),
         granted_credit_units: body["granted_credit_units"].as_i64(),
         transaction_id: transaction,
+        redirect_url: body["redirect_url"].as_str().map(str::to_owned),
     };
     sqlx::query("INSERT INTO checkouts(checkout_id,user_id,transaction_id,subscription_checkout_id,checkout_kind,status,amount_minor,currency,granted_credit_units) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(subscription_checkout_id) DO UPDATE SET status=excluded.status")
         .bind(response.checkout_id.to_string()).bind(&user.user_id).bind(&response.transaction_id).bind(response.checkout_id.to_string())
@@ -186,102 +218,13 @@ pub async fn create_checkout(
     Ok(response)
 }
 
-pub async fn create_payment_method_setup(
-    state: &AppState,
-    user: &AuthenticatedUser,
-) -> Result<Value, AppError> {
-    let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
-    let (success_url, cancel_url) = payment_setup_return_urls(&state.app_public_url)?;
-    let session = state
-        .subscription
-        .post(
-            &format!(
-                "/v1/workspaces/{}/payment-method-setup-sessions",
-                user.workspace_id
-            ),
-            None,
-            &json!({
-                "customer_plan_id":customer_plan_id,
-                "success_url":success_url,
-                "cancel_url":cancel_url,
-            }),
-        )
-        .await?;
-    Ok(session)
-}
-
-pub async fn save_payment_method_binding(
-    state: &AppState,
-    user: &AuthenticatedUser,
-    payment_method_setup_id: Uuid,
-    card_name: Option<String>,
-) -> Result<Value, AppError> {
-    let customer_plan_id = ensure_payment_customer_plan(state, user).await?;
-    state
-        .subscription
-        .post(
-            &format!("/v1/workspaces/{}/payment-method-bindings", user.workspace_id),
-            None,
-            &json!({"customer_plan_id":customer_plan_id,"payment_method_setup_id":payment_method_setup_id,"card_name":card_name}),
-        )
-        .await
-}
-
-fn payment_setup_return_urls(public_app_url: &str) -> Result<(String, String), AppError> {
+fn checkout_return_urls(public_app_url: &str) -> Result<(String, String), AppError> {
     let base = url::Url::parse(public_app_url).map_err(|error| AppError::Internal(error.into()))?;
     let mut success = base.clone();
-    success.set_query(Some("payment_setup=success"));
+    success.set_query(Some("checkout=success"));
     let mut cancel = base;
-    cancel.set_query(Some("payment_setup=cancelled"));
+    cancel.set_query(Some("checkout=cancelled"));
     Ok((success.to_string(), cancel.to_string()))
-}
-
-pub async fn list_payment_method_bindings(
-    state: &AppState,
-    user: &AuthenticatedUser,
-) -> Result<Value, AppError> {
-    state
-        .subscription
-        .get(&format!(
-            "/v1/workspaces/{}/payment-method-bindings",
-            user.workspace_id
-        ))
-        .await
-}
-
-pub async fn remove_payment_method_binding(
-    state: &AppState,
-    user: &AuthenticatedUser,
-    binding_id: Uuid,
-) -> Result<(), AppError> {
-    state
-        .subscription
-        .delete(&format!(
-            "/v1/workspaces/{}/payment-method-bindings/{binding_id}",
-            user.workspace_id
-        ))
-        .await
-}
-
-async fn ensure_payment_customer_plan(
-    state: &AppState,
-    user: &AuthenticatedUser,
-) -> Result<Uuid, AppError> {
-    if let Some(customer_plan_id) = user.customer_plan_id.as_deref() {
-        return Uuid::parse_str(customer_plan_id)
-            .map_err(|error| AppError::Integration(error.to_string()));
-    }
-    let plan_id = setting(&state.pool, "paid_plan_id")
-        .await?
-        .ok_or_else(catalog_missing)?;
-    let transaction = format!("tasklab-card-setup:{}", user.user_id);
-    let customer_plan_id = create_customer_plan(state, user, &plan_id, &transaction).await?;
-    sqlx::query("UPDATE users SET plan_model='SUBSCRIPTION',customer_plan_id=? WHERE user_id=? AND customer_plan_id IS NULL")
-        .bind(customer_plan_id.to_string())
-        .bind(&user.user_id)
-        .execute(&state.pool)
-        .await?;
-    Ok(customer_plan_id)
 }
 
 pub async fn refresh_checkout(
@@ -289,7 +232,7 @@ pub async fn refresh_checkout(
     user: &AuthenticatedUser,
     checkout_id: Uuid,
 ) -> Result<CheckoutResponse, AppError> {
-    let row = sqlx::query_as::<_, (String,String)>("SELECT subscription_checkout_id,transaction_id FROM checkouts WHERE checkout_id=? AND user_id=?")
+    let row = sqlx::query_as::<_, (String,String,String)>("SELECT subscription_checkout_id,transaction_id,checkout_kind FROM checkouts WHERE checkout_id=? AND user_id=?")
         .bind(checkout_id.to_string()).bind(&user.user_id).fetch_optional(&state.pool).await?.ok_or_else(||AppError::Invalid("checkout não encontrado".into()))?;
     let body = state
         .subscription
@@ -305,10 +248,66 @@ pub async fn refresh_checkout(
         currency: body["currency"].as_str().map(str::to_owned),
         granted_credit_units: body["granted_credit_units"].as_i64(),
         transaction_id: row.1,
+        redirect_url: body["redirect_url"].as_str().map(str::to_owned),
     };
+    if response.status == "PAID" && row.2 == "PlanUpgrade" {
+        sqlx::query("UPDATE users SET plan_model='SUBSCRIPTION' WHERE user_id=?")
+            .bind(&user.user_id)
+            .execute(&state.pool)
+            .await?;
+    }
     sqlx::query("UPDATE checkouts SET status=?,amount_minor=?,currency=?,granted_credit_units=? WHERE checkout_id=?")
         .bind(&response.status).bind(response.amount_minor).bind(&response.currency).bind(response.granted_credit_units).bind(checkout_id.to_string()).execute(&state.pool).await?;
     Ok(response)
+}
+
+pub async fn cancel_plan(state: &AppState, user: &AuthenticatedUser) -> Result<Value, AppError> {
+    let customer_plan_id = user
+        .customer_plan_id
+        .as_deref()
+        .ok_or_else(|| AppError::Conflict("conta sem plano ativo".into()))?;
+    state
+        .subscription
+        .post::<Value>(
+            &format!(
+                "/v1/workspaces/{}/customer-plans/{customer_plan_id}/cancel",
+                user.workspace_id
+            ),
+            None,
+            &json!({}),
+        )
+        .await
+}
+
+pub async fn regularize_plan(
+    state: &AppState,
+    user: &AuthenticatedUser,
+    transaction_id: &str,
+) -> Result<Value, AppError> {
+    let customer_plan_id = user
+        .customer_plan_id
+        .as_deref()
+        .ok_or_else(|| AppError::Conflict("conta sem plano ativo".into()))?;
+    if transaction_id.trim().is_empty() || transaction_id.len() > 128 || !transaction_id.is_ascii()
+    {
+        return Err(AppError::Invalid(
+            "transaction_id deve conter de 1 a 128 caracteres ASCII".into(),
+        ));
+    }
+    state
+        .subscription
+        .post(
+            &format!(
+                "/v1/workspaces/{}/customer-plans/{customer_plan_id}/renewal-regularizations",
+                user.workspace_id
+            ),
+            Some(&format!(
+                "tasklab-regularization:{}:{transaction_id}",
+                user.user_id
+            )),
+            &json!({"transaction_id": transaction_id}),
+        )
+        .await
 }
 
 pub async fn execute_task(
@@ -370,7 +369,7 @@ pub async fn execute_task(
         Ok(response) => response,
         Err(error) => {
             if matches!(error, AppError::Conflict(_) | AppError::Invalid(_)) {
-                sqlx::query("UPDATE executions SET status='REJECTED',result_text=? WHERE user_id=? AND transaction_id=?")
+                sqlx::query("UPDATE executions SET status='REJECTED',result_text=?,credits_debited='0' WHERE user_id=? AND transaction_id=?")
                     .bind(error.to_string()).bind(&user.user_id).bind(transaction).execute(&state.pool).await?;
             }
             return Err(error);
@@ -527,52 +526,19 @@ pub async fn dashboard_catalog(state: &AppState) -> Result<Value, AppError> {
     let item = setting(&state.pool, "item_id")
         .await?
         .ok_or_else(catalog_missing)?;
+    let plans = commercial_plan_catalog(&state.pool).await?;
     Ok(
-        json!({"product_id":product,"item_id":item,"prepaid_price_minor":1000,"prepaid_credits":10,"subscription_price_minor":2990,"subscription_credits":50,"task_cost":1,"topup_offers":[{"credit_units":10,"price_amount_minor":1000},{"credit_units":25,"price_amount_minor":2500},{"credit_units":50,"price_amount_minor":5000}]}),
+        json!({"product_id":product,"item_id":item,"task_cost":1,"plans":plans,"topup_price_per_credit_minor":100}),
     )
 }
 
-async fn topup_plan_id(pool: &SqlitePool, credits: i64) -> Result<String, AppError> {
-    let key = topup_plan_setting_key(credits)?;
-    setting(pool, key).await?.ok_or_else(catalog_missing)
-}
-
-fn topup_plan_setting_key(credits: i64) -> Result<&'static str, AppError> {
-    match credits {
-        10 => Ok("topup_10_plan_id"),
-        25 => Ok("topup_25_plan_id"),
-        50 => Ok("topup_50_plan_id"),
-        _ => Err(AppError::Invalid(
-            "pacote de recarga inválido; escolha 10, 25 ou 50 créditos".into(),
-        )),
+async fn commercial_plan_catalog(pool: &SqlitePool) -> Result<Vec<Value>, AppError> {
+    let mut plans = Vec::with_capacity(3);
+    for (credits, amount) in [(100_i64, 2_000_i64), (200, 4_000), (400, 6_000)] {
+        let plan_version_id = setting(pool, &format!("paid_plan_{credits}_id"))
+            .await?
+            .ok_or_else(catalog_missing)?;
+        plans.push(json!({"plan_version_id":plan_version_id,"price_amount_minor":amount,"credit_units":credits}));
     }
-}
-
-#[cfg(test)]
-mod topup_tests {
-    use super::topup_plan_setting_key;
-
-    #[test]
-    fn only_persisted_topup_packages_are_selectable() {
-        assert_eq!(topup_plan_setting_key(10).unwrap(), "topup_10_plan_id");
-        assert_eq!(topup_plan_setting_key(25).unwrap(), "topup_25_plan_id");
-        assert_eq!(topup_plan_setting_key(50).unwrap(), "topup_50_plan_id");
-        assert!(topup_plan_setting_key(11).is_err());
-    }
-}
-
-#[cfg(test)]
-mod payment_setup_tests {
-    use super::payment_setup_return_urls;
-
-    #[test]
-    fn setup_return_urls_use_the_configured_tasklab_origin() {
-        assert_eq!(
-            payment_setup_return_urls("https://tasklab.example").expect("return URLs"),
-            (
-                "https://tasklab.example/?payment_setup=success".into(),
-                "https://tasklab.example/?payment_setup=cancelled".into(),
-            )
-        );
-    }
+    Ok(plans)
 }

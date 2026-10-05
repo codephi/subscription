@@ -1,21 +1,20 @@
-import type { ReactNode } from "react"
-import { CreditCard, History, LogOut, Play, Plus, Sparkles, Trash2, WalletCards, Zap } from "lucide-react"
+import { History, LogOut, Play, Plus, Sparkles, WalletCards, Zap } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import type { Dashboard, PaymentMethodBinding, User } from "@/lib/api"
+import type { Dashboard, User } from "@/lib/api"
 
-type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null }
+type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null; redirect_url?: string | null }
+type PaidPlan = { plan_version_id: string; price_amount_minor: number; credit_units: number }
 
 type WorkspaceDashboardProps = {
   user: User
@@ -25,8 +24,6 @@ type WorkspaceDashboardProps = {
   actionError: string
   retryDashboard: () => void
   checkout: CheckoutView | null
-  selectedPaymentMethodId: string
-  setSelectedPaymentMethodId: (id: string) => void
   taskName: string
   setTaskName: (name: string) => void
   taskResult: string
@@ -37,16 +34,16 @@ type WorkspaceDashboardProps = {
   executionBusy: boolean
   onSignOut: () => void
   onCheckout: (credits: number) => void
-  onAddPaymentMethod: () => void
-  onRemovePaymentMethod: (bindingId: string) => void
-  removingPaymentMethod: boolean
-  cardSetupForm: ReactNode
+  onUpgrade: (planVersionId: string) => void
+  onCancelPlan: () => void
+  cancelBusy: boolean
+  onRegularize: () => void
+  regularizeBusy: boolean
   onExecute: () => void
 }
 
 export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
   const { user, view, loading, queryError, actionError, retryDashboard, checkout } = props
-  const latestCheckout = view?.checkouts[0]
 
   return <main className="app-shell">
     <header className="app-header">
@@ -81,8 +78,8 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
         <ActivityCard view={view} loading={loading} />
       </section>
       <aside className="dashboard-aside">
-        <PlanCard user={user} busy={props.checkoutBusy} onCheckout={() => props.onCheckout(props.topupCredits)} topupCredits={props.topupCredits} />
-        {(user.plan_model === "PREPAID" || latestCheckout?.status !== "PAID") && <CheckoutCard {...props} />}
+        <PlanCard user={user} plans={view?.catalog.plans ?? []} currentPlanVersionId={view?.customer_plan?.plan_version_id} busy={props.checkoutBusy} onCheckout={() => props.onCheckout(props.topupCredits)} onUpgrade={props.onUpgrade} onCancel={props.onCancelPlan} cancelBusy={props.cancelBusy} onRegularize={props.onRegularize} regularizeBusy={props.regularizeBusy} canRegularize={view?.customer_plan?.commercial_status === "PAST_DUE"} topupCredits={props.topupCredits} />
+        <CheckoutCard {...props} />
         <LedgerCard view={view} loading={loading} />
       </aside>
     </div>
@@ -108,7 +105,7 @@ function BalanceCard({ user, view, loading }: { user: User; view?: Dashboard; lo
       <div className="metric-icon"><WalletCards /></div>
     </CardHeader>
     <CardFooter className="flex-wrap justify-between gap-3">
-      <Badge variant="outline">{user.plan_model === "PREPAID" ? "Pré-pago" : "Assinatura mensal"}</Badge>
+      <Badge variant="outline">{user.plan_model === "PREPAID" ? "Teste grátis" : "Assinatura mensal"}</Badge>
       <span className="text-sm text-muted-foreground">1 execução = 1 crédito</span>
     </CardFooter>
   </Card>
@@ -175,88 +172,67 @@ function ActivityCard({ view, loading }: { view?: Dashboard; loading: boolean })
   </Card>
 }
 
-function PlanCard({ user, busy, onCheckout, topupCredits }: { user: User; busy: boolean; onCheckout: () => void; topupCredits: number }) {
+function PlanCard({ user, plans, currentPlanVersionId, busy, onCheckout, onUpgrade, onCancel, cancelBusy, onRegularize, regularizeBusy, canRegularize, topupCredits }: { user: User; plans: PaidPlan[]; currentPlanVersionId?: string; busy: boolean; onCheckout: () => void; onUpgrade: (planVersionId: string) => void; onCancel: () => void; cancelBusy: boolean; onRegularize: () => void; regularizeBusy: boolean; canRegularize: boolean; topupCredits: number }) {
   const prepaid = user.plan_model === "PREPAID"
+  const currentCredits = plans.find((plan) => plan.plan_version_id === currentPlanVersionId)?.credit_units ?? 0
 
   return <Card>
     <CardHeader>
-      <CardTitle>{prepaid ? "Créditos pré-pagos" : "Plano mensal"}</CardTitle>
-      <CardDescription>{prepaid ? "Recarregue sempre que precisar." : "Créditos liberados após cada ciclo confirmado."}</CardDescription>
+      <CardTitle>{prepaid ? "Créditos de teste" : "Plano mensal"}</CardTitle>
+      <CardDescription>{prepaid ? "Seu teste começa com 10 créditos. Recarregue quando precisar." : "Créditos mensais após cada confirmação."}</CardDescription>
     </CardHeader>
     <CardContent className="flex items-end justify-between gap-3">
       <div>
-        <p className="text-2xl font-semibold tracking-tight">{prepaid ? formatCurrency(topupCredits * 100) : "R$ 29,90"}</p>
-        <p className="text-sm text-muted-foreground">{prepaid ? `${topupCredits} créditos por compra` : "50 créditos por ciclo"}</p>
+        <p className="text-2xl font-semibold tracking-tight">{prepaid ? formatCurrency(topupCredits * 100) : "Ativo"}</p>
+        <p className="text-sm text-muted-foreground">{prepaid ? `${topupCredits} créditos avulsos` : "Cobrança e saldo no Subscription"}</p>
       </div>
-      {prepaid ? <Button variant="outline" onClick={onCheckout} disabled={busy}><Plus data-icon="inline-start" />Recarregar</Button> : <Badge variant="secondary">Ativo</Badge>}
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={onCheckout} disabled={busy}><Plus data-icon="inline-start" />Recarregar</Button>
+        {!prepaid && <Button variant="outline" onClick={onCancel} disabled={cancelBusy}>Cancelar no fim do ciclo</Button>}
+        {canRegularize && <Button onClick={onRegularize} disabled={regularizeBusy}>{regularizeBusy ? <Spinner data-icon="inline-start" /> : null}Regularizar cobrança</Button>}
+      </div>
     </CardContent>
-    {prepaid && <CardFooter className="text-sm text-muted-foreground">Checkout gerenciado pela Subscription.</CardFooter>}
+    <CardFooter className="flex-col items-stretch gap-2 text-sm text-muted-foreground">
+      <span>{prepaid ? "Escolha uma assinatura mensal:" : "Upgrade de plano:"}</span>
+      {plans.map((plan) => <Button key={plan.plan_version_id} variant="outline" onClick={() => onUpgrade(plan.plan_version_id)} disabled={busy || plan.credit_units <= currentCredits}>
+        {plan.credit_units} créditos · {formatCurrency(plan.price_amount_minor)} / mês{plan.plan_version_id === currentPlanVersionId ? " · Plano atual" : ""}
+      </Button>)}
+    </CardFooter>
   </Card>
 }
 
 function CheckoutCard(props: WorkspaceDashboardProps) {
   const pending = props.checkout?.status === "PENDING"
   const prepaid = props.user.plan_model === "PREPAID"
-  const offers = props.view?.catalog.topup_offers ?? [10, 25, 50].map((credit_units) => ({ credit_units, price_amount_minor: credit_units * 100 }))
 
   return <Card>
     <CardHeader>
-      <CardTitle className="flex items-center gap-2"><Sparkles />Simular checkout</CardTitle>
-      <CardDescription>Escolha um cartão salvo ou adicione outro na página segura do provedor. A Subscription mantém a referência tokenizada.</CardDescription>
+      <CardTitle className="flex items-center gap-2"><Sparkles />Comprar créditos</CardTitle>
+      <CardDescription>O Subscription calcula a cobrança e abre o checkout seguro do provedor.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
-      {prepaid && <Field>
-        <FieldLabel>Quanto deseja carregar?</FieldLabel>
-        <RadioGroup value={String(props.topupCredits)} onValueChange={(value) => props.setTopupCredits(Number(value))} disabled={props.checkoutBusy || pending} className="grid gap-2 sm:grid-cols-3">
-          {offers.map((offer) => <Field data-selected={props.topupCredits === offer.credit_units} className="plan-option" key={offer.credit_units}>
-            <RadioGroupItem id={`topup-${offer.credit_units}`} value={String(offer.credit_units)} />
-            <FieldContent>
-              <FieldLabel htmlFor={`topup-${offer.credit_units}`}>{offer.credit_units} créditos</FieldLabel>
-              <FieldDescription>{formatCurrency(offer.price_amount_minor)}</FieldDescription>
-            </FieldContent>
-          </Field>)}
-        </RadioGroup>
-      </Field>}
-      <SavedPaymentMethods methods={props.view?.payment_methods ?? []} selectedId={props.selectedPaymentMethodId} onSelect={props.setSelectedPaymentMethodId} onRemove={props.onRemovePaymentMethod} removing={props.removingPaymentMethod} disabled={props.checkoutBusy || pending} />
-      <Button variant="outline" onClick={props.onAddPaymentMethod} disabled={props.checkoutBusy || pending}>
-        <CreditCard data-icon="inline-start" />Adicionar cartão
-      </Button>
-      {props.cardSetupForm}
+      <Field>
+        <FieldLabel htmlFor="topup-credits">Créditos para adicionar</FieldLabel>
+        <Input id="topup-credits" type="number" min={1} max={10000} step={1} value={props.topupCredits} onChange={(event) => props.setTopupCredits(Number(event.target.value))} disabled={props.checkoutBusy || pending} />
+        <p className="text-sm text-muted-foreground">R$ 1,00 por crédito. O Subscription valida quantidade e valor.</p>
+      </Field>
       {props.checkoutBusy && <Alert role="status" aria-live="polite">
         <Spinner />
         <AlertTitle>Preparando sua {prepaid ? "recarga" : "assinatura"}</AlertTitle>
         <AlertDescription>Enviando a solicitação para a Subscription. Esta etapa pode levar alguns segundos.</AlertDescription>
       </Alert>}
       <Item variant="muted" size="sm">
-        <ItemMedia variant="icon"><CreditCard /></ItemMedia>
-        <ItemContent><ItemTitle>Dados protegidos</ItemTitle><ItemDescription>Os dados do cartão são informados na página segura do provedor; TaskLab recebe somente a confirmação do vínculo.</ItemDescription></ItemContent>
+        <ItemMedia variant="icon"><Sparkles /></ItemMedia>
+        <ItemContent><ItemTitle>Checkout hospedado</ItemTitle><ItemDescription>TaskLab recebe somente o estado do checkout e os créditos confirmados.</ItemDescription></ItemContent>
       </Item>
     </CardContent>
     <CardFooter>
-      <Button className="w-full" variant="outline" onClick={() => props.onCheckout(props.topupCredits)} disabled={props.checkoutBusy || pending || !props.selectedPaymentMethodId}>
+      <Button className="w-full" variant="outline" onClick={() => props.onCheckout(props.topupCredits)} disabled={props.checkoutBusy || pending}>
         {props.checkoutBusy || pending ? <Spinner data-icon="inline-start" /> : <Zap data-icon="inline-start" />}
-        {prepaid ? "Iniciar recarga" : failedCheckout(props.checkout) ? "Tentar assinatura novamente" : "Iniciar assinatura"}
+        {failedCheckout(props.checkout) ? "Tentar recarga novamente" : "Iniciar recarga"}
       </Button>
     </CardFooter>
   </Card>
-}
-
-function SavedPaymentMethods({ methods, selectedId, onSelect, onRemove, removing, disabled }: { methods: PaymentMethodBinding[]; selectedId: string; onSelect: (id: string) => void; onRemove: (id: string) => void; removing: boolean; disabled: boolean }) {
-  const active = methods.filter((method) => method.status === "ACTIVE")
-  const selected = active.find((method) => method.payment_method_binding_id === selectedId)
-  return <Field>
-    <FieldLabel htmlFor="saved-payment-method">Cartão salvo</FieldLabel>
-    <div className="flex flex-wrap gap-2">
-    <select id="saved-payment-method" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" value={selectedId} onChange={(event) => onSelect(event.target.value)} disabled={!active.length || disabled || removing}>
-      {!active.length && <option value="">Adicione um cartão para continuar</option>}
-      {active.map((method, index) => <option key={method.payment_method_binding_id} value={method.payment_method_binding_id}>{method.display_name ?? `Cartão salvo ${index + 1}`}</option>)}
-    </select>
-    {selected && <Button type="button" variant="outline" onClick={() => onRemove(selected.payment_method_binding_id)} disabled={disabled || removing}>
-      {removing ? <Spinner data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}
-      Remover cartão
-    </Button>}
-    </div>
-  </Field>
 }
 
 function LedgerCard({ view, loading }: { view?: Dashboard; loading: boolean }) {
@@ -293,9 +269,12 @@ function CheckoutNotice({ checkout }: { checkout: CheckoutView }) {
   const variant = checkout.status === "FAILED" || checkout.status === "EXPIRED" ? "destructive" : "default"
 
   return <Alert variant={variant}>
-    <CreditCard />
+    <Sparkles />
     <AlertTitle>Checkout {checkout.status.toLowerCase()}</AlertTitle>
-    <AlertDescription>{paid ? "Pagamento confirmado pela Subscription." : checkout.status === "PENDING" ? "A Subscription está processando; este painel acompanha o resultado." : `Estado atualizado: ${checkout.status}.`}</AlertDescription>
+    <AlertDescription className="flex flex-col items-start gap-3">
+      <span>{paid ? "Pagamento confirmado pela Subscription." : checkout.status === "PENDING" ? "A Subscription está processando; este painel acompanha o resultado." : `Estado atualizado: ${checkout.status}.`}</span>
+      {checkout.status === "PENDING" && checkout.redirect_url && <Button variant="outline" size="sm" onClick={() => window.location.assign(checkout.redirect_url!)}>Abrir checkout hospedado</Button>}
+    </AlertDescription>
   </Alert>
 }
 

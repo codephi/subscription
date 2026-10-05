@@ -25,12 +25,6 @@ impl SubscriptionClient {
         self.send(Method::GET, path, None, None).await
     }
 
-    pub async fn delete(&self, path: &str) -> Result<(), AppError> {
-        self.send(Method::DELETE, path, None, None)
-            .await
-            .map(|_| ())
-    }
-
     pub async fn post<T: Serialize>(
         &self,
         path: &str,

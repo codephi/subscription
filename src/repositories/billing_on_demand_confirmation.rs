@@ -12,6 +12,7 @@ pub(super) struct OnDemandCreditGrant<'a> {
     pub on_demand_plan_id: Option<Uuid>,
     pub plan_version_id: Uuid,
     pub granted_credit_units: i64,
+    pub quantity: i32,
     pub customer_plan_id: Uuid,
     pub transaction_id: &'a str,
 }
@@ -24,7 +25,10 @@ pub(super) async fn grant_on_demand_credit(
     let offer_id = grant.on_demand_plan_id.ok_or_else(|| {
         ApiError::unexpected("ON_DEMAND collection must reference an on-demand plan")
     })?;
-    let credit_units = load_credit_units(transaction, offer_id, grant.plan_version_id).await?;
+    let unit_credits = load_credit_units(transaction, offer_id, grant.plan_version_id).await?;
+    let credit_units = unit_credits
+        .checked_mul(i64::from(grant.quantity))
+        .ok_or_else(|| invalid_offer(offer_id, "credit quantity exceeds the supported maximum"))?;
     validate_credit_snapshot(offer_id, credit_units, grant.granted_credit_units)?;
     let balance_after = wallet.balance.checked_add(CreditUnits::new(credit_units))?;
     let entry_id = insert_credit_entry(

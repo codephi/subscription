@@ -100,6 +100,7 @@ impl DatabaseRepository {
                 on_demand_plan_id: context.on_demand_plan_id,
                 plan_version_id: context.plan_version_id,
                 granted_credit_units: context.granted_credit_units,
+                quantity: context.credit_quantity,
                 customer_plan_id: context.customer_plan_id,
                 transaction_id: &context.transaction_id,
             };
@@ -174,6 +175,8 @@ struct ConfirmationContext {
     customer_plan_version_id: Uuid,
     request_kind: String,
     granted_credit_units: i64,
+    credit_quantity: i32,
+    previous_granted_credit_units: i64,
     request_status: String,
     activation_status: String,
     commercial_status: String,
@@ -205,11 +208,13 @@ async fn lock_confirmation_context(
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<ConfirmationContext> {
     let row = sqlx::query(
-        "SELECT cr.customer_plan_id,cr.plan_version_id,cr.request_kind,cr.granted_credit_units, \
+        "SELECT cr.customer_plan_id,cr.plan_version_id,cr.request_kind,cr.granted_credit_units,cr.credit_quantity, \
          cr.status request_status,cr.payment_expires_at,cr.amount_minor,cr.currency,cr.transaction_id,cr.on_demand_plan_id, \
-         cp.plan_version_id customer_plan_version_id,cp.activation_status,cp.commercial_status,cp.renewal_status, \
+         cp.plan_version_id customer_plan_version_id,current_plan.granted_credit_units previous_granted_credit_units, \
+         cp.activation_status,cp.commercial_status,cp.renewal_status, \
          bp.billing_payment_id,bp.provider,bp.provider_payment_id \
          FROM collection_requests cr JOIN customer_plans cp ON cp.customer_plan_id=cr.customer_plan_id \
+         JOIN subscription_plan_versions current_plan ON current_plan.plan_version_id=cp.plan_version_id \
          JOIN billing_payments bp ON bp.collection_request_id=cr.collection_request_id \
          JOIN collection_attempts ca ON ca.collection_attempt_id=bp.collection_attempt_id \
          WHERE cr.collection_request_id=$1 FOR UPDATE OF cr,cp,bp,ca",
@@ -229,6 +234,8 @@ fn context_from_row(row: &sqlx::postgres::PgRow) -> ConfirmationContext {
         customer_plan_version_id: row.get("customer_plan_version_id"),
         request_kind: row.get("request_kind"),
         granted_credit_units: row.get("granted_credit_units"),
+        credit_quantity: row.get("credit_quantity"),
+        previous_granted_credit_units: row.get("previous_granted_credit_units"),
         request_status: row.get("request_status"),
         activation_status: row.get("activation_status"),
         commercial_status: row.get("commercial_status"),
@@ -302,7 +309,9 @@ fn validate_plan_and_customer(
     } else if context.request_kind == "PLAN_UPGRADE" {
         context.customer_plan_version_id != context.plan_version_id
             && plan.response.commercial_model == crate::dto::plans::CommercialModel::Paid
-            && context.granted_credit_units == plan.response.granted_credit_units.value()
+            && context.granted_credit_units
+                == plan.response.granted_credit_units.value()
+                    - context.previous_granted_credit_units
     } else {
         context.customer_plan_version_id == context.plan_version_id
             && plan.response.commercial_model == crate::dto::plans::CommercialModel::Paid

@@ -11,10 +11,12 @@ use crate::{
             checkout_request_hash, CheckoutQuoteRequest, CheckoutQuoteResponse, CheckoutResponse,
             CreateCheckoutRequest,
         },
+        plans::{CreatePlanTransitionRequest, PlanTransitionKind},
     },
     error::{ApiError, ApiResult},
     repositories::{
         billing_checkouts::{CheckoutClaim, CheckoutRecord},
+        billing_connector::{BillingConnector, HostedPaymentSessionCommand},
         database::DatabaseRepository,
         stripe::StripeConnector,
     },
@@ -25,7 +27,6 @@ use crate::{
 pub struct BillingCheckoutConfig {
     pub(crate) api_secret: String,
     pub(crate) webhook_secret: String,
-    pub(crate) declines_charge: bool,
 }
 
 impl BillingCheckoutConfig {
@@ -35,15 +36,9 @@ impl BillingCheckoutConfig {
         }
         let api_secret = required_test_value("STRIPE_SECRET_KEY", "sk_test_")?;
         let webhook_secret = required_test_value("STRIPE_WEBHOOK_SECRET", "whsec_")?;
-        let declines_charge = match env::var("BILLING_SANDBOX_PAYMENT_SCENARIO").as_deref() {
-            Ok("APPROVED") => false,
-            Ok("DECLINED") => true,
-            _ => return Err(invalid_scenario()),
-        };
         Ok(Some(Self {
             api_secret,
             webhook_secret,
-            declines_charge,
         }))
     }
 }
@@ -56,6 +51,9 @@ pub async fn create(
     request: CreateCheckoutRequest,
 ) -> ApiResult<CheckoutResponse> {
     validate_request(&request, idempotency_key)?;
+    if request.payment_method_binding_id.is_none() {
+        validate_return_urls(&request)?;
+    }
     if request.payment_method_binding_id.is_none() && request.coupon_code.is_none() {
         required_config(config)?;
     }
@@ -99,10 +97,40 @@ async fn create_or_resume(
     request: CreateCheckoutRequest,
 ) -> ApiResult<CheckoutResponse> {
     match claim {
-        CheckoutClaim::Existing(record) => response_for_record(repository, record).await,
+        CheckoutClaim::Existing(record) => {
+            resume_hosted_checkout(repository, config, &record, &request).await?;
+            response_for_record(repository, record).await
+        }
         CheckoutClaim::Busy(record) => Ok(pending_response(record)),
         CheckoutClaim::Claimed(record) => process_claim(repository, config, record, request).await,
     }
+}
+
+async fn resume_hosted_checkout(
+    repository: &DatabaseRepository,
+    config: Option<&BillingCheckoutConfig>,
+    record: &CheckoutRecord,
+    request: &CreateCheckoutRequest,
+) -> ApiResult<()> {
+    let Some(recovery) = repository
+        .recoverable_hosted_checkout(record.checkout_id)
+        .await?
+    else {
+        return Ok(());
+    };
+    let secrets = repository
+        .integration_secrets(record.workspace_id, recovery.billing_connection_id)
+        .await?;
+    let customer_id = billing_integrations::ensure_customer(repository, &secrets).await?;
+    create_hosted_session(
+        repository,
+        config,
+        record,
+        &recovery.collection,
+        request,
+        &HostedCheckout { customer_id },
+    )
+    .await
 }
 
 async fn process_claim(
@@ -133,6 +161,8 @@ async fn process_claim_inner(
                     customer_plan_id: request.customer_plan_id,
                     checkout_kind: request.checkout_kind,
                     on_demand_plan_id: request.on_demand_plan_id,
+                    target_plan_version_id: request.target_plan_version_id,
+                    quantity: request.quantity,
                     coupon_code: request.coupon_code.clone().unwrap_or_default(),
                 },
             )
@@ -149,10 +179,23 @@ async fn process_claim_inner(
         }
     }
     match begin_collection(repository, config, &record, &request).await {
-        Ok(collection) => {
+        Ok((collection, hosted)) => {
             repository
                 .finish_checkout(record.checkout_id, collection.collection_request_id)
                 .await?;
+            if let Some(hosted) = hosted {
+                repository
+                    .mark_hosted_collection_pending(
+                        record.checkout_id,
+                        collection.collection_request_id,
+                    )
+                    .await?;
+                let collection = repository
+                    .hosted_checkout_collection(record.checkout_id)
+                    .await?;
+                create_hosted_session(repository, config, &record, &collection, &request, &hosted)
+                    .await?;
+            }
             response_for_record(
                 repository,
                 repository
@@ -170,26 +213,34 @@ async fn begin_collection(
     config: Option<&BillingCheckoutConfig>,
     record: &CheckoutRecord,
     request: &CreateCheckoutRequest,
-) -> ApiResult<crate::dto::billing::CollectionRequestResponse> {
-    let binding = prepare_payment_method(repository, config, record).await?;
-    create_collection(
+) -> ApiResult<(
+    crate::dto::billing::CollectionRequestResponse,
+    Option<HostedCheckout>,
+)> {
+    let (binding, hosted) = prepare_payment_method(repository, config, record).await?;
+    let collection = create_collection(
         repository,
         record,
         request,
         binding.payment_method_binding_id,
     )
-    .await
+    .await?;
+    Ok((collection, hosted))
 }
 
 async fn prepare_payment_method(
     repository: &DatabaseRepository,
     config: Option<&BillingCheckoutConfig>,
     record: &CheckoutRecord,
-) -> ApiResult<crate::dto::billing::PaymentMethodBindingResponse> {
+) -> ApiResult<(
+    crate::dto::billing::PaymentMethodBindingResponse,
+    Option<HostedCheckout>,
+)> {
     if let Some(binding_id) = record.payment_method_binding_id {
         return repository
             .find_payment_method_binding_by_id(record.workspace_id, binding_id)
-            .await;
+            .await
+            .map(|binding| (binding, None));
     }
     let config = required_config(config)?;
     let connector = StripeConnector::new(config.api_secret.clone(), None);
@@ -200,30 +251,112 @@ async fn prepare_payment_method(
         .integration_secrets(record.workspace_id, integration.billing_connection_id)
         .await?;
     let customer_id = billing_integrations::ensure_customer(repository, &secrets).await?;
-    let prepared = connector
-        .prepare_test_payment_method(
-            &customer_id,
-            &format!("checkout:{}:payment-method:v1", record.checkout_id),
-            config.declines_charge,
+    let binding_id = repository
+        .ensure_hosted_payment_binding(
+            record.checkout_id,
+            record.workspace_id,
+            integration.billing_connection_id,
         )
+        .await?;
+    let binding = repository
+        .find_payment_method_binding_by_id(record.workspace_id, binding_id)
+        .await?;
+    Ok((binding, Some(HostedCheckout { customer_id })))
+}
+
+async fn create_hosted_session(
+    repository: &DatabaseRepository,
+    config: Option<&BillingCheckoutConfig>,
+    checkout: &CheckoutRecord,
+    collection: &crate::dto::billing::CollectionRequestResponse,
+    request: &CreateCheckoutRequest,
+    hosted: &HostedCheckout,
+) -> ApiResult<()> {
+    let config = required_config(config)?;
+    let connector = StripeConnector::new(config.api_secret.clone(), None);
+    let success_url = return_url(
+        request
+            .success_url
+            .as_deref()
+            .expect("validated success URL"),
+        checkout.checkout_id,
+        true,
+    )?;
+    let cancel_url = request.cancel_url.as_deref().expect("validated cancel URL");
+    let result = connector
+        .create_hosted_payment_session(&HostedPaymentSessionCommand {
+            customer_reference: hosted.customer_id.clone(),
+            client_reference_id: checkout.checkout_id.to_string(),
+            collection_request_id: collection.collection_request_id.to_string(),
+            amount_minor: collection.amount_minor,
+            currency: collection.currency.clone(),
+            success_url,
+            cancel_url: cancel_url.to_string(),
+            expires_at: collection.payment_expires_at.timestamp(),
+            provider_idempotency_key: format!(
+                "checkout:{}:hosted-session:v2",
+                checkout.checkout_id
+            ),
+        })
         .await
         .map_err(stripe_error)?;
-    if prepared.customer_id != customer_id {
-        return Err(ApiError::conflict(
-            "billing_payment_method_customer_mismatch",
-            format!(
-                "checkout {} received a payment method for another customer",
-                record.checkout_id
-            ),
-        ));
+    repository
+        .finish_hosted_payment_session(
+            checkout.checkout_id,
+            &result.provider_session_id,
+            &result.redirect_url,
+        )
+        .await
+}
+
+struct HostedCheckout {
+    customer_id: String,
+}
+
+fn validate_return_urls(request: &CreateCheckoutRequest) -> ApiResult<()> {
+    for (name, value) in [
+        ("success_url", &request.success_url),
+        ("cancel_url", &request.cancel_url),
+    ] {
+        let value = value.as_deref().ok_or_else(|| {
+            ApiError::unprocessable(
+                "checkout_return_url_required",
+                format!("{name} must be provided for hosted checkout"),
+            )
+        })?;
+        let parsed = url::Url::parse(value).map_err(|error| {
+            ApiError::unprocessable(
+                "invalid_checkout_return_url",
+                format!(
+                    "{name} {value:?} must be an absolute HTTPS URL or loopback HTTP URL: {error}"
+                ),
+            )
+        })?;
+        let loopback = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        if parsed.scheme() != "https" && !(loopback && parsed.scheme() == "http") {
+            return Err(ApiError::unprocessable(
+                "invalid_checkout_return_url",
+                format!("{name} {value:?} must use HTTPS except on loopback"),
+            ));
+        }
     }
-    find_or_create_binding(
-        repository,
-        record,
-        integration.billing_connection_id,
-        &prepared.payment_method_id,
-    )
-    .await
+    Ok(())
+}
+
+fn return_url(value: &str, checkout_id: Uuid, success: bool) -> ApiResult<String> {
+    let mut parsed = url::Url::parse(value).map_err(|error| {
+        ApiError::unprocessable(
+            "invalid_checkout_return_url",
+            format!("return URL {value:?} must be absolute: {error}"),
+        )
+    })?;
+    if success {
+        parsed
+            .query_pairs_mut()
+            .append_pair("subscription_checkout_id", &checkout_id.to_string())
+            .append_pair("session_id", "{CHECKOUT_SESSION_ID}");
+    }
+    Ok(parsed.to_string())
 }
 
 async fn ensure_integration(
@@ -302,28 +435,6 @@ fn integration_is_ready(integration: &crate::dto::billing::WorkspaceIntegrationR
     active && integration.webhook_secret_configured
 }
 
-async fn find_or_create_binding(
-    repository: &DatabaseRepository,
-    checkout: &CheckoutRecord,
-    connection_id: Uuid,
-    payment_method_id: &str,
-) -> ApiResult<crate::dto::billing::PaymentMethodBindingResponse> {
-    if let Some(binding) = repository
-        .find_payment_method_binding(checkout.workspace_id, connection_id, payment_method_id)
-        .await?
-    {
-        return Ok(binding);
-    }
-    repository
-        .create_verified_payment_method_binding(
-            checkout.workspace_id,
-            connection_id,
-            Some(checkout.customer_plan_id),
-            payment_method_id,
-        )
-        .await
-}
-
 async fn create_collection(
     repository: &DatabaseRepository,
     checkout: &CheckoutRecord,
@@ -357,12 +468,31 @@ async fn create_collection(
                     &checkout.idempotency_key,
                     &CreateOnDemandPurchaseRequest {
                         on_demand_plan_id: request.on_demand_plan_id.expect("validated offer"),
+                        quantity: request.quantity.unwrap_or(1),
                         payment_method_binding_id: binding_id,
                         transaction_id: checkout.transaction_id.clone(),
                     },
                     coupon,
                 )
                 .await
+        }
+        crate::dto::checkouts::CheckoutKind::PlanUpgrade => {
+            crate::services::billing::create_paid_plan_upgrade(
+                repository,
+                checkout.workspace_id,
+                checkout.customer_plan_id,
+                &checkout.idempotency_key,
+                &CreatePlanTransitionRequest {
+                    new_plan_version_id: request
+                        .target_plan_version_id
+                        .expect("validated target plan"),
+                    transition_kind: PlanTransitionKind::Upgrade,
+                    payment_method_binding_id: Some(binding_id),
+                    transaction_id: checkout.transaction_id.clone(),
+                    actor_reference: format!("workspace:{}", checkout.workspace_id),
+                },
+            )
+            .await
         }
     }
 }
@@ -388,13 +518,18 @@ async fn response_for_record(
             discount_amount_minor: record.discount_amount_minor,
             coupon_code: record.coupon_code,
             payment_required: false,
+            redirect_url: None,
         });
     }
     if let Some(collection_id) = record.collection_request_id {
         let collection = repository
             .find_collection_request(record.workspace_id, collection_id)
             .await?;
-        return Ok(repository.response_for_checkout(record, Some(&collection)));
+        let mut response = repository.response_for_checkout(record.clone(), Some(&collection));
+        response.redirect_url = repository
+            .hosted_payment_redirect_url(record.checkout_id)
+            .await?;
+        return Ok(response);
     }
     Ok(pending_response(record))
 }
@@ -415,14 +550,30 @@ fn pending_response(record: CheckoutRecord) -> CheckoutResponse {
         discount_amount_minor: record.discount_amount_minor,
         coupon_code: record.coupon_code,
         payment_required: true,
+        redirect_url: None,
     }
 }
 
 fn validate_request(request: &CreateCheckoutRequest, key: &str) -> ApiResult<()> {
     let valid = match request.checkout_kind {
-        crate::dto::checkouts::CheckoutKind::Initial => request.on_demand_plan_id.is_none(),
-        crate::dto::checkouts::CheckoutKind::OnDemand => request.on_demand_plan_id.is_some(),
+        crate::dto::checkouts::CheckoutKind::Initial => {
+            request.on_demand_plan_id.is_none()
+                && request.target_plan_version_id.is_none()
+                && request.quantity.is_none_or(|value| value == 1)
+        }
+        crate::dto::checkouts::CheckoutKind::OnDemand => {
+            request.on_demand_plan_id.is_some() && request.target_plan_version_id.is_none()
+        }
+        crate::dto::checkouts::CheckoutKind::PlanUpgrade => {
+            request.on_demand_plan_id.is_none()
+                && request.target_plan_version_id.is_some()
+                && request.quantity.is_none_or(|value| value == 1)
+                && request.coupon_code.is_none()
+        }
     };
+    let valid_quantity = request
+        .quantity
+        .is_none_or(|quantity| (1..=10_000).contains(&quantity));
     let valid_transaction = (1..=255).contains(&request.transaction_id.len())
         && request.transaction_id.is_ascii()
         && !request.transaction_id.trim().is_empty();
@@ -430,6 +581,7 @@ fn validate_request(request: &CreateCheckoutRequest, key: &str) -> ApiResult<()>
     if valid
         && valid_transaction
         && valid_key
+        && valid_quantity
         && request.coupon_code.as_deref().is_none_or(valid_coupon_code)
     {
         return Ok(());
@@ -472,20 +624,13 @@ fn required_test_value(name: &str, prefix: &str) -> ApiResult<String> {
     ))
 }
 
-fn invalid_scenario() -> ApiError {
-    ApiError::service_unavailable(
-        "billing_checkout_configuration_invalid",
-        "BILLING_SANDBOX_PAYMENT_SCENARIO must be APPROVED or DECLINED",
-    )
-}
-
 fn stripe_error(error: impl std::fmt::Display) -> ApiError {
     ApiError::external("billing_connector_error", error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{integration_is_ready, validate_request};
+    use super::{integration_is_ready, return_url, validate_request, validate_return_urls};
     use crate::dto::{
         billing::WorkspaceIntegrationResponse,
         checkouts::{CheckoutKind, CreateCheckoutRequest},
@@ -498,6 +643,10 @@ mod tests {
             customer_plan_id: Uuid::new_v4(),
             checkout_kind: CheckoutKind::Initial,
             on_demand_plan_id: None,
+            target_plan_version_id: None,
+            quantity: None,
+            success_url: None,
+            cancel_url: None,
             transaction_id: "operation-1".to_string(),
             coupon_code: None,
             payment_method_binding_id: None,
@@ -530,5 +679,48 @@ mod tests {
         integration.status = "ACTIVE".into();
         integration.webhook_secret_configured = true;
         assert!(integration_is_ready(&integration));
+    }
+
+    #[test]
+    fn hosted_checkout_return_urls_require_https_outside_loopback() {
+        let mut request = CreateCheckoutRequest {
+            customer_plan_id: Uuid::new_v4(),
+            checkout_kind: CheckoutKind::OnDemand,
+            on_demand_plan_id: Some(Uuid::new_v4()),
+            target_plan_version_id: None,
+            quantity: Some(2),
+            success_url: Some("https://client.example/checkout/success".into()),
+            cancel_url: Some("http://localhost:5174/checkout/cancel".into()),
+            transaction_id: "operation-2".into(),
+            coupon_code: None,
+            payment_method_binding_id: None,
+        };
+        assert!(validate_return_urls(&request).is_ok());
+        request.cancel_url = Some("http://client.example/cancel".into());
+        assert!(validate_return_urls(&request).is_err());
+    }
+
+    #[test]
+    fn hosted_success_return_adds_only_subscription_polling_references() {
+        let checkout_id = Uuid::new_v4();
+        let url = return_url("https://client.example/done?source=web", checkout_id, true)
+            .expect("valid URL");
+        let parsed = url::Url::parse(&url).expect("returned URL");
+        assert_eq!(
+            parsed
+                .query_pairs()
+                .find(|(key, _)| key == "source")
+                .unwrap()
+                .1,
+            "web"
+        );
+        assert!(parsed
+            .query()
+            .unwrap()
+            .contains(&format!("subscription_checkout_id={checkout_id}")));
+        assert!(parsed
+            .query()
+            .unwrap()
+            .contains("session_id=%7BCHECKOUT_SESSION_ID%7D"));
     }
 }

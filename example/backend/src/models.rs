@@ -38,13 +38,13 @@ pub struct ChoosePlanRequest {
 pub struct CreateCheckoutRequest {
     pub checkout_kind: CheckoutKind,
     pub topup_credits: Option<i64>,
-    pub payment_method_binding_id: Uuid,
+    pub payment_method_binding_id: Option<Uuid>,
+    pub target_plan_version_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct SavePaymentMethodBindingRequest {
-    pub payment_method_setup_id: Uuid,
-    pub card_name: Option<String>,
+pub struct CreateRegularizationRequest {
+    pub transaction_id: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
@@ -52,6 +52,7 @@ pub struct SavePaymentMethodBindingRequest {
 pub enum CheckoutKind {
     Initial,
     OnDemand,
+    PlanUpgrade,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -77,4 +78,5 @@ pub struct CheckoutResponse {
     pub currency: Option<String>,
     pub granted_credit_units: Option<i64>,
     pub transaction_id: String,
+    pub redirect_url: Option<String>,
 }

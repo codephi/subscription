@@ -143,6 +143,7 @@ async fn lock_terms(
 ) -> ApiResult<UpgradeTerms> {
     let row = sqlx::query("SELECT cp.plan_version_id previous_plan_version_id,cp.commercial_status, \
          cp.activation_status,cp.renewal_status,current_plan.subscription_id current_subscription_id, \
+         COALESCE(current_plan.price_amount_minor,0) previous_amount_minor,current_plan.granted_credit_units previous_credit_units, \
          target.subscription_id target_subscription_id,target.commercial_model,target.price_amount_minor, \
          target.currency,target.granted_credit_units,target.revoked_at,pmb.status binding_status, \
          statement_timestamp() scheduled_at,statement_timestamp()+s.payment_completion_window payment_expires_at \
@@ -155,11 +156,25 @@ async fn lock_terms(
             "plan_upgrade_resources_not_found", format!("upgrade resources must belong to workspace {workspace_id}"),
         ))?;
     validate_state(customer_plan_id, &row)?;
+    let previous_amount: i64 = row.get("previous_amount_minor");
+    let target_amount: i64 = row.get("price_amount_minor");
+    let previous_credits: i64 = row.get("previous_credit_units");
+    let target_credits: i64 = row.get("granted_credit_units");
+    if target_amount <= previous_amount || target_credits <= previous_credits {
+        return Err(ApiError::conflict(
+            "plan_upgrade_not_higher",
+            format!(
+                "target plan {} must cost and grant more than current plan {}",
+                request.new_plan_version_id,
+                row.get::<Uuid, _>("previous_plan_version_id")
+            ),
+        ));
+    }
     Ok(UpgradeTerms {
         previous_plan_version_id: row.get("previous_plan_version_id"),
-        amount_minor: row.get("price_amount_minor"),
+        amount_minor: target_amount - previous_amount,
         currency: row.get("currency"),
-        credit_units: row.get("granted_credit_units"),
+        credit_units: target_credits - previous_credits,
         scheduled_at: row.get("scheduled_at"),
         payment_expires_at: row.get("payment_expires_at"),
     })
