@@ -120,6 +120,7 @@ pub async fn create_checkout(
     payment_method_binding_id: Option<Uuid>,
     target_plan_version_id: Option<Uuid>,
     transaction: String,
+    request_origin: Option<&str>,
 ) -> Result<CheckoutResponse, AppError> {
     if transaction.trim().is_empty() || transaction.len() > 128 {
         return Err(AppError::Invalid(
@@ -174,7 +175,7 @@ pub async fn create_checkout(
         ),
     };
     let key = format!("tasklab-checkout:{}:{transaction}", user.user_id);
-    let (success_url, cancel_url) = checkout_return_urls(&state.app_public_url)?;
+    let (success_url, cancel_url) = checkout_return_urls(&state.app_public_url, request_origin)?;
     let request = match kind {
         CheckoutKind::Initial => {
             json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"success_url":success_url,"cancel_url":cancel_url})
@@ -218,13 +219,51 @@ pub async fn create_checkout(
     Ok(response)
 }
 
-fn checkout_return_urls(public_app_url: &str) -> Result<(String, String), AppError> {
-    let base = url::Url::parse(public_app_url).map_err(|error| AppError::Internal(error.into()))?;
+fn checkout_return_urls(
+    public_app_url: &str,
+    request_origin: Option<&str>,
+) -> Result<(String, String), AppError> {
+    let configured =
+        url::Url::parse(public_app_url).map_err(|error| AppError::Internal(error.into()))?;
+    let base = match request_origin {
+        Some(origin) => validated_checkout_origin(&configured, origin)?,
+        None => configured,
+    };
     let mut success = base.clone();
     success.set_query(Some("checkout=success"));
     let mut cancel = base;
     cancel.set_query(Some("checkout=cancelled"));
     Ok((success.to_string(), cancel.to_string()))
+}
+
+fn validated_checkout_origin(configured: &url::Url, origin: &str) -> Result<url::Url, AppError> {
+    let requested = url::Url::parse(origin)
+        .map_err(|_| AppError::Invalid(format!("Origin {origin:?} deve ser uma origem HTTP(S)")))?;
+    let is_origin = requested.path() == "/"
+        && requested.query().is_none()
+        && requested.fragment().is_none()
+        && requested.username().is_empty()
+        && requested.password().is_none();
+    let matches_config = requested.origin() == configured.origin();
+    let is_local_alias = is_localhost_alias(configured, &requested);
+    if !is_origin || !(matches_config || is_local_alias) {
+        return Err(AppError::Invalid(format!(
+            "Origin {origin:?} deve corresponder a APP_PUBLIC_URL {configured}"
+        )));
+    }
+    Ok(requested)
+}
+
+fn is_localhost_alias(configured: &url::Url, requested: &url::Url) -> bool {
+    let local_host = |url: &url::Url| {
+        url.host_str()
+            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"))
+    };
+    configured.scheme() == "http"
+        && requested.scheme() == "http"
+        && configured.port_or_known_default() == requested.port_or_known_default()
+        && local_host(configured)
+        && local_host(requested)
 }
 
 pub async fn refresh_checkout(
@@ -541,4 +580,35 @@ async fn commercial_plan_catalog(pool: &SqlitePool) -> Result<Vec<Value>, AppErr
         plans.push(json!({"plan_version_id":plan_version_id,"price_amount_minor":amount,"credit_units":credits}));
     }
     Ok(plans)
+}
+
+#[cfg(test)]
+mod checkout_return_tests {
+    use super::{checkout_return_urls, validated_checkout_origin};
+
+    #[test]
+    fn checkout_returns_use_the_browser_origin_for_both_results() {
+        let (success, cancel) =
+            checkout_return_urls("http://localhost:5174", Some("http://127.0.0.1:5174"))
+                .expect("local alias should be allowed");
+
+        assert_eq!(success, "http://127.0.0.1:5174/?checkout=success");
+        assert_eq!(cancel, "http://127.0.0.1:5174/?checkout=cancelled");
+    }
+
+    #[test]
+    fn checkout_return_falls_back_to_the_configured_origin_without_request_origin() {
+        let (success, _) = checkout_return_urls("https://tasklab.example", None)
+            .expect("configured origin should be used");
+
+        assert_eq!(success, "https://tasklab.example/?checkout=success");
+    }
+
+    #[test]
+    fn checkout_return_rejects_an_untrusted_request_origin() {
+        let configured = url::Url::parse("https://tasklab.example").unwrap();
+
+        assert!(validated_checkout_origin(&configured, "https://attacker.example").is_err());
+        assert!(validated_checkout_origin(&configured, "https://tasklab.example/path").is_err());
+    }
 }

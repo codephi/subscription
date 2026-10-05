@@ -353,8 +353,7 @@ fn return_url(value: &str, checkout_id: Uuid, success: bool) -> ApiResult<String
     if success {
         parsed
             .query_pairs_mut()
-            .append_pair("subscription_checkout_id", &checkout_id.to_string())
-            .append_pair("session_id", "{CHECKOUT_SESSION_ID}");
+            .append_pair("subscription_checkout_id", &checkout_id.to_string());
     }
     Ok(parsed.to_string())
 }
@@ -718,9 +717,6 @@ mod tests {
             .query()
             .unwrap()
             .contains(&format!("subscription_checkout_id={checkout_id}")));
-        assert!(parsed
-            .query()
-            .unwrap()
-            .contains("session_id=%7BCHECKOUT_SESSION_ID%7D"));
+        assert!(!parsed.query().unwrap().contains("session_id"));
     }
 }
