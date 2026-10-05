@@ -150,12 +150,13 @@ credenciais Stripe nem recebe PAN/CVC. O nome de exibição opcional fica no
 navegador durante o redirecionamento e só é salvo com o vínculo confirmado.
 
 Para sandbox, configure `BILLING_SANDBOX_ENABLED=true`, `STRIPE_SECRET_KEY`
-`sk_test_...`, `STRIPE_WEBHOOK_SECRET` `whsec_...` e
-`BILLING_SANDBOX_PAYMENT_SCENARIO=APPROVED` ou `DECLINED` no ambiente da
-Subscription. No primeiro setup, a Subscription provisiona e ativa a integração
-Stripe `TEST` daquele workspace. Use um cartão de teste na página hospedada da
+`sk_test_...` e `STRIPE_WEBHOOK_SECRET` `whsec_...` no ambiente da Subscription.
+No primeiro setup, a Subscription provisiona e ativa a integração Stripe
+`TEST` daquele workspace. Use um cartão de teste na página hospedada da
 Stripe. `make run` inicia o Stripe CLI quando o sandbox está ligado; o script
-valida o segredo do listener e encaminha webhooks diretamente à Subscription.
+valida o segredo do listener e encaminha `checkout.session.completed` (que
+confirma pagamentos hospedados), além dos eventos `payment_intent.*` usados
+pelas cobranças de renovação off-session, diretamente à Subscription.
 
 Em produção, configure as credenciais padrão `LIVE` e o segredo de webhook na
 área administrativa da Subscription. No primeiro setup, cada workspace recebe

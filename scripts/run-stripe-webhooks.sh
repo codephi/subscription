@@ -31,6 +31,6 @@ fi
 
 echo "Forwarding Stripe test webhooks to the Subscription."
 stripe listen \
-  --events payment_intent.succeeded,payment_intent.payment_failed,payment_intent.canceled,payment_intent.requires_action,charge.refunded \
+  --events checkout.session.completed,payment_intent.succeeded,payment_intent.payment_failed,payment_intent.canceled,payment_intent.requires_action,charge.refunded \
   --forward-to http://localhost:3000/v1/billing/webhooks/stripe \
   2>&1 | sed -E 's/whsec_[A-Za-z0-9]+/[REDACTED]/g'
