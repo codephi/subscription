@@ -32,7 +32,6 @@ export default function App() {
     queryKey: ["dashboard", user?.username],
     queryFn: () => api<Dashboard>("/dashboard"),
     enabled: Boolean(user),
-    refetchInterval: checkout?.status === "PENDING" ? 2500 : false,
   })
 
   useEffect(() => syncPendingCheckout(dashboard.data, checkout, setCheckout), [dashboard.data?.checkouts, checkout?.checkout_id])
@@ -146,7 +145,7 @@ function watchCheckout(checkout: CheckoutView | null, user: User | null, update:
   const timer = window.setInterval(() => api<CheckoutView>(`/checkouts/${checkout.checkout_id}`).then((result) => {
     update(result)
     clearFinishedCheckout(result, user, key)
-  }).catch((error: Error) => fail(error.message)), 2000)
+  }).catch((error: Error) => fail(error.message)), 2500)
   return () => window.clearInterval(timer)
 }
 
