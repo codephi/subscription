@@ -24,6 +24,9 @@ type WorkspaceDashboardProps = {
   actionError: string
   retryDashboard: () => void
   checkout: CheckoutView | null
+  checkoutAutoPollDone: boolean
+  checkoutRefreshBusy: boolean
+  onRefreshCheckout: () => void
   taskName: string
   setTaskName: (name: string) => void
   taskResult: string
@@ -70,7 +73,7 @@ export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
         <Button variant="outline" size="sm" onClick={retryDashboard}>Tentar novamente</Button>
       </AlertDescription>
     </Alert>}
-    {checkout && <CheckoutNotice checkout={checkout} />}
+    {checkout && <CheckoutNotice checkout={checkout} autoPollDone={props.checkoutAutoPollDone} refreshBusy={props.checkoutRefreshBusy} onRefresh={props.onRefreshCheckout} />}
     <div className="dashboard-grid">
       <section className="dashboard-main">
         <BalanceCard user={user} view={view} loading={loading} />
@@ -264,7 +267,7 @@ function LedgerCard({ view, loading }: { view?: Dashboard; loading: boolean }) {
   </Card>
 }
 
-function CheckoutNotice({ checkout }: { checkout: CheckoutView }) {
+function CheckoutNotice({ checkout, autoPollDone, refreshBusy, onRefresh }: { checkout: CheckoutView; autoPollDone: boolean; refreshBusy: boolean; onRefresh: () => void }) {
   const paid = checkout.status === "PAID"
   const variant = checkout.status === "FAILED" || checkout.status === "EXPIRED" ? "destructive" : "default"
 
@@ -272,8 +275,9 @@ function CheckoutNotice({ checkout }: { checkout: CheckoutView }) {
     <Sparkles />
     <AlertTitle>Checkout {checkout.status.toLowerCase()}</AlertTitle>
     <AlertDescription className="flex flex-col items-start gap-3">
-      <span>{paid ? "Pagamento confirmado pela Subscription." : checkout.status === "PENDING" ? "A Subscription está processando; este painel acompanha o resultado." : `Estado atualizado: ${checkout.status}.`}</span>
+      <span>{paid ? "Pagamento confirmado pela Subscription." : checkout.status === "PENDING" ? "A confirmação pode levar alguns instantes." : `Estado atualizado: ${checkout.status}.`}</span>
       {checkout.status === "PENDING" && checkout.redirect_url && <Button variant="outline" size="sm" onClick={() => window.location.assign(checkout.redirect_url!)}>Abrir checkout hospedado</Button>}
+      {checkout.status === "PENDING" && autoPollDone && <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshBusy}>{refreshBusy ? <Spinner data-icon="inline-start" /> : null}Atualizar status</Button>}
     </AlertDescription>
   </Alert>
 }

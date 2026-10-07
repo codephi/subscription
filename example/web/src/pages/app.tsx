@@ -21,6 +21,8 @@ export default function App() {
   const [pendingExecution, setPendingExecution] = useState(false)
   const [taskResult, setTaskResult] = useState("")
   const [checkout, setCheckout] = useState<CheckoutView | null>(null)
+  const [checkoutAutoPollDone, setCheckoutAutoPollDone] = useState(false)
+  const [checkoutRefreshBusy, setCheckoutRefreshBusy] = useState(false)
   const [topupCredits, setTopupCredits] = useState(10)
   const checkoutKey = useRef<CheckoutKey | null>(null)
   const executionTransaction = useRef<string | null>(null)
@@ -35,7 +37,8 @@ export default function App() {
   })
 
   useEffect(() => syncPendingCheckout(dashboard.data, checkout, setCheckout), [dashboard.data?.checkouts, checkout?.checkout_id])
-  useEffect(() => watchCheckout(checkout, user, setCheckout, checkoutKey, setError), [checkout?.checkout_id, checkout?.status, user?.username])
+  useEffect(() => setCheckoutAutoPollDone(false), [checkout?.checkout_id])
+  useEffect(() => watchCheckout(checkout, user, setCheckout, checkoutKey, setError, checkoutAutoPollDone, setCheckoutAutoPollDone), [checkout?.checkout_id, checkout?.status, checkoutAutoPollDone, user?.username])
   useEffect(() => {
     if (checkout?.status !== "PAID" || !user) return
     void api<User>("/me").then(setUser).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] }))
@@ -91,6 +94,9 @@ export default function App() {
     actionError={error}
     retryDashboard={() => dashboard.refetch()}
     checkout={checkout}
+    checkoutRefreshBusy={checkoutRefreshBusy}
+    checkoutAutoPollDone={checkoutAutoPollDone}
+    onRefreshCheckout={() => refreshCheckout(checkout, user, setCheckout, checkoutKey, setCheckoutRefreshBusy, setError)}
     topupCredits={topupCredits}
     setTopupCredits={setTopupCredits}
     taskName={taskName}
@@ -140,13 +146,34 @@ function syncPendingCheckout(view: Dashboard | undefined, checkout: CheckoutView
   if (latest?.status === "PENDING" && latest.checkout_id !== checkout?.checkout_id) setCheckout(latest)
 }
 
-function watchCheckout(checkout: CheckoutView | null, user: User | null, update: (checkout: CheckoutView) => void, key: React.MutableRefObject<CheckoutKey | null>, fail: (message: string) => void) {
+function watchCheckout(checkout: CheckoutView | null, user: User | null, update: (checkout: CheckoutView) => void, key: React.MutableRefObject<CheckoutKey | null>, fail: (message: string) => void, pollingDone: boolean, setPollingDone: (done: boolean) => void) {
+  if (!checkout || checkout.status !== "PENDING" || pollingDone) return
+  let attempts = 0
+  const timer = window.setInterval(() => {
+    attempts += 1
+    void api<CheckoutView>(`/checkouts/${checkout.checkout_id}`).then((result) => {
+      update(result)
+      clearFinishedCheckout(result, user, key)
+      if (result.status !== "PENDING") setPollingDone(true)
+    }).catch((error: Error) => fail(error.message)).finally(() => {
+      if (attempts >= 3) setPollingDone(true)
+    })
+  }, 2500)
+  return () => window.clearInterval(timer)
+}
+
+async function refreshCheckout(checkout: CheckoutView | null, user: User | null, update: (checkout: CheckoutView) => void, key: React.MutableRefObject<CheckoutKey | null>, setBusy: (busy: boolean) => void, fail: (message: string) => void) {
   if (!checkout || checkout.status !== "PENDING") return
-  const timer = window.setInterval(() => api<CheckoutView>(`/checkouts/${checkout.checkout_id}`).then((result) => {
+  setBusy(true)
+  try {
+    const result = await api<CheckoutView>(`/checkouts/${checkout.checkout_id}`)
     update(result)
     clearFinishedCheckout(result, user, key)
-  }).catch((error: Error) => fail(error.message)), 2500)
-  return () => window.clearInterval(timer)
+  } catch (error) {
+    fail((error as Error).message)
+  } finally {
+    setBusy(false)
+  }
 }
 
 function clearFinishedCheckout(result: CheckoutView, user: User | null, key: React.MutableRefObject<CheckoutKey | null>) {

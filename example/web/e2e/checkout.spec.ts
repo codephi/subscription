@@ -54,3 +54,23 @@ test("newly registered account already has its trial and never collects card det
   await expect(page.getByText("Adicionar cartão")).toHaveCount(0)
   await expect(page.getByLabel("Créditos para adicionar")).toBeVisible()
 })
+
+test("pending checkout stops automatic polling and can be refreshed manually", async ({ page }) => {
+  let statusChecks = 0
+  await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: account() }))
+  await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: dashboard("10") }))
+  await page.route("**/api/checkouts", (route) => route.fulfill({ status: 202, json: { checkout_id: "checkout-pending", status: "PENDING" } }))
+  await page.route("**/api/checkouts/checkout-pending", (route) => {
+    statusChecks += 1
+    const status = statusChecks > 3 ? "PAID" : "PENDING"
+    return route.fulfill({ status: 200, json: { checkout_id: "checkout-pending", status } })
+  })
+
+  await page.goto("/")
+  await page.getByRole("button", { name: "Iniciar recarga" }).click()
+  await expect(page.getByRole("button", { name: "Atualizar status" })).toBeVisible({ timeout: 10000 })
+  expect(statusChecks).toBe(3)
+  await page.getByRole("button", { name: "Atualizar status" }).click()
+  await expect(page.getByText(/Checkout paid/i)).toBeVisible()
+  expect(statusChecks).toBe(4)
+})
