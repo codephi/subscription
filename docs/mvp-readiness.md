@@ -20,7 +20,7 @@ para a fase 9, salvo se passarem a ser requisito comercial explícito.
 ## O que está pronto
 
 - fases 0 a 6 com seus gates automatizados aprovados;
-- contratos, projeção assinada de workspaces e entrega por inbox/outbox;
+- contratos, projeção assinada de accounts e entrega por inbox/outbox;
 - catálogo e preços publicados imutáveis;
 - provisionamento e reconciliação de wallets;
 - razão append-only, lotes de crédito, saldo e extratos;

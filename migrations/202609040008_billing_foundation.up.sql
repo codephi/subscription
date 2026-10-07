@@ -1,6 +1,6 @@
 CREATE TABLE billing_connections (
   billing_connection_id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   provider text NOT NULL CHECK (length(provider) BETWEEN 1 AND 50),
   external_account_reference text NOT NULL CHECK (length(external_account_reference) BETWEEN 1 AND 255),
   secret_reference text NOT NULL CHECK (length(secret_reference) BETWEEN 1 AND 255),
@@ -8,7 +8,7 @@ CREATE TABLE billing_connections (
   status text NOT NULL CHECK (status IN ('ACTIVE','BLOCKED','REVOKED')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (workspace_id,provider,external_account_reference)
+  UNIQUE (account_id,provider,external_account_reference)
 );
 
 CREATE TRIGGER trg_billing_connections_updated_at
@@ -17,7 +17,7 @@ BEFORE UPDATE ON billing_connections FOR EACH ROW EXECUTE FUNCTION set_updated_a
 CREATE TABLE payment_method_bindings (
   payment_method_binding_id uuid PRIMARY KEY,
   billing_connection_id uuid NOT NULL REFERENCES billing_connections(billing_connection_id) ON DELETE RESTRICT,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   customer_id uuid NOT NULL,
   customer_plan_id uuid REFERENCES customer_plans(customer_plan_id) ON DELETE RESTRICT,
   payment_method text NOT NULL CHECK (payment_method='CARD'),
@@ -25,7 +25,7 @@ CREATE TABLE payment_method_bindings (
   status text NOT NULL CHECK (status IN ('ACTIVE','REPLACED','DETACHED','INACTIVE','INVALID')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (workspace_id=customer_id),
+  CHECK (account_id=customer_id),
   UNIQUE (billing_connection_id,provider_payment_method_reference)
 );
 
@@ -34,7 +34,7 @@ BEFORE UPDATE ON payment_method_bindings FOR EACH ROW EXECUTE FUNCTION set_updat
 
 CREATE TABLE collection_requests (
   collection_request_id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   customer_id uuid NOT NULL,
   customer_plan_id uuid REFERENCES customer_plans(customer_plan_id) ON DELETE RESTRICT,
   plan_version_id uuid REFERENCES subscription_plan_versions(plan_version_id) ON DELETE RESTRICT,
@@ -59,11 +59,11 @@ CREATE TABLE collection_requests (
   terminal_reason text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (workspace_id=customer_id),
+  CHECK (account_id=customer_id),
   CHECK (payment_expires_at > scheduled_at),
   CHECK ((request_kind='ON_DEMAND')=(on_demand_plan_id IS NOT NULL)),
-  UNIQUE (workspace_id,transaction_id),
-  UNIQUE (workspace_id,idempotency_key)
+  UNIQUE (account_id,transaction_id),
+  UNIQUE (account_id,idempotency_key)
 );
 
 CREATE TRIGGER trg_collection_requests_updated_at

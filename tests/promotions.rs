@@ -11,8 +11,8 @@ use subscription::dto::{
         PricingModel, UpdateItemRequest, UpdateProductRequest, UsageModel,
     },
     checkouts::{CheckoutKind, CreateCheckoutRequest},
-    credits::UpdateWorkspaceBillingConfigRequest,
-    events::WorkspaceEventEnvelope,
+    credits::UpdateAccountBillingConfigRequest,
+    events::AccountEventEnvelope,
     plans::{
         AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest, CreateSubscriptionPlanRequest,
         CreateSubscriptionRequest, PlanRecurrence, SubscriptionModel,
@@ -22,12 +22,12 @@ use subscription::dto::{
 use subscription::{
     dto::promotions::{CreateCouponRequest, CreateVoucherRequest, RedeemVoucherRequest},
     repositories::database::DatabaseRepository,
-    services::{billing, billing_checkout, catalog, credits, plans, promotions, workspace_events},
+    services::{account_events, billing, billing_checkout, catalog, credits, plans, promotions},
 };
 use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn simultaneous_redemptions_respect_the_workspace_limit_and_credit_once() {
+async fn simultaneous_redemptions_respect_the_account_limit_and_credit_once() {
     let fixture = CreditFixture::new().await;
     let voucher = promotions::create_voucher(
         &fixture.repository,
@@ -39,7 +39,7 @@ async fn simultaneous_redemptions_respect_the_workspace_limit_and_credit_once() 
             valid_from: None,
             valid_until: None,
             max_total_uses: Some(20),
-            max_uses_per_workspace: Some(1),
+            max_uses_per_account: Some(1),
         },
     )
     .await
@@ -47,17 +47,17 @@ async fn simultaneous_redemptions_respect_the_workspace_limit_and_credit_once() 
     let voucher_id = voucher.promotion_id;
     let first_repo = fixture.repository.clone();
     let second_repo = fixture.repository.clone();
-    let workspace_id = fixture.workspace_id;
+    let account_id = fixture.account_id;
     let (first, second) = tokio::join!(
         promotions::redeem_voucher(
             &first_repo,
-            workspace_id,
+            account_id,
             "redeem-first",
             redemption(voucher_id, "transaction-first"),
         ),
         promotions::redeem_voucher(
             &second_repo,
-            workspace_id,
+            account_id,
             "redeem-second",
             redemption(voucher_id, "transaction-second"),
         )
@@ -66,16 +66,16 @@ async fn simultaneous_redemptions_respect_the_workspace_limit_and_credit_once() 
     let balance: i64 = sqlx::query_scalar(
         "SELECT cw.balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) WHERE w.customer_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&fixture.pool)
     .await
-    .expect("workspace balance");
+    .expect("account balance");
     assert_eq!(balance, 250);
     let uses: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM voucher_redemptions WHERE voucher_id=$1 AND workspace_id=$2",
+        "SELECT count(*) FROM voucher_redemptions WHERE voucher_id=$1 AND account_id=$2",
     )
     .bind(voucher_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&fixture.pool)
     .await
     .expect("voucher redemption count");
@@ -87,23 +87,23 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
     let (router, pool) = support::setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let product_id = create_active_product(&repository).await;
-    let workspace_id = Uuid::new_v4();
-    for (event, sequence) in [("workspace.created", 1), ("workspace.activated", 2)] {
-        let envelope: WorkspaceEventEnvelope = serde_json::from_value(serde_json::json!({
+    let account_id = Uuid::new_v4();
+    for (event, sequence) in [("account.created", 1), ("account.activated", 2)] {
+        let envelope: AccountEventEnvelope = serde_json::from_value(serde_json::json!({
             "event_id": Uuid::new_v4(), "event_type": event, "schema_version": 1,
-            "aggregate_id": workspace_id, "workspace_id": workspace_id, "sequence": sequence,
+            "aggregate_id": account_id, "account_id": account_id, "sequence": sequence,
             "occurred_at": Utc::now(), "correlation_id": Uuid::new_v4(),
-            "payload": {"workspace_id": workspace_id}
+            "payload": {"account_id": account_id}
         }))
         .unwrap();
-        workspace_events::process_workspace_event(&repository, envelope)
+        account_events::process_account_event(&repository, envelope)
             .await
             .unwrap();
     }
     credits::update_billing_config(
         &repository,
-        workspace_id,
-        UpdateWorkspaceBillingConfigRequest {
+        account_id,
+        UpdateAccountBillingConfigRequest {
             direct_credit_enabled: false,
             recurring_credit_enabled: true,
             expected_version: 1,
@@ -140,7 +140,7 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
     .expect("paid plan");
     let customer_plan = plans::create_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         "admission-1",
         CreateCustomerPlanRequest {
             plan_version_id: plan.plan_version_id,
@@ -163,7 +163,7 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
             valid_from: None,
             valid_until: None,
             max_total_uses: Some(1),
-            max_uses_per_workspace: Some(1),
+            max_uses_per_account: Some(1),
         },
     )
     .await
@@ -174,8 +174,8 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
         on_demand_plan_id: None,
         target_plan_version_id: None,
         quantity: None,
-        success_url: None,
-        cancel_url: None,
+        success_url: Some("https://tasklab.example/success".into()),
+        cancel_url: Some("https://tasklab.example/cancel".into()),
         transaction_id: "free-checkout-1".into(),
         coupon_code: Some("FREE100".into()),
         payment_method_binding_id: None,
@@ -183,7 +183,7 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
     let checkout = billing_checkout::create(
         &repository,
         None,
-        workspace_id,
+        account_id,
         "checkout-free-1",
         request.clone(),
     )
@@ -195,10 +195,9 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
     assert_eq!(checkout.base_amount_minor, Some(2500));
     assert_eq!(checkout.collection_request_id, None);
     assert_eq!(checkout.granted_credit_units, Some(120));
-    let retry =
-        billing_checkout::create(&repository, None, workspace_id, "checkout-free-1", request)
-            .await
-            .expect("checkout retry");
+    let retry = billing_checkout::create(&repository, None, account_id, "checkout-free-1", request)
+        .await
+        .expect("checkout retry");
     assert_eq!(retry, checkout);
     let uses: i64 = sqlx::query_scalar("SELECT count(*) FROM coupon_checkout_reservations WHERE coupon_id=$1 AND status='COMPLETED'")
         .bind(coupon.promotion_id).fetch_one(&pool).await.expect("completed coupon use");
@@ -213,7 +212,7 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
     let balance: i64 = sqlx::query_scalar(
         "SELECT cw.balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) WHERE w.customer_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&pool)
     .await
     .expect("granted cycle credits");
@@ -226,12 +225,12 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     let (_router, pool) = support::setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let product_id = create_active_product(&repository).await;
-    let workspace_id = Uuid::new_v4();
-    activate_workspace(&repository, workspace_id).await;
+    let account_id = Uuid::new_v4();
+    activate_account(&repository, account_id).await;
     credits::update_billing_config(
         &repository,
-        workspace_id,
-        UpdateWorkspaceBillingConfigRequest {
+        account_id,
+        UpdateAccountBillingConfigRequest {
             direct_credit_enabled: false,
             recurring_credit_enabled: true,
             expected_version: 1,
@@ -242,7 +241,7 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     let plan = create_paid_plan(&repository, product_id).await;
     let customer_plan = plans::create_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         "paid-coupon-admission",
         CreateCustomerPlanRequest {
             plan_version_id: plan,
@@ -253,7 +252,7 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     .expect("initial customer plan");
     let connection = billing::create_billing_connection(
         &repository,
-        workspace_id,
+        account_id,
         &CreateBillingConnectionRequest {
             provider: "STRIPE".into(),
             external_account_reference: "cus_coupon_test".into(),
@@ -265,7 +264,7 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     .expect("billing connection");
     let binding = repository
         .create_verified_payment_method_binding(
-            workspace_id,
+            account_id,
             connection.billing_connection_id,
             Some(customer_plan.customer_plan_id),
             "pm_coupon_test",
@@ -286,7 +285,7 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
             valid_from: None,
             valid_until: None,
             max_total_uses: Some(1),
-            max_uses_per_workspace: Some(1),
+            max_uses_per_account: Some(1),
         },
     )
     .await
@@ -294,7 +293,7 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     let checkout = billing_checkout::create(
         &repository,
         None,
-        workspace_id,
+        account_id,
         "paid-coupon-checkout-key",
         CreateCheckoutRequest {
             customer_plan_id: customer_plan.customer_plan_id,
@@ -325,10 +324,10 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
     .expect("immutable discount snapshot");
     assert_eq!(snapshot, (1_250, 2_500, 1_250));
     let reserved: (i64, i64) = sqlx::query_as(
-        "SELECT reserved_uses,completed_uses FROM promotion_usage_counters WHERE promotion_kind='COUPON' AND promotion_id=$1 AND workspace_id=$2",
+        "SELECT reserved_uses,completed_uses FROM promotion_usage_counters WHERE promotion_kind='COUPON' AND promotion_id=$1 AND account_id=$2",
     )
     .bind(coupon.promotion_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&pool)
     .await
     .expect("reserved coupon use");
@@ -339,7 +338,7 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
         .await
         .expect("terminal failure");
     let released: (String, i64, i64) = sqlx::query_as(
-        "SELECT r.status,c.reserved_uses,c.completed_uses FROM coupon_checkout_reservations r JOIN promotion_usage_counters c ON c.promotion_kind='COUPON' AND c.promotion_id=r.coupon_id AND c.workspace_id=r.workspace_id WHERE r.checkout_id=$1",
+        "SELECT r.status,c.reserved_uses,c.completed_uses FROM coupon_checkout_reservations r JOIN promotion_usage_counters c ON c.promotion_kind='COUPON' AND c.promotion_id=r.coupon_id AND c.account_id=r.account_id WHERE r.checkout_id=$1",
     )
     .bind(checkout.checkout_id)
     .fetch_one(&pool)
@@ -428,16 +427,16 @@ async fn create_active_product(repository: &DatabaseRepository) -> Uuid {
     product.product_id
 }
 
-async fn activate_workspace(repository: &DatabaseRepository, workspace_id: Uuid) {
-    for (event, sequence) in [("workspace.created", 1), ("workspace.activated", 2)] {
-        let envelope: WorkspaceEventEnvelope = serde_json::from_value(serde_json::json!({
+async fn activate_account(repository: &DatabaseRepository, account_id: Uuid) {
+    for (event, sequence) in [("account.created", 1), ("account.activated", 2)] {
+        let envelope: AccountEventEnvelope = serde_json::from_value(serde_json::json!({
             "event_id": Uuid::new_v4(), "event_type": event, "schema_version": 1,
-            "aggregate_id": workspace_id, "workspace_id": workspace_id, "sequence": sequence,
+            "aggregate_id": account_id, "account_id": account_id, "sequence": sequence,
             "occurred_at": Utc::now(), "correlation_id": Uuid::new_v4(),
-            "payload": {"workspace_id": workspace_id}
+            "payload": {"account_id": account_id}
         }))
         .unwrap();
-        workspace_events::process_workspace_event(repository, envelope)
+        account_events::process_account_event(repository, envelope)
             .await
             .unwrap();
     }

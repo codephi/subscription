@@ -8,9 +8,9 @@ use uuid::Uuid;
 
 use crate::{
     dto::credits::{
+        AccountBillingConfigResponse, AccountTransactionResponse,
         CreditLedgerReconciliationResponse, CustomerWalletStatementResponse, DirectCreditRequest,
-        DirectCreditResponse, StatementQuery, UpdateWorkspaceBillingConfigRequest,
-        WorkspaceBillingConfigResponse, WorkspaceTransactionResponse,
+        DirectCreditResponse, StatementQuery, UpdateAccountBillingConfigRequest,
     },
     error::{ApiError, ApiResult, ErrorResponse},
     services::credits,
@@ -28,37 +28,37 @@ pub fn router() -> OpenApiRouter<AppState> {
 
 #[utoipa::path(
     post,
-    path = "/v1/workspaces/{workspace_id}/credits/direct",
+    path = "/v1/accounts/{account_id}/credits/direct",
     tag = "Credits",
     params(
-        ("workspace_id" = Uuid, Path),
+        ("account_id" = Uuid, Path),
         ("Idempotency-Key" = String, Header, description = "Strict single-use idempotency key")
     ),
     request_body = DirectCreditRequest,
     responses(
         (status = 201, body = DirectCreditResponse),
-        (status = 409, body = ErrorResponse, description = "Duplicate key or transaction includes existing_operation when its committed reference is available; inactive workspaces and disabled grants also conflict"),
+        (status = 409, body = ErrorResponse, description = "Duplicate key or transaction includes existing_operation when its committed reference is available; inactive accounts and disabled grants also conflict"),
         (status = 422, body = ErrorResponse, description = "Invalid units or context"),
         (status = 503, body = ErrorResponse, description = "Wallet hierarchy is incomplete")
     )
 )]
 async fn grant_direct_credit(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     headers: HeaderMap,
     Json(request): Json<DirectCreditRequest>,
 ) -> ApiResult<(StatusCode, Json<DirectCreditResponse>)> {
     let key = required_idempotency_key(&headers)?;
     let response =
-        credits::grant_direct_credit(&state.database(), workspace_id, key, request).await?;
+        credits::grant_direct_credit(&state.database(), account_id, key, request).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
 #[utoipa::path(
     get,
-    path = "/v1/workspaces/{workspace_id}/customer-wallet/statement",
+    path = "/v1/accounts/{account_id}/customer-wallet/statement",
     tag = "Credits",
-    params(("workspace_id" = Uuid, Path), StatementQuery),
+    params(("account_id" = Uuid, Path), StatementQuery),
     responses(
         (status = 200, body = CustomerWalletStatementResponse),
         (status = 422, body = ErrorResponse, description = "Invalid cursor or page limit")
@@ -66,38 +66,38 @@ async fn grant_direct_credit(
 )]
 async fn customer_wallet_statement(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     Query(query): Query<StatementQuery>,
 ) -> ApiResult<Json<CustomerWalletStatementResponse>> {
     Ok(Json(
-        credits::statement(&state.database(), workspace_id, query).await?,
+        credits::statement(&state.database(), account_id, query).await?,
     ))
 }
 
 #[utoipa::path(
     get,
-    path = "/v1/workspaces/{workspace_id}/customer-wallet/transactions/{transaction_id}",
+    path = "/v1/accounts/{account_id}/customer-wallet/transactions/{transaction_id}",
     tag = "Credits",
-    params(("workspace_id" = Uuid, Path), ("transaction_id" = String, Path)),
+    params(("account_id" = Uuid, Path), ("transaction_id" = String, Path)),
     responses(
-        (status = 200, body = WorkspaceTransactionResponse),
+        (status = 200, body = AccountTransactionResponse),
         (status = 404, body = ErrorResponse, description = "Transaction does not exist")
     )
 )]
 async fn find_customer_wallet_transaction(
     State(state): State<AppState>,
-    Path((workspace_id, transaction_id)): Path<(Uuid, String)>,
-) -> ApiResult<Json<WorkspaceTransactionResponse>> {
+    Path((account_id, transaction_id)): Path<(Uuid, String)>,
+) -> ApiResult<Json<AccountTransactionResponse>> {
     Ok(Json(
-        credits::find_transaction(&state.database(), workspace_id, &transaction_id).await?,
+        credits::find_transaction(&state.database(), account_id, &transaction_id).await?,
     ))
 }
 
 #[utoipa::path(
     post,
-    path = "/v1/admin/workspaces/{workspace_id}/customer-wallet/reconcile",
+    path = "/v1/admin/accounts/{account_id}/customer-wallet/reconcile",
     tag = "Operations",
-    params(("workspace_id" = Uuid, Path)),
+    params(("account_id" = Uuid, Path)),
     responses(
         (status = 200, body = CreditLedgerReconciliationResponse, description = "Read-only comparison of wallet balance, summed ledger with continuous sequence/balance chain, and unexpired remaining lots; divergence never repairs history"),
         (status = 503, body = ErrorResponse, description = "Customer wallet is absent")
@@ -105,47 +105,47 @@ async fn find_customer_wallet_transaction(
 )]
 async fn reconcile_credit_ledger(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
 ) -> ApiResult<Json<CreditLedgerReconciliationResponse>> {
     Ok(Json(
-        credits::reconcile(&state.database(), workspace_id).await?,
+        credits::reconcile(&state.database(), account_id).await?,
     ))
 }
 
 #[utoipa::path(
     get,
-    path = "/v1/workspaces/{workspace_id}/billing-config",
+    path = "/v1/accounts/{account_id}/billing-config",
     tag = "Credits",
-    params(("workspace_id" = Uuid, Path)),
-    responses((status = 200, body = WorkspaceBillingConfigResponse))
+    params(("account_id" = Uuid, Path)),
+    responses((status = 200, body = AccountBillingConfigResponse))
 )]
 async fn get_billing_config(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
-) -> ApiResult<Json<WorkspaceBillingConfigResponse>> {
+    Path(account_id): Path<Uuid>,
+) -> ApiResult<Json<AccountBillingConfigResponse>> {
     Ok(Json(
-        credits::get_billing_config(&state.database(), workspace_id).await?,
+        credits::get_billing_config(&state.database(), account_id).await?,
     ))
 }
 
 #[utoipa::path(
     put,
-    path = "/v1/workspaces/{workspace_id}/billing-config",
+    path = "/v1/accounts/{account_id}/billing-config",
     tag = "Credits",
-    params(("workspace_id" = Uuid, Path)),
-    request_body = UpdateWorkspaceBillingConfigRequest,
+    params(("account_id" = Uuid, Path)),
+    request_body = UpdateAccountBillingConfigRequest,
     responses(
-        (status = 200, body = WorkspaceBillingConfigResponse),
+        (status = 200, body = AccountBillingConfigResponse),
         (status = 409, body = ErrorResponse, description = "Optimistic version conflict")
     )
 )]
 async fn update_billing_config(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
-    Json(request): Json<UpdateWorkspaceBillingConfigRequest>,
-) -> ApiResult<Json<WorkspaceBillingConfigResponse>> {
+    Path(account_id): Path<Uuid>,
+    Json(request): Json<UpdateAccountBillingConfigRequest>,
+) -> ApiResult<Json<AccountBillingConfigResponse>> {
     Ok(Json(
-        credits::update_billing_config(&state.database(), workspace_id, request).await?,
+        credits::update_billing_config(&state.database(), account_id, request).await?,
     ))
 }
 

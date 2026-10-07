@@ -11,19 +11,17 @@ use crate::{
 impl DatabaseRepository {
     pub async fn cancel_customer_plan(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
     ) -> ApiResult<CustomerPlanResponse> {
         let mut transaction = self.pool().begin().await?;
-        let row = lock_customer_plan(&mut transaction, workspace_id, customer_plan_id).await?;
+        let row = lock_customer_plan(&mut transaction, account_id, customer_plan_id).await?;
         let status: String = row.get("commercial_status");
         if matches!(status.as_str(), "CANCELED" | "EXPIRED" | "REVOKED")
             || row.get::<bool, _>("cancel_at_period_end")
         {
             transaction.commit().await?;
-            return self
-                .find_customer_plan(workspace_id, customer_plan_id)
-                .await;
+            return self.find_customer_plan(account_id, customer_plan_id).await;
         }
         let immediate = row.get::<String, _>("activation_status") != "ACTIVATED"
             || row.get::<String, _>("recurrence") == "NONE";
@@ -46,7 +44,7 @@ impl DatabaseRepository {
         }
         insert_plan_outbox(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             row.get("plan_version_id"),
             if immediate {
@@ -58,25 +56,22 @@ impl DatabaseRepository {
         )
         .await?;
         transaction.commit().await?;
-        self.find_customer_plan(workspace_id, customer_plan_id)
-            .await
+        self.find_customer_plan(account_id, customer_plan_id).await
     }
 
     pub async fn revoke_customer_plan(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
         reason: &str,
         actor_reference: &str,
     ) -> ApiResult<CustomerPlanResponse> {
         let mut transaction = self.pool().begin().await?;
-        let row = lock_customer_plan(&mut transaction, workspace_id, customer_plan_id).await?;
+        let row = lock_customer_plan(&mut transaction, account_id, customer_plan_id).await?;
         let status: String = row.get("commercial_status");
         if status == "REVOKED" {
             transaction.commit().await?;
-            return self
-                .find_customer_plan(workspace_id, customer_plan_id)
-                .await;
+            return self.find_customer_plan(account_id, customer_plan_id).await;
         }
         ensure_revocable(customer_plan_id, &status)?;
         let version: i64 = row.get("version");
@@ -93,7 +88,7 @@ impl DatabaseRepository {
             .await?;
         insert_revocation_audit(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             reason,
             actor_reference,
@@ -101,7 +96,7 @@ impl DatabaseRepository {
         .await?;
         insert_plan_outbox(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             plan_version_id,
             "customer_plan.revoked",
@@ -109,8 +104,7 @@ impl DatabaseRepository {
         )
         .await?;
         transaction.commit().await?;
-        self.find_customer_plan(workspace_id, customer_plan_id)
-            .await
+        self.find_customer_plan(account_id, customer_plan_id).await
     }
 }
 
@@ -142,7 +136,7 @@ fn ensure_revocable(customer_plan_id: Uuid, status: &str) -> ApiResult<()> {
 
 async fn lock_customer_plan(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
 ) -> ApiResult<sqlx::postgres::PgRow> {
     sqlx::query(
@@ -150,14 +144,14 @@ async fn lock_customer_plan(
          FROM customer_plans c JOIN subscription_plan_versions p ON p.plan_version_id=c.plan_version_id \
          WHERE c.customer_id=$1 AND c.customer_plan_id=$2 FOR UPDATE OF c",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_plan_id)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| {
         ApiError::not_found(
             "commercial_resource_not_found",
-            format!("customer_plan {customer_plan_id} does not exist in workspace {workspace_id}"),
+            format!("customer_plan {customer_plan_id} does not exist in account {account_id}"),
         )
     })
 }
@@ -209,18 +203,18 @@ async fn close_customer_plan_dependents(
 
 async fn insert_revocation_audit(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     reason: &str,
     actor_reference: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO audit_events (audit_event_id,workspace_id,actor_reference,action,resource_kind, \
+        "INSERT INTO audit_events (audit_event_id,account_id,actor_reference,action,resource_kind, \
          resource_id,correlation_id,details) VALUES ($1,$2,$3,'customer_plan.revoked', \
          'customer_plan',$4,$5,jsonb_build_object('reason',$6))",
     )
     .bind(Uuid::new_v4())
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(actor_reference)
     .bind(customer_plan_id)
     .bind(Uuid::new_v4())

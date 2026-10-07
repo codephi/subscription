@@ -13,7 +13,7 @@ Consulte os fluxos completos de [créditos](credito.md) e
 | Etapa | Já existe no admin-ui | Falta para operar sem chamadas manuais |
 | --- | --- | --- |
 | Catálogo de produto, item, preço, Subscription, plano e pacote avulso | Criação, consulta, publicação de preço, ativação de produto e revogação de versão de plano | Assistente que mostre a cadeia completa e valide a oferta antes de liberar onboarding. |
-| Workspace e carteira | Lista, detalhe, provisionamento, saldos, extratos, medidores e reconciliação | Visão da conta do SaaS com nome externo e workspaces de infraestrutura associados. |
+| Account e carteira | Lista, detalhe, provisionamento, saldos, extratos, medidores e reconciliação | Visão da conta do SaaS com nome externo e accounts de infraestrutura associados. |
 | Configuração de Billing | `direct_credit_enabled`, `recurring_credit_enabled` e conexão Stripe por referências `env://` | Status de Customer Stripe, destino de webhook e verificação de conexão. |
 | CustomerPlan | Leitura, cancelamento, transição e revogação | Adesão inicial, seleção da oferta, acompanhamento da primeira cobrança e regularização. |
 | Crédito | Crédito direto administrativo com confirmação e idempotência | Recarga paga por `OnDemandPlan` e histórico de pacotes por conta. |
@@ -23,13 +23,13 @@ Consulte os fluxos completos de [créditos](credito.md) e
 ## Pré-requisitos de backend antes das telas de cobrança
 
 1. **Autenticação e autorização.** Implementar identidade de operador,
-   papéis, escopo por `workspace_id` e trilha de ator verificado. O painel
+   papéis, escopo por `account_id` e trilha de ator verificado. O painel
    atual não tem login e as rotas gerais/admin não têm middleware de
    autenticação; não o exponha diretamente à internet.
 2. **Identidade Stripe por conta.** A integração gerenciada já cria ou associa
-   um Customer Stripe por workspace e persiste essa relação na conexão. O
+   um Customer Stripe por account e persiste essa relação na conexão. O
    SetupIntent e as cobranças futuras usam esse Customer; mantenha o vínculo
-   com o workspace como autoridade.
+   com o account como autoridade.
 3. **Webhook escalável.** A resposta da conexão fornece
    `/v1/billing/webhooks/{connection_id}`. Definir e implementar entrada
    compartilhada que identifique a conexão com segurança, ou provisionar e
@@ -44,9 +44,9 @@ Consulte os fluxos completos de [créditos](credito.md) e
 5. **Renovação paga.** Criar a solicitação `RENEWAL` única por ciclo na data
    de vencimento. O worker atual despacha apenas solicitações existentes.
    Validar restart, concorrência, falha, expiração e regularização.
-6. **Conta e consumo.** O `workspace_id` da API representa a conta pagante.
-   Definir no SaaS o registro dos workspaces internos e dos `execution_id`;
-   para filtros por workspace interno no painel, criar projeção/endpoint de
+6. **Conta e consumo.** O `account_id` da API representa a conta pagante.
+   Definir no SaaS o registro dos accounts internos e dos `execution_id`;
+   para filtros por account interno no painel, criar projeção/endpoint de
    relatório. O medidor atual agrega por `(conta, item)`.
 7. **Política para execução falha.** Se cobrar antes de enfileirar, definir
    quando uma execução malsucedida mantém o débito e quando há ajuste. A API
@@ -88,17 +88,17 @@ orquestração e a revisão da oferta, não a criação de um segundo catálogo.
 ### 3. Onboarding de uma conta do SaaS
 
 1. Receber do SaaS o UUID da conta. Mostrar no painel a sequência de eventos
-   `workspace.created` e `workspace.activated`; o envio assinado continua
+   `account.created` e `account.activated`; o envio assinado continua
    responsabilidade de Accounts. Não oferecer botão que crie uma identidade
    local sem o evento do sistema proprietário.
 2. Mostrar estado `ACTIVE`, provisionamento `ACTIVE` e `wallets.ready=true`.
    Em erro de materialização, oferecer
-   `POST /v1/admin/workspaces/{id}/wallet-provisioning/reconcile` com o
+   `POST /v1/admin/accounts/{id}/wallet-provisioning/reconcile` com o
    resultado e histórico da ação.
 3. Exibir/ajustar `billing-config` com `expected_version`. Para ambos os
    modelos, `recurring_credit_enabled` deve estar ativo antes da adesão.
 4. Criar o CustomerPlan pelo
-   `POST /v1/workspaces/{id}/customer-plans`, com `Idempotency-Key` e
+   `POST /v1/accounts/{id}/customer-plans`, com `Idempotency-Key` e
    `transaction_id` persistidos no servidor. Mostrar estados `ACTIVATED`,
    `PENDING_INITIAL_PAYMENT`, `PAST_DUE` e os produtos efetivamente concedidos.
 5. Exibir o `cus_...` Stripe associado e a conexão. Após automação do
@@ -124,7 +124,7 @@ orquestração e a revisão da oferta, não a criação de um segundo catálogo.
 ### 5. Operação contínua
 
 1. Por conta, mostrar saldo principal, extrato, compras, CustomerPlan,
-   coleções e consumo por item. Para quebrar por workspace interno, combinar
+   coleções e consumo por item. Para quebrar por account interno, combinar
    com os registros de execução do SaaS ou desenvolver um relatório dedicado.
 2. Mostrar execuções recusadas por falta de saldo e permitir ao operador
    localizar `transaction_id`/`execution_id`. A chamada de consumo permanece
@@ -133,7 +133,7 @@ orquestração e a revisão da oferta, não a criação de um segundo catálogo.
    `PAST_DUE` e regularização. Para créditos, mostrar pacotes e recargas.
 4. Preservar as telas existentes de investigação de webhook, pagamentos não
    conciliados, outbox, auditoria e reconciliação. Links entre esses registros
-   devem manter `workspace_id`, `customer_plan_id` e
+   devem manter `account_id`, `customer_plan_id` e
    `collection_request_id` visíveis ao operador.
 
 ## Sequência de implementação recomendada
@@ -146,7 +146,7 @@ orquestração e a revisão da oferta, não a criação de um segundo catálogo.
    backend, não apenas no `localStorage` do navegador.
 3. Adicionar as visões de compra inicial, recarga e regularização; conectar
    estados de Billing ao registro da conta.
-4. Adicionar visões de renovação e consumo por workspace interno após os
+4. Adicionar visões de renovação e consumo por account interno após os
    respectivos contratos de backend estarem disponíveis.
 5. Atualizar `/openapi.json` e os tipos do painel com `npm run api:types` ao
    mudar endpoints; então verificar os fluxos em Stripe teste antes de

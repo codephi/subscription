@@ -1,26 +1,26 @@
 use crate::{
-    dto::events::{WorkspaceEventEnvelope, WorkspaceEventResponse, WorkspaceEventType},
+    dto::events::{AccountEventEnvelope, AccountEventResponse, AccountEventType},
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
 };
 
-pub async fn process_workspace_event(
+pub async fn process_account_event(
     repository: &DatabaseRepository,
-    event: WorkspaceEventEnvelope,
-) -> ApiResult<WorkspaceEventResponse> {
+    event: AccountEventEnvelope,
+) -> ApiResult<AccountEventResponse> {
     validate_event(&event)?;
-    let response = repository.apply_workspace_event(&event).await?;
-    if matches!(event.event_type, WorkspaceEventType::Created) {
-        crate::services::billing_integrations::provision_workspace_defaults(
+    let response = repository.apply_account_event(&event).await?;
+    if matches!(event.event_type, AccountEventType::Created) {
+        crate::services::billing_integrations::provision_account_defaults(
             repository,
-            event.workspace_id,
+            event.account_id,
         )
         .await?;
     }
     Ok(response)
 }
 
-fn validate_event(event: &WorkspaceEventEnvelope) -> ApiResult<()> {
+fn validate_event(event: &AccountEventEnvelope) -> ApiResult<()> {
     if event.schema_version != 1 {
         return Err(ApiError::unprocessable(
             "unsupported_event_schema",
@@ -33,13 +33,12 @@ fn validate_event(event: &WorkspaceEventEnvelope) -> ApiResult<()> {
             format!("sequence {} must be at least 1", event.sequence),
         ));
     }
-    if event.aggregate_id != event.workspace_id || event.payload.workspace_id != event.workspace_id
-    {
+    if event.aggregate_id != event.account_id || event.payload.account_id != event.account_id {
         return Err(ApiError::unprocessable(
-            "workspace_context_mismatch",
+            "account_context_mismatch",
             format!(
-                "event workspace {} must match aggregate and payload",
-                event.workspace_id
+                "event account {} must match aggregate and payload",
+                event.account_id
             ),
         ));
     }

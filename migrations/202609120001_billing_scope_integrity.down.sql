@@ -11,4 +11,4 @@ ALTER TABLE customer_plans
   DROP CONSTRAINT IF EXISTS uq_customer_plan_customer;
 
 ALTER TABLE billing_connections
-  DROP CONSTRAINT IF EXISTS uq_billing_connection_workspace;
+  DROP CONSTRAINT IF EXISTS uq_billing_connection_account;

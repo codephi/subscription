@@ -11,14 +11,14 @@ use usage_fixture::{setup_usage, usage_request};
 async fn expired_lots_reject_usage_with_conflict_and_no_persisted_effects() {
     let fixture = setup_usage(1, 7, 10).await;
     sqlx::query("UPDATE credit_lots SET expires_at=now()-interval '1 second' WHERE customer_id=$1")
-        .bind(fixture.workspace_id)
+        .bind(fixture.account_id)
         .execute(&fixture.pool)
         .await
         .expect("expired lot before worker");
     let before = usage_snapshot(&fixture).await;
     let error = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "expired-lot-key",
         usage_request(&fixture, "expired-lot-transaction", 1),
     )
@@ -33,11 +33,16 @@ async fn expired_lots_reject_usage_with_conflict_and_no_persisted_effects() {
 async fn plan_event_payload_matches_persisted_correlation() {
     let fixture = setup_usage(1, 1, 10).await;
     let mismatches: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_events WHERE workspace_id=$1 AND aggregate_type='customer_plan' \
+        "SELECT count(*) FROM outbox_events WHERE account_id=$1 AND aggregate_type='customer_plan' \
          AND (payload->>'correlation_id') IS DISTINCT FROM correlation_id::text")
-        .bind(fixture.workspace_id).fetch_one(&fixture.pool).await.expect("event correlations");
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox_events WHERE workspace_id=$1 AND aggregate_type='customer_plan'")
-        .bind(fixture.workspace_id).fetch_one(&fixture.pool).await.expect("plan events exist");
+        .bind(fixture.account_id).fetch_one(&fixture.pool).await.expect("event correlations");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox_events WHERE account_id=$1 AND aggregate_type='customer_plan'",
+    )
+    .bind(fixture.account_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("plan events exist");
     assert!(count > 0);
     assert_eq!(mismatches, 0);
 }
@@ -71,7 +76,7 @@ async fn usage_snapshot(fixture: &usage_fixture::UsageFixture) -> Vec<Value> {
                 .build_query_scalar()
                 .fetch_one(&fixture.pool)
                 .await
-                .expect("workspace snapshot"),
+                .expect("account snapshot"),
         );
     }
     snapshot

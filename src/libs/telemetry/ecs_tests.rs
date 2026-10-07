@@ -126,7 +126,7 @@ fn ecs_service_defaults_and_legacy_environment_are_supported() {
 fn ecs_fields_follow_span_updates_and_event_precedence() {
     let writer = FakeLogWriter::default();
     tracing::dispatcher::with_default(&ecs_dispatch(writer.clone()), || {
-        let parent = tracing::info_span!("parent", workspace_id = "workspace-1", attempt = 1_u64);
+        let parent = tracing::info_span!("parent", account_id = "account-1", attempt = 1_u64);
         parent.record("attempt", 2_u64);
         parent.in_scope(|| {
             let child = tracing::info_span!("child", job_id = "job-1");
@@ -138,7 +138,7 @@ fn ecs_fields_follow_span_updates_and_event_precedence() {
     assert_eq!(
         events[0]["labels"],
         serde_json::json!({
-            "workspace_id": "workspace-1", "job_id": "job-1", "attempt": 3
+            "account_id": "account-1", "job_id": "job-1", "attempt": 3
         })
     );
     assert_eq!(events[1]["labels"]["attempt"], 2);

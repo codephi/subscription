@@ -5,7 +5,7 @@ export async function getDefaultStripeCredentials() {
   return unwrapResponse(await api.GET("/v1/admin/billing/stripe-defaults"));
 }
 
-/** Save default Stripe credentials used when provisioning new workspaces. */
+/** Save default Stripe credentials used when provisioning new accounts. */
 export async function updateDefaultStripeCredentials(body: {
   expected_version: number;
   secret_key?: string;
@@ -21,18 +21,18 @@ export async function listIntegrationProviders() {
   return unwrapResponse(await api.GET("/v1/admin/integrations/providers"));
 }
 
-/** List workspace integration summaries without secret values. */
-export async function listWorkspaceIntegrations(workspaceId: string) {
+/** List account integration summaries without secret values. */
+export async function listAccountIntegrations(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/admin/workspaces/{workspace_id}/integrations", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.GET("/v1/admin/accounts/{account_id}/integrations", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
 /** Configure a Stripe account; secrets are sent directly to the API. */
 export async function createStripeIntegration(
-  workspaceId: string,
+  accountId: string,
   body: {
     secret_key: string;
     environment: string;
@@ -40,8 +40,8 @@ export async function createStripeIntegration(
   },
 ) {
   return unwrapResponse(
-    await api.POST("/v1/admin/workspaces/{workspace_id}/integrations", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.POST("/v1/admin/accounts/{account_id}/integrations", {
+      params: { path: { account_id: accountId } },
       body,
     }),
   );
@@ -49,7 +49,7 @@ export async function createStripeIntegration(
 
 /** Save webhook configuration or rotate a Stripe API key. */
 export async function updateStripeIntegration(
-  workspaceId: string,
+  accountId: string,
   connectionId: string,
   body: {
     expected_version: number;
@@ -59,18 +59,18 @@ export async function updateStripeIntegration(
 ) {
   return unwrapResponse(
     await api.PATCH(
-      "/v1/admin/workspaces/{workspace_id}/integrations/{connection_id}",
-      { params: { path: { workspace_id: workspaceId, connection_id: connectionId } }, body },
+      "/v1/admin/accounts/{account_id}/integrations/{connection_id}",
+      { params: { path: { account_id: accountId, connection_id: connectionId } }, body },
     ),
   );
 }
 
-/** Test saved Stripe credentials; e.g. `testStripeIntegration(workspaceId, id)`. */
-export async function testStripeIntegration(workspaceId: string, connectionId: string) {
+/** Test saved Stripe credentials; e.g. `testStripeIntegration(accountId, id)`. */
+export async function testStripeIntegration(accountId: string, connectionId: string) {
   return unwrapResponse(
     await api.POST(
-      "/v1/admin/workspaces/{workspace_id}/integrations/{connection_id}/test",
-      { params: { path: { workspace_id: workspaceId, connection_id: connectionId } } },
+      "/v1/admin/accounts/{account_id}/integrations/{connection_id}/test",
+      { params: { path: { account_id: accountId, connection_id: connectionId } } },
     ),
   );
 }
@@ -84,7 +84,7 @@ export async function getOperations() {
 export async function listBillingRecords(
   kind: string,
   cursor?: string,
-  workspaceId?: string,
+  accountId?: string,
   status?: string,
   collectionRequestId?: string,
   correlationId?: string,
@@ -95,7 +95,7 @@ export async function listBillingRecords(
         path: { kind },
         query: {
           cursor,
-          workspace_id: workspaceId,
+          account_id: accountId,
           status,
           collection_request_id: collectionRequestId,
           correlation_id: correlationId,
@@ -117,7 +117,7 @@ export async function getBillingRecord(kind: string, id: string) {
 
 /** Grant direct credit with a stable key; e.g. `grantDirectCredit(id, key, body)`. */
 export async function grantDirectCredit(
-  workspaceId: string,
+  accountId: string,
   key: string,
   body: {
     transaction_id: string;
@@ -128,9 +128,9 @@ export async function grantDirectCredit(
   },
 ) {
   return unwrapResponse(
-    await api.POST("/v1/workspaces/{workspace_id}/credits/direct", {
+    await api.POST("/v1/accounts/{account_id}/credits/direct", {
       params: {
-        path: { workspace_id: workspaceId },
+        path: { account_id: accountId },
         header: { "Idempotency-Key": key },
       },
       body,
@@ -138,18 +138,18 @@ export async function grantDirectCredit(
   );
 }
 
-/** Read workspace Billing switches; e.g. `getBillingConfig(id)`. */
-export async function getBillingConfig(workspaceId: string) {
+/** Read account Billing switches; e.g. `getBillingConfig(id)`. */
+export async function getBillingConfig(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/billing-config", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.GET("/v1/accounts/{account_id}/billing-config", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
-/** Update workspace Billing switches with the observed version; e.g. `updateBillingConfig(id, body)`. */
+/** Update account Billing switches with the observed version; e.g. `updateBillingConfig(id, body)`. */
 export async function updateBillingConfig(
-  workspaceId: string,
+  accountId: string,
   body: {
     direct_credit_enabled: boolean;
     recurring_credit_enabled: boolean;
@@ -157,8 +157,8 @@ export async function updateBillingConfig(
   },
 ) {
   return unwrapResponse(
-    await api.PUT("/v1/workspaces/{workspace_id}/billing-config", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.PUT("/v1/accounts/{account_id}/billing-config", {
+      params: { path: { account_id: accountId } },
       body,
     }),
   );
@@ -166,7 +166,7 @@ export async function updateBillingConfig(
 
 /** Register a legacy environment-referenced Stripe connection. */
 export async function createBillingConnection(
-  workspaceId: string,
+  accountId: string,
   body: {
     provider: string;
     external_account_reference: string;
@@ -175,39 +175,39 @@ export async function createBillingConnection(
   },
 ) {
   return unwrapResponse(
-    await api.POST("/v1/workspaces/{workspace_id}/billing-connections", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.POST("/v1/accounts/{account_id}/billing-connections", {
+      params: { path: { account_id: accountId } },
       body,
     }),
   );
 }
 
 /** Compare wallet balance and ledger; e.g. `reconcileCredits(id)`. */
-export async function reconcileCredits(workspaceId: string) {
+export async function reconcileCredits(accountId: string) {
   return unwrapResponse(
     await api.POST(
-      "/v1/admin/workspaces/{workspace_id}/customer-wallet/reconcile",
-      { params: { path: { workspace_id: workspaceId } } },
+      "/v1/admin/accounts/{account_id}/customer-wallet/reconcile",
+      { params: { path: { account_id: accountId } } },
     ),
   );
 }
 
 /** Reconcile wallet provisioning; e.g. `reconcileProvisioning(id)`. */
-export async function reconcileProvisioning(workspaceId: string) {
+export async function reconcileProvisioning(accountId: string) {
   return unwrapResponse(
     await api.POST(
-      "/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile",
-      { params: { path: { workspace_id: workspaceId } } },
+      "/v1/admin/accounts/{account_id}/wallet-provisioning/reconcile",
+      { params: { path: { account_id: accountId } } },
     ),
   );
 }
 
-/** Compare item usage ledger and meter; e.g. `reconcileItemUsage(workspaceId, itemId)`. */
-export async function reconcileItemUsage(workspaceId: string, itemId: string) {
+/** Compare item usage ledger and meter; e.g. `reconcileItemUsage(accountId, itemId)`. */
+export async function reconcileItemUsage(accountId: string, itemId: string) {
   return unwrapResponse(
     await api.POST(
-      "/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile",
-      { params: { path: { workspace_id: workspaceId, item_id: itemId } } },
+      "/v1/admin/accounts/{account_id}/items/{item_id}/usage/reconcile",
+      { params: { path: { account_id: accountId, item_id: itemId } } },
     ),
   );
 }

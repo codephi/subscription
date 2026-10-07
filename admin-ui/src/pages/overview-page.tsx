@@ -111,17 +111,17 @@ export function OverviewPage() {
       )}
       <Card>
         <CardHeader>
-          <CardTitle>Investigar por workspace</CardTitle>
+          <CardTitle>Investigar por account</CardTitle>
           <CardDescription>
-            Consulte planos, carteira, créditos e consumo de um workspace.
+            Consulte planos, carteira, créditos e consumo de um account.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Link
-            to="/workspaces"
+            to="/accounts"
             className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
           >
-            Abrir workspaces <ArrowRight className="size-4" />
+            Abrir accounts <ArrowRight className="size-4" />
           </Link>
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 use serde_json::json;
 use subscription::{
     dto::{
-        events::WorkspaceEventEnvelope,
+        events::AccountEventEnvelope,
         plans::{
             AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest,
             CreateSubscriptionPlanRequest, CreateSubscriptionRequest, PlanRecurrence,
@@ -10,7 +10,7 @@ use subscription::{
         units::CreditUnits,
     },
     repositories::database::DatabaseRepository,
-    services::workspace_events::process_workspace_event,
+    services::account_events::process_account_event,
 };
 use uuid::Uuid;
 
@@ -73,19 +73,19 @@ pub fn revoke_plan_request() -> RevokePlanRequest {
     }
 }
 
-pub async fn apply_workspace_event(
+pub async fn apply_account_event(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     kind: &str,
     sequence: i64,
 ) {
-    let event: WorkspaceEventEnvelope = serde_json::from_value(json!({
-        "event_id":Uuid::new_v4(),"event_type":kind,"schema_version":1,"aggregate_id":workspace_id,
-        "sequence":sequence,"occurred_at":"2026-09-04T00:00:00Z","workspace_id":workspace_id,
-        "correlation_id":Uuid::new_v4(),"causation_id":null,"payload":{"workspace_id":workspace_id}
+    let event: AccountEventEnvelope = serde_json::from_value(json!({
+        "event_id":Uuid::new_v4(),"event_type":kind,"schema_version":1,"aggregate_id":account_id,
+        "sequence":sequence,"occurred_at":"2026-09-04T00:00:00Z","account_id":account_id,
+        "correlation_id":Uuid::new_v4(),"causation_id":null,"payload":{"account_id":account_id}
     }))
-    .expect("workspace event");
-    process_workspace_event(repository, event)
+    .expect("account event");
+    process_account_event(repository, event)
         .await
-        .expect("apply workspace event");
+        .expect("apply account event");
 }

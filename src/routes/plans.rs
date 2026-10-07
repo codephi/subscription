@@ -121,8 +121,8 @@ async fn get_on_demand_plan(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans", tag = "Subscriptions",
-    params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/customer-plans", tag = "Subscriptions",
+    params(("account_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateCustomerPlanRequest,
     responses(
         (status = 201, body = CustomerPlanResponse),
@@ -131,43 +131,42 @@ async fn get_on_demand_plan(
     ))]
 async fn create_customer_plan(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     headers: HeaderMap,
     Json(request): Json<CreateCustomerPlanRequest>,
 ) -> ApiResult<(StatusCode, Json<CustomerPlanResponse>)> {
     let key = idempotency_key(&headers)?;
-    let response =
-        plans::create_customer_plan(&state.database(), workspace_id, key, request).await?;
+    let response = plans::create_customer_plan(&state.database(), account_id, key, request).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}", tag = "Subscriptions",
-    params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}", tag = "Subscriptions",
+    params(("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
     responses((status = 200, body = CustomerPlanResponse)))]
 async fn get_customer_plan(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<CustomerPlanResponse>> {
     Ok(Json(
-        plans::get_customer_plan(&state.database(), workspace_id, customer_plan_id).await?,
+        plans::get_customer_plan(&state.database(), account_id, customer_plan_id).await?,
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/cancel", tag = "Subscriptions",
-    params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/cancel", tag = "Subscriptions",
+    params(("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
     responses((status = 200, body = CustomerPlanResponse), (status = 409, body = ErrorResponse)))]
 async fn cancel_customer_plan(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<CustomerPlanResponse>> {
     Ok(Json(
-        plans::cancel_customer_plan(&state.database(), workspace_id, customer_plan_id).await?,
+        plans::cancel_customer_plan(&state.database(), account_id, customer_plan_id).await?,
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/plan-transitions", tag = "Subscriptions",
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/plan-transitions", tag = "Subscriptions",
     params(
-        ("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path),
+        ("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path),
         ("Idempotency-Key" = String, Header)
     ),
     request_body = CreatePlanTransitionRequest,
@@ -178,7 +177,7 @@ async fn cancel_customer_plan(
     ))]
 async fn transition_customer_plan(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(request): Json<CreatePlanTransitionRequest>,
 ) -> ApiResult<(StatusCode, Json<PlanTransitionOutcomeResponse>)> {
@@ -187,7 +186,7 @@ async fn transition_customer_plan(
         PlanTransitionOutcomeResponse::PaymentPending(
             billing::create_paid_plan_upgrade(
                 &state.database(),
-                workspace_id,
+                account_id,
                 customer_plan_id,
                 key,
                 &request,
@@ -198,7 +197,7 @@ async fn transition_customer_plan(
         PlanTransitionOutcomeResponse::Applied(
             plans::transition_customer_plan(
                 &state.database(),
-                workspace_id,
+                account_id,
                 customer_plan_id,
                 key,
                 request,
@@ -209,17 +208,17 @@ async fn transition_customer_plan(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/revoke", tag = "Operations",
-    params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
+#[utoipa::path(post, path = "/v1/admin/accounts/{account_id}/customer-plans/{customer_plan_id}/revoke", tag = "Operations",
+    params(("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)),
     request_body = RevokeCustomerPlanRequest,
     responses((status = 200, body = CustomerPlanResponse), (status = 409, body = ErrorResponse)))]
 async fn revoke_customer_plan(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
     Json(request): Json<RevokeCustomerPlanRequest>,
 ) -> ApiResult<Json<CustomerPlanResponse>> {
     Ok(Json(
-        plans::revoke_customer_plan(&state.database(), workspace_id, customer_plan_id, request)
+        plans::revoke_customer_plan(&state.database(), account_id, customer_plan_id, request)
             .await?,
     ))
 }

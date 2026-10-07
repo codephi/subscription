@@ -2,14 +2,14 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
-    dto::billing::WorkspaceIntegrationResponse,
+    dto::billing::AccountIntegrationResponse,
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
 };
 
 #[derive(Clone)]
 pub struct IntegrationSecrets {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub external_account_reference: String,
@@ -23,7 +23,7 @@ pub struct IntegrationSecrets {
 }
 
 pub struct CheckoutWebhookScope {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub environment: Option<String>,
@@ -36,7 +36,7 @@ impl DatabaseRepository {
         &self,
         collection_request_id: Uuid,
     ) -> ApiResult<CheckoutWebhookScope> {
-        let row = sqlx::query("SELECT bc.workspace_id,bc.billing_connection_id,bc.provider,bc.environment, \
+        let row = sqlx::query("SELECT bc.account_id,bc.billing_connection_id,bc.provider,bc.environment, \
             bc.provider_account_reference,bc.provider_customer_reference FROM collection_requests cr \
             JOIN payment_method_bindings pmb ON pmb.payment_method_binding_id=cr.payment_method_binding_id \
             JOIN billing_connections bc ON bc.billing_connection_id=pmb.billing_connection_id \
@@ -45,7 +45,7 @@ impl DatabaseRepository {
             .ok_or_else(|| ApiError::not_found("collection_request_not_found", format!(
                 "collection request {collection_request_id} does not exist")))?;
         Ok(CheckoutWebhookScope {
-            workspace_id: row.get("workspace_id"),
+            account_id: row.get("account_id"),
             billing_connection_id: row.get("billing_connection_id"),
             provider: row.get("provider"),
             environment: row.try_get("environment").unwrap_or(None),
@@ -56,15 +56,15 @@ impl DatabaseRepository {
 
     pub async fn find_test_stripe_integration(
         &self,
-        workspace_id: Uuid,
-        account_id: &str,
-    ) -> ApiResult<Option<WorkspaceIntegrationResponse>> {
+        account_id: Uuid,
+        stripe_account_id: &str,
+    ) -> ApiResult<Option<AccountIntegrationResponse>> {
         let row = sqlx::query(
-            "SELECT * FROM billing_connections WHERE workspace_id=$1 AND provider='STRIPE' \
+            "SELECT * FROM billing_connections WHERE account_id=$1 AND provider='STRIPE' \
              AND environment='TEST' AND provider_account_reference=$2",
         )
-        .bind(workspace_id)
         .bind(account_id)
+        .bind(stripe_account_id)
         .fetch_optional(&self.pool())
         .await?;
         Ok(row.as_ref().map(integration_from_row))
@@ -72,42 +72,42 @@ impl DatabaseRepository {
 
     pub async fn get_integration(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
-    ) -> ApiResult<WorkspaceIntegrationResponse> {
+    ) -> ApiResult<AccountIntegrationResponse> {
         let row = sqlx::query(
-            "SELECT * FROM billing_connections WHERE workspace_id=$1 AND billing_connection_id=$2",
+            "SELECT * FROM billing_connections WHERE account_id=$1 AND billing_connection_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(connection_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_integration(workspace_id, connection_id))?;
+        .ok_or_else(|| missing_integration(account_id, connection_id))?;
         Ok(integration_from_row(&row))
     }
 
     pub async fn create_stripe_integration(
         &self,
-        workspace_id: Uuid,
-        account_id: &str,
+        account_id: Uuid,
+        stripe_account_id: &str,
         environment: &str,
         customer_id: Option<&str>,
         secret: &str,
-    ) -> ApiResult<WorkspaceIntegrationResponse> {
+    ) -> ApiResult<AccountIntegrationResponse> {
         let id = Uuid::new_v4();
         let ciphertext = self
             .credential_vault()?
-            .seal(workspace_id, id, "stripe_api", secret)?;
+            .seal(account_id, id, "stripe_api", secret)?;
         let row = sqlx::query(
-            "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+            "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
              external_account_reference,secret_reference,capabilities,status,environment, \
              provider_account_reference,provider_customer_reference) \
              VALUES ($1,$2,'STRIPE',$3,$4,ARRAY['CARD','SETUP_SESSION','OFF_SESSION','WEBHOOK'], \
              'PENDING_SETUP',$5,$3,$6) RETURNING *",
         )
         .bind(id)
-        .bind(workspace_id)
         .bind(account_id)
+        .bind(stripe_account_id)
         .bind(ciphertext)
         .bind(environment)
         .bind(customer_id)
@@ -117,24 +117,26 @@ impl DatabaseRepository {
             sqlx::Error::Database(database) if database.code().as_deref() == Some("23505") => {
                 ApiError::conflict(
                     "integration_already_exists",
-                    format!("Stripe account {account_id} is already connected for {environment}"),
+                    format!(
+                        "Stripe account {stripe_account_id} is already connected for {environment}"
+                    ),
                 )
             }
             _ => ApiError::from(error),
         })?;
-        audit_configuration(&self.pool(), workspace_id, id, "integration.created").await?;
+        audit_configuration(&self.pool(), account_id, id, "integration.created").await?;
         Ok(integration_from_row(&row))
     }
 
     pub async fn list_integrations(
         &self,
-        workspace_id: Uuid,
-    ) -> ApiResult<Vec<WorkspaceIntegrationResponse>> {
+        account_id: Uuid,
+    ) -> ApiResult<Vec<AccountIntegrationResponse>> {
         let rows = sqlx::query(
-            "SELECT * FROM billing_connections WHERE workspace_id=$1 \
+            "SELECT * FROM billing_connections WHERE account_id=$1 \
              ORDER BY created_at,billing_connection_id",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_all(&self.pool())
         .await?;
         Ok(rows.iter().map(integration_from_row).collect())
@@ -142,43 +144,40 @@ impl DatabaseRepository {
 
     pub async fn integration_secrets(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
     ) -> ApiResult<IntegrationSecrets> {
         let row = sqlx::query(
-            "SELECT * FROM billing_connections WHERE workspace_id=$1 AND billing_connection_id=$2",
+            "SELECT * FROM billing_connections WHERE account_id=$1 AND billing_connection_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(connection_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_integration(workspace_id, connection_id))?;
+        .ok_or_else(|| missing_integration(account_id, connection_id))?;
         Ok(secrets_from_row(&row))
     }
 
     pub async fn update_stripe_integration(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         expected_version: i32,
         secret: Option<&str>,
         webhook_secret: Option<&str>,
-    ) -> ApiResult<WorkspaceIntegrationResponse> {
-        let current = self
-            .integration_secrets(workspace_id, connection_id)
-            .await?;
-        let api_ciphertext =
-            seal_optional(self, workspace_id, connection_id, "stripe_api", secret)?;
+    ) -> ApiResult<AccountIntegrationResponse> {
+        let current = self.integration_secrets(account_id, connection_id).await?;
+        let api_ciphertext = seal_optional(self, account_id, connection_id, "stripe_api", secret)?;
         let webhook_ciphertext = seal_optional(
             self,
-            workspace_id,
+            account_id,
             connection_id,
             "stripe_webhook",
             webhook_secret,
         )?;
         let row = update_integration_row(
             self,
-            workspace_id,
+            account_id,
             connection_id,
             expected_version,
             &current,
@@ -188,7 +187,7 @@ impl DatabaseRepository {
         .await?;
         audit_configuration(
             &self.pool(),
-            workspace_id,
+            account_id,
             connection_id,
             "integration.updated",
         )
@@ -198,16 +197,16 @@ impl DatabaseRepository {
 
     pub async fn activate_stripe_integration(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         expected_version: i32,
-    ) -> ApiResult<WorkspaceIntegrationResponse> {
+    ) -> ApiResult<AccountIntegrationResponse> {
         let row = sqlx::query(
             "UPDATE billing_connections SET status='ACTIVE',configuration_version=configuration_version+1 \
-             WHERE workspace_id=$1 AND billing_connection_id=$2 AND configuration_version=$3 \
+             WHERE account_id=$1 AND billing_connection_id=$2 AND configuration_version=$3 \
              AND status='PENDING_SETUP' AND webhook_secret_reference IS NOT NULL RETURNING *",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(connection_id)
         .bind(expected_version)
         .fetch_optional(&self.pool())
@@ -215,7 +214,7 @@ impl DatabaseRepository {
         .ok_or_else(|| version_conflict(connection_id))?;
         audit_configuration(
             &self.pool(),
-            workspace_id,
+            account_id,
             connection_id,
             "integration.activated",
         )
@@ -225,16 +224,16 @@ impl DatabaseRepository {
 
     pub async fn begin_customer_operation(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
     ) -> ApiResult<Option<String>> {
         let inserted = sqlx::query(
             "INSERT INTO billing_integration_customer_operations \
-             (billing_connection_id,workspace_id,status) VALUES ($1,$2,'STARTED') \
+             (billing_connection_id,account_id,status) VALUES ($1,$2,'STARTED') \
              ON CONFLICT (billing_connection_id) DO NOTHING RETURNING billing_connection_id",
         )
         .bind(connection_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&self.pool())
         .await?;
         if inserted.is_some() {
@@ -242,13 +241,13 @@ impl DatabaseRepository {
         }
         let row = sqlx::query(
             "SELECT status,provider_customer_reference FROM billing_integration_customer_operations \
-             WHERE billing_connection_id=$1 AND workspace_id=$2",
+             WHERE billing_connection_id=$1 AND account_id=$2",
         )
         .bind(connection_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_integration(workspace_id, connection_id))?;
+        .ok_or_else(|| missing_integration(account_id, connection_id))?;
         if row.get::<String, _>("status") == "COMPLETE" {
             return Ok(row.try_get("provider_customer_reference").unwrap_or(None));
         }
@@ -260,25 +259,25 @@ impl DatabaseRepository {
 
     pub async fn finish_customer_operation(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         customer_id: &str,
     ) -> ApiResult<()> {
         let mut transaction = self.pool().begin().await?;
         sqlx::query(
             "UPDATE billing_integration_customer_operations SET status='COMPLETE', \
-             provider_customer_reference=$3 WHERE billing_connection_id=$1 AND workspace_id=$2",
+             provider_customer_reference=$3 WHERE billing_connection_id=$1 AND account_id=$2",
         )
         .bind(connection_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(customer_id)
         .execute(&mut *transaction)
         .await?;
         sqlx::query(
             "UPDATE billing_connections SET provider_customer_reference=$3 \
-             WHERE workspace_id=$1 AND billing_connection_id=$2 AND provider_customer_reference IS NULL",
+             WHERE account_id=$1 AND billing_connection_id=$2 AND provider_customer_reference IS NULL",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(connection_id)
         .bind(customer_id)
         .execute(&mut *transaction)
@@ -290,7 +289,7 @@ impl DatabaseRepository {
 
 async fn update_integration_row(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     expected_version: i32,
     current: &IntegrationSecrets,
@@ -301,10 +300,10 @@ async fn update_integration_row(
     sqlx::query(
         "UPDATE billing_connections SET secret_reference=COALESCE($4,secret_reference), \
          webhook_secret_reference=COALESCE($5,webhook_secret_reference), status=$6, \
-         configuration_version=configuration_version+1 WHERE workspace_id=$1 \
+         configuration_version=configuration_version+1 WHERE account_id=$1 \
          AND billing_connection_id=$2 AND configuration_version=$3 RETURNING *",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(connection_id)
     .bind(expected_version)
     .bind(api_ciphertext)
@@ -325,7 +324,7 @@ fn updated_status(current: &IntegrationSecrets, adds_webhook: bool) -> &'static 
 
 fn seal_optional(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     purpose: &str,
     secret: Option<&str>,
@@ -334,24 +333,24 @@ fn seal_optional(
         .map(|secret| {
             repository
                 .credential_vault()?
-                .seal(workspace_id, connection_id, purpose, secret)
+                .seal(account_id, connection_id, purpose, secret)
         })
         .transpose()
 }
 
 async fn audit_configuration(
     pool: &sqlx::PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     action: &str,
 ) -> ApiResult<()> {
     sqlx::query(
-        "INSERT INTO audit_events (audit_event_id,workspace_id,actor_reference,action, \
+        "INSERT INTO audit_events (audit_event_id,account_id,actor_reference,action, \
          resource_kind,resource_id,correlation_id,details) VALUES ($1,$2,'admin-ui',$3, \
          'billing_connection',$4,$5,'{}'::jsonb)",
     )
     .bind(Uuid::new_v4())
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(action)
     .bind(connection_id)
     .bind(Uuid::new_v4())
@@ -360,9 +359,9 @@ async fn audit_configuration(
     Ok(())
 }
 
-fn integration_from_row(row: &sqlx::postgres::PgRow) -> WorkspaceIntegrationResponse {
+fn integration_from_row(row: &sqlx::postgres::PgRow) -> AccountIntegrationResponse {
     let connection_id: Uuid = row.get("billing_connection_id");
-    WorkspaceIntegrationResponse {
+    AccountIntegrationResponse {
         billing_connection_id: connection_id,
         provider: row.get("provider"),
         account_reference: row
@@ -389,7 +388,7 @@ fn integration_from_row(row: &sqlx::postgres::PgRow) -> WorkspaceIntegrationResp
 
 fn secrets_from_row(row: &sqlx::postgres::PgRow) -> IntegrationSecrets {
     IntegrationSecrets {
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         billing_connection_id: row.get("billing_connection_id"),
         provider: row.get("provider"),
         external_account_reference: row.get("external_account_reference"),
@@ -410,9 +409,9 @@ fn version_conflict(connection_id: Uuid) -> ApiError {
     )
 }
 
-fn missing_integration(workspace_id: Uuid, connection_id: Uuid) -> ApiError {
+fn missing_integration(account_id: Uuid, connection_id: Uuid) -> ApiError {
     ApiError::not_found(
         "integration_not_found",
-        format!("integration {connection_id} does not exist in workspace {workspace_id}"),
+        format!("integration {connection_id} does not exist in account {account_id}"),
     )
 }

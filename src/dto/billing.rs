@@ -19,7 +19,7 @@ pub struct IntegrationProviderResponse {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
-pub struct WorkspaceIntegrationResponse {
+pub struct AccountIntegrationResponse {
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub account_reference: String,
@@ -74,7 +74,7 @@ pub struct DefaultStripeCredentialsResponse {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct BillingConnectionResponse {
     pub billing_connection_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub provider: String,
     pub external_account_reference: String,
     pub capabilities: Vec<String>,
@@ -122,7 +122,7 @@ pub struct CreatePaymentMethodFromCardResponse {
 pub struct PaymentMethodBindingResponse {
     pub payment_method_binding_id: Uuid,
     pub billing_connection_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub customer_plan_id: Option<Uuid>,
     pub payment_method: String,
     pub display_name: Option<String>,
@@ -229,7 +229,7 @@ pub struct CollectionRequestResponse {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct UnmatchedPaymentCaseResponse {
     pub unmatched_payment_case_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub provider_event_id: String,

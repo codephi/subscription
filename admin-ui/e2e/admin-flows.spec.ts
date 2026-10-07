@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-const workspaceId = "00000000-0000-4000-8000-000000000001";
+const accountId = "00000000-0000-4000-8000-000000000001";
 const collectionId = "00000000-0000-4000-8000-000000000002";
 const productId = "00000000-0000-4000-8000-000000000003";
 const itemId = "00000000-0000-4000-8000-000000000005";
@@ -29,7 +29,7 @@ test("operator follows a pending collection from the overview to its evidence", 
           {
             id: collectionId,
             kind: "collections",
-            workspace_id: workspaceId,
+            account_id: accountId,
             status: "SCHEDULED",
             occurred_at: "2026-09-24T12:00:00Z",
             collection_request_id: collectionId,
@@ -56,7 +56,7 @@ test("operator follows a pending collection from the overview to its evidence", 
         json: {
           id: collectionId,
           kind: "collections",
-          workspace_id: workspaceId,
+          account_id: accountId,
           status: "SCHEDULED",
           occurred_at: "2026-09-24T12:00:00Z",
           collection_request_id: collectionId,
@@ -82,9 +82,9 @@ test("operator follows a pending collection from the overview to its evidence", 
   await expect(page).toHaveURL(/status=ACTIVE/);
   await page.getByRole("link", { name: /00000000…0002/ }).click();
   await expect(page.getByText("tx-1")).toBeVisible();
-  await expect(page.getByRole("link", { name: workspaceId })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: accountId })).toHaveAttribute(
     "href",
-    `/workspaces/${workspaceId}`,
+    `/accounts/${accountId}`,
   );
 });
 
@@ -380,8 +380,8 @@ test("operator replays a quarantined inbox event after confirmation", async ({
         items: [
           {
             event_id: eventId,
-            workspace_id: workspaceId,
-            event_type: "workspace.updated",
+            account_id: accountId,
+            event_type: "account.updated",
             external_sequence: 7,
             processing_status: "QUARANTINED",
             correlation_id: collectionId,
@@ -401,7 +401,7 @@ test("operator replays a quarantined inbox event after confirmation", async ({
         json: {
           event_id: eventId,
           outcome: "applied",
-          workspace_status: "ACTIVE",
+          account_status: "ACTIVE",
           external_sequence: 7,
         },
       });
@@ -442,11 +442,11 @@ test("operator reviews a direct credit and the panel sends an idempotency key", 
 }) => {
   const lotId = "00000000-0000-4000-8000-000000000005";
   await page.route(
-    `**/v1/workspaces/${workspaceId}/billing-config`,
+    `**/v1/accounts/${accountId}/billing-config`,
     async (route) =>
       route.fulfill({
         json: {
-          workspace_id: workspaceId,
+          account_id: accountId,
           direct_credit_enabled: true,
           recurring_credit_enabled: true,
           version: 3,
@@ -456,7 +456,7 @@ test("operator reviews a direct credit and the panel sends an idempotency key", 
       }),
   );
   await page.route(
-    `**/v1/workspaces/${workspaceId}/credits/direct`,
+    `**/v1/accounts/${accountId}/credits/direct`,
     async (route) => {
       expect(route.request().headers()["idempotency-key"]).toMatch(
         /^[0-9a-f-]{36}$/i,
@@ -471,7 +471,7 @@ test("operator reviews a direct credit and the panel sends an idempotency key", 
       });
     },
   );
-  await page.goto(`/workspaces/${workspaceId}/actions`);
+  await page.goto(`/accounts/${accountId}/actions`);
   await page
     .getByRole("textbox", { name: "Transação ID" })
     .fill("support-credit-01");

@@ -1,6 +1,6 @@
 CREATE TABLE billing_checkouts (
   checkout_id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   customer_plan_id uuid NOT NULL REFERENCES customer_plans(customer_plan_id) ON DELETE RESTRICT,
   checkout_kind text NOT NULL CHECK (checkout_kind IN ('INITIAL','ON_DEMAND')),
   on_demand_plan_id uuid REFERENCES on_demand_plans(on_demand_plan_id) ON DELETE RESTRICT,
@@ -12,12 +12,12 @@ CREATE TABLE billing_checkouts (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK ((checkout_kind='ON_DEMAND')=(on_demand_plan_id IS NOT NULL)),
-  UNIQUE (workspace_id,idempotency_key),
-  UNIQUE (workspace_id,transaction_id)
+  UNIQUE (account_id,idempotency_key),
+  UNIQUE (account_id,transaction_id)
 );
 
 CREATE INDEX ix_billing_checkouts_collection
-  ON billing_checkouts(workspace_id,collection_request_id)
+  ON billing_checkouts(account_id,collection_request_id)
   WHERE collection_request_id IS NOT NULL;
 
 CREATE TRIGGER trg_billing_checkouts_updated_at

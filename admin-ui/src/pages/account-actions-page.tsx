@@ -32,17 +32,17 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { clearPendingKey, pendingKey } from "@/lib/idempotency";
 
-export function WorkspaceActionsPage() {
-  const { workspaceId } = useParams();
-  if (!workspaceId) return <p>Workspace ID ausente.</p>;
-  return <WorkspaceActions workspaceId={workspaceId} />;
+export function AccountActionsPage() {
+  const { accountId } = useParams();
+  if (!accountId) return <p>Account ID ausente.</p>;
+  return <AccountActions accountId={accountId} />;
 }
 
-function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
+function AccountActions({ accountId }: { accountId: string }) {
   const client = useQueryClient();
   const config = useQuery({
-    queryKey: ["billing-config", workspaceId],
-    queryFn: () => getBillingConfig(workspaceId),
+    queryKey: ["billing-config", accountId],
+    queryFn: () => getBillingConfig(accountId),
   });
   const [creditReview, setCreditReview] = useState<{
     transactionId: string;
@@ -51,9 +51,9 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
   } | null>(null);
   const credit = useMutation({
     mutationFn: async (input: NonNullable<typeof creditReview>) => {
-      const scope = `credit:${workspaceId}`;
+      const scope = `credit:${accountId}`;
       const result = await grantDirectCredit(
-        workspaceId,
+        accountId,
         pendingKey(scope, input.transactionId),
         {
           transaction_id: input.transactionId,
@@ -67,8 +67,8 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
       return result;
     },
     onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ["wallets", workspaceId] });
-      await client.invalidateQueries({ queryKey: ["credits", workspaceId] });
+      await client.invalidateQueries({ queryKey: ["wallets", accountId] });
+      await client.invalidateQueries({ queryKey: ["credits", accountId] });
     },
   });
   const update = useMutation({
@@ -76,23 +76,23 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
       direct_credit_enabled: boolean;
       recurring_credit_enabled: boolean;
       expected_version: number;
-    }) => updateBillingConfig(workspaceId, body),
+    }) => updateBillingConfig(accountId, body),
     onSuccess: async () => {
       await client.invalidateQueries({
-        queryKey: ["billing-config", workspaceId],
+        queryKey: ["billing-config", accountId],
       });
     },
   });
   const ledger = useMutation({
-    mutationFn: () => reconcileCredits(workspaceId),
+    mutationFn: () => reconcileCredits(accountId),
   });
   const provisioning = useMutation({
-    mutationFn: () => reconcileProvisioning(workspaceId),
+    mutationFn: () => reconcileProvisioning(accountId),
     onSuccess: async () => {
       await client.invalidateQueries({
-        queryKey: ["provisioning", workspaceId],
+        queryKey: ["provisioning", accountId],
       });
-      await client.invalidateQueries({ queryKey: ["wallets", workspaceId] });
+      await client.invalidateQueries({ queryKey: ["wallets", accountId] });
     },
   });
 
@@ -121,16 +121,16 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
         <Link
-          to={`/workspaces/${workspaceId}`}
+          to={`/accounts/${accountId}`}
           className="text-sm text-primary hover:underline"
         >
-          ← Voltar ao workspace
+          ← Voltar ao account
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight">
           Ações administrativas
         </h1>
         <p className="break-all font-mono text-sm text-muted-foreground">
-          {workspaceId}
+          {accountId}
         </p>
       </header>
       <Card>
@@ -233,7 +233,7 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
           </form>
           {!config.data?.direct_credit_enabled && (
             <p className="mt-3 text-xs text-muted-foreground">
-              Crédito direto desabilitado neste workspace.
+              Crédito direto desabilitado neste account.
             </p>
           )}
           {credit.error && <QueryError error={credit.error} />}
@@ -253,7 +253,7 @@ function WorkspaceActions({ workspaceId }: { workspaceId: string }) {
               <AlertDialogHeader>
                 <AlertDialogTitle>Conceder crédito?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Workspace {workspaceId}: {creditReview?.units} unidades na
+                  Account {accountId}: {creditReview?.units} unidades na
                   transação {creditReview?.transactionId}. Esta operação altera
                   o saldo.
                 </AlertDialogDescription>

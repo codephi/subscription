@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import {
   createStripeIntegration,
   listIntegrationProviders,
-  listWorkspaceIntegrations,
+  listAccountIntegrations,
   testStripeIntegration,
   updateStripeIntegration,
 } from "@/api/billing-api";
@@ -31,15 +31,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type WorkspaceIntegration = Awaited<ReturnType<typeof listWorkspaceIntegrations>>[number];
+type AccountIntegration = Awaited<ReturnType<typeof listAccountIntegrations>>[number];
 
-export function WorkspaceIntegrationsPage() {
-  const { workspaceId } = useParams();
-  if (!workspaceId) return <p>Workspace ID ausente.</p>;
-  return <WorkspaceIntegrations workspaceId={workspaceId} />;
+export function AccountIntegrationsPage() {
+  const { accountId } = useParams();
+  if (!accountId) return <p>Account ID ausente.</p>;
+  return <AccountIntegrations accountId={accountId} />;
 }
 
-function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
+function AccountIntegrations({ accountId }: { accountId: string }) {
   const client = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [environment, setEnvironment] = useState("TEST");
@@ -51,8 +51,8 @@ function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
     queryFn: listIntegrationProviders,
   });
   const integrations = useQuery({
-    queryKey: ["workspace-integrations", workspaceId],
-    queryFn: () => listWorkspaceIntegrations(workspaceId),
+    queryKey: ["account-integrations", accountId],
+    queryFn: () => listAccountIntegrations(accountId),
   });
   const selected = integrations.data?.find(
     (integration) => integration.billing_connection_id === selectedId,
@@ -60,7 +60,7 @@ function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
   const test = useMutation({
     mutationFn: () =>
       selected
-        ? testStripeIntegration(workspaceId, selected.billing_connection_id)
+        ? testStripeIntegration(accountId, selected.billing_connection_id)
         : Promise.reject(new Error("Selecione uma integração.")),
   });
 
@@ -73,7 +73,7 @@ function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
     setFormError(null);
     try {
       setSavingCredentials(true);
-      const created = await createStripeIntegration(workspaceId, {
+      const created = await createStripeIntegration(accountId, {
         secret_key: secretKey,
         environment,
         existing_customer_reference:
@@ -82,7 +82,7 @@ function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
       formElement.reset();
       setSelectedId(created.billing_connection_id);
       await client.invalidateQueries({
-        queryKey: ["workspace-integrations", workspaceId],
+        queryKey: ["account-integrations", accountId],
       });
     } catch (error) {
       setFormError(asError(error));
@@ -105,14 +105,14 @@ function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
     setFormError(null);
     try {
       setSavingSecrets(true);
-      await updateStripeIntegration(workspaceId, selected.billing_connection_id, {
+      await updateStripeIntegration(accountId, selected.billing_connection_id, {
         expected_version: selected.configuration_version,
         ...(secretKey ? { secret_key: secretKey } : {}),
         ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
       });
       formElement.reset();
       await client.invalidateQueries({
-        queryKey: ["workspace-integrations", workspaceId],
+        queryKey: ["account-integrations", accountId],
       });
     } catch (error) {
       setFormError(asError(error));
@@ -125,15 +125,15 @@ function WorkspaceIntegrations({ workspaceId }: { workspaceId: string }) {
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
         <Link
-          to={`/workspaces/${workspaceId}`}
+          to={`/accounts/${accountId}`}
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft aria-hidden="true" />
-          Voltar ao workspace
+          Voltar ao account
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight">Integrações</h1>
         <p className="break-all font-mono text-sm text-muted-foreground">
-          {workspaceId}
+          {accountId}
         </p>
       </header>
       {providers.isLoading && <QueryLoading />}
@@ -312,7 +312,7 @@ function SelectedIntegrationForm({
   pending,
   onSubmit,
 }: {
-  integration: WorkspaceIntegration;
+  integration: AccountIntegration;
   pending: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {

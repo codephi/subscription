@@ -5,7 +5,7 @@ FROM subscription_plan_versions p
 LEFT JOIN subscription_admission_policies policy ON policy.policy_version_id=p.admission_policy_version_id
 LEFT JOIN LATERAL (
   SELECT e.event_id,e.verified_facts,e.valid_until FROM subscription_admission_evidence e
-  WHERE e.workspace_id=$1 AND e.policy_version_id=p.admission_policy_version_id
+  WHERE e.account_id=$1 AND e.policy_version_id=p.admission_policy_version_id
   ORDER BY e.sequence DESC LIMIT 1
 ) evidence ON true
 WHERE p.plan_version_id=$2

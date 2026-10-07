@@ -12,7 +12,7 @@ use crate::{
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn insert_usage_outbox(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     usage_id: Uuid,
     meter: &LockedMeter,
     conversion: &Conversion,
@@ -27,7 +27,7 @@ pub(super) async fn insert_usage_outbox(
             "item_wallet",
             meter.wallet_id,
             meter.version + 1,
-            workspace_id,
+            account_id,
             occurred_at,
             json!({
                 "usage_event_id": usage_id,
@@ -41,7 +41,7 @@ pub(super) async fn insert_usage_outbox(
     if let Some(debit) = debit {
         persist_debit_event(
             transaction,
-            workspace_id,
+            account_id,
             usage_id,
             meter,
             conversion,
@@ -55,7 +55,7 @@ pub(super) async fn insert_usage_outbox(
 
 async fn persist_debit_event(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     usage_id: Uuid,
     meter: &LockedMeter,
     conversion: &Conversion,
@@ -69,7 +69,7 @@ async fn persist_debit_event(
             "customer_wallet",
             meter.customer_wallet_id,
             debit.entry_sequence,
-            workspace_id,
+            account_id,
             occurred_at,
             json!({
                 "usage_event_id": usage_id,
@@ -87,7 +87,7 @@ fn domain_event(
     aggregate_type: &str,
     aggregate_id: Uuid,
     sequence: i64,
-    workspace_id: Uuid,
+    account_id: Uuid,
     occurred_at: DateTime<Utc>,
     payload: Value,
 ) -> DomainEventEnvelope {
@@ -99,7 +99,7 @@ fn domain_event(
         aggregate_id,
         sequence,
         occurred_at,
-        workspace_id,
+        account_id,
         correlation_id: Uuid::new_v4(),
         causation_id: None,
         payload,
@@ -112,7 +112,7 @@ async fn persist_event(
 ) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id, \
-         aggregate_sequence,workspace_id,correlation_id,causation_id,payload,occurred_at) \
+         aggregate_sequence,account_id,correlation_id,causation_id,payload,occurred_at) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(event.event_id)
@@ -120,7 +120,7 @@ async fn persist_event(
     .bind(&event.aggregate_type)
     .bind(event.aggregate_id)
     .bind(event.sequence)
-    .bind(event.workspace_id)
+    .bind(event.account_id)
     .bind(event.correlation_id)
     .bind(event.causation_id)
     .bind(serde_json::to_value(&event).map_err(ApiError::serialization)?)

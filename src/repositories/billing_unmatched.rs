@@ -15,7 +15,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnmatchedPaymentRecord {
     pub unmatched_payment_case_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub provider_event_id: String,
@@ -54,9 +54,9 @@ async fn load_duplicate_case(
     connection_id: Uuid,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<UnmatchedPaymentRecord> {
-    let workspace_id = lock_billing_connection(transaction, connection_id, webhook).await?;
+    let account_id = lock_billing_connection(transaction, connection_id, webhook).await?;
     let case = find_case_by_event(transaction, webhook).await?;
-    validate_existing_case(&case, workspace_id, connection_id, webhook)?;
+    validate_existing_case(&case, account_id, connection_id, webhook)?;
     Ok(case)
 }
 
@@ -65,11 +65,11 @@ async fn open_unmatched_case(
     connection_id: Uuid,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<UnmatchedPaymentRecord> {
-    let workspace_id = lock_billing_connection(transaction, connection_id, webhook).await?;
+    let account_id = lock_billing_connection(transaction, connection_id, webhook).await?;
     ensure_collection_is_missing(transaction, webhook.collection_request_id).await?;
-    let inserted = insert_case(transaction, workspace_id, connection_id, webhook).await?;
+    let inserted = insert_case(transaction, account_id, connection_id, webhook).await?;
     let case = find_case_by_payment(transaction, webhook).await?;
-    validate_existing_case(&case, workspace_id, connection_id, webhook)?;
+    validate_existing_case(&case, account_id, connection_id, webhook)?;
     if inserted {
         insert_opened_history(transaction, &case, webhook).await?;
         insert_unmatched_outbox(transaction, &case).await?;
@@ -90,7 +90,7 @@ async fn lock_billing_connection(
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<Uuid> {
     let row = sqlx::query(
-        "SELECT workspace_id,provider,status FROM billing_connections \
+        "SELECT account_id,provider,status FROM billing_connections \
          WHERE billing_connection_id=$1 FOR SHARE",
     )
     .bind(connection_id)
@@ -100,7 +100,7 @@ async fn lock_billing_connection(
     if row.get::<String, _>("provider") == webhook.provider
         && row.get::<String, _>("status") == "ACTIVE"
     {
-        return Ok(row.get("workspace_id"));
+        return Ok(row.get("account_id"));
     }
     Err(ApiError::conflict(
         "billing_connection_mismatch",
@@ -132,19 +132,19 @@ async fn ensure_collection_is_missing(
 
 async fn insert_case(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<bool> {
     let evidence = serde_json::to_value(webhook).map_err(ApiError::serialization)?;
     let result = sqlx::query(
-        "INSERT INTO unmatched_payment_cases (unmatched_payment_case_id,workspace_id, \
+        "INSERT INTO unmatched_payment_cases (unmatched_payment_case_id,account_id, \
          billing_connection_id,provider,provider_event_id,provider_payment_id,amount_minor,currency, \
          reason,evidence,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8, \
          'COLLECTION_REQUEST_NOT_FOUND',$9,'OPEN') ON CONFLICT DO NOTHING",
     )
     .bind(Uuid::new_v4())
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(connection_id)
     .bind(&webhook.provider)
     .bind(&webhook.provider_event_id)
@@ -188,11 +188,11 @@ async fn find_case_by_payment(
 
 fn validate_existing_case(
     case: &UnmatchedPaymentRecord,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<()> {
-    if case.workspace_id == workspace_id
+    if case.account_id == account_id
         && case.billing_connection_id == connection_id
         && case.amount_minor == webhook.amount_minor
         && case.currency == webhook.currency
@@ -202,7 +202,7 @@ fn validate_existing_case(
     Err(ApiError::conflict(
         "unmatched_payment_mismatch",
         format!(
-            "provider payment {:?} already has a different workspace, connection, amount, or currency",
+            "provider payment {:?} already has a different account, connection, amount, or currency",
             webhook.provider_payment_id
         ),
     ))
@@ -231,17 +231,17 @@ async fn insert_unmatched_outbox(
 ) -> ApiResult<()> {
     let event_id = Uuid::new_v4();
     let payload = json!({"billing_event_id":event_id,"event_type":"payment.unmatched",
-        "schema_version":1,"occurred_at":case.created_at,"workspace_id":case.workspace_id,
+        "schema_version":1,"occurred_at":case.created_at,"account_id":case.account_id,
         "unmatched_payment_case_id":case.unmatched_payment_case_id,
         "provider":case.provider,"provider_payment_id":case.provider_payment_id});
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) VALUES \
+         account_id,correlation_id,payload) VALUES \
          ($1,'payment.unmatched','unmatched_payment_case',$2,1,$3,$2,$4)",
     )
     .bind(event_id)
     .bind(case.unmatched_payment_case_id)
-    .bind(case.workspace_id)
+    .bind(case.account_id)
     .bind(payload)
     .execute(&mut **transaction)
     .await?;
@@ -251,7 +251,7 @@ async fn insert_unmatched_outbox(
 fn case_from_row(row: &sqlx::postgres::PgRow) -> UnmatchedPaymentRecord {
     UnmatchedPaymentRecord {
         unmatched_payment_case_id: row.get("unmatched_payment_case_id"),
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         billing_connection_id: row.get("billing_connection_id"),
         provider: row.get("provider"),
         provider_event_id: row.get("provider_event_id"),

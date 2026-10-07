@@ -68,7 +68,7 @@ impl BillingConnector for WebhookBeforeResponseConnector {
 
 struct BillingConfirmationFixture {
     repository: DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     collection_request_id: Uuid,
 }
@@ -159,7 +159,7 @@ async fn on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_pl
     .unwrap();
     let purchase = billing::create_on_demand_purchase(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         fixture.customer_plan_id,
         &format!("on-demand-key-{}", Uuid::new_v4()),
         &CreateOnDemandPurchaseRequest {
@@ -207,7 +207,7 @@ async fn on_demand_confirmation_grants_persistent_credit_without_new_cycle_or_pl
          JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id WHERE cp.customer_plan_id=$1",
     )
     .bind(fixture.customer_plan_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.repository.pool())
     .await
     .unwrap();
@@ -252,7 +252,7 @@ async fn paid_upgrade_changes_plan_and_cycle_only_after_full_confirmation() {
     .unwrap();
     let upgrade = billing::create_paid_plan_upgrade(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         fixture.customer_plan_id,
         &format!("upgrade-key-{}", Uuid::new_v4()),
         &CreatePlanTransitionRequest {
@@ -309,7 +309,7 @@ async fn paid_upgrade_changes_plan_and_cycle_only_after_full_confirmation() {
          JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id WHERE cp.customer_plan_id=$1",
     )
     .bind(fixture.customer_plan_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.repository.pool())
     .await
     .unwrap();
@@ -321,7 +321,7 @@ async fn cancellation_and_plan_revocation_terminalize_pending_collections() {
     let canceled = setup_unstarted_confirmation().await;
     plans::cancel_customer_plan(
         &canceled.repository,
-        canceled.workspace_id,
+        canceled.account_id,
         canceled.customer_plan_id,
     )
     .await
@@ -370,7 +370,7 @@ async fn cancellation_and_plan_revocation_terminalize_pending_collections() {
     let admin_revoked = setup_unstarted_confirmation().await;
     plans::revoke_customer_plan(
         &admin_revoked.repository,
-        admin_revoked.workspace_id,
+        admin_revoked.account_id,
         admin_revoked.customer_plan_id,
         RevokeCustomerPlanRequest {
             reason: "risk review".into(),
@@ -414,7 +414,7 @@ async fn changed_billing_snapshot_rolls_back_every_confirmation_effect() {
           WHERE w.customer_id=$2 AND w.wallet_type='CUSTOMER')",
     )
     .bind(fixture.customer_plan_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.repository.pool())
     .await
     .expect("rolled back confirmation effects");
@@ -475,7 +475,7 @@ async fn confirmed_webhook_after_commercial_expiration_is_recorded_without_effec
          WHERE cp.customer_plan_id=$1 AND cr.collection_request_id=$3",
     )
     .bind(fixture.customer_plan_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.collection_request_id)
     .fetch_one(&fixture.repository.pool())
     .await
@@ -504,7 +504,7 @@ async fn setup_unstarted_confirmation() -> BillingConfirmationFixture {
     let paid_plan = create_paid_plan(&usage.repository, usage.product_id).await;
     let customer_plan = plans::create_customer_plan(
         &usage.repository,
-        usage.workspace_id,
+        usage.account_id,
         &format!("paid-plan-key-{}", Uuid::new_v4()),
         CreateCustomerPlanRequest {
             plan_version_id: paid_plan.plan_version_id,
@@ -516,14 +516,14 @@ async fn setup_unstarted_confirmation() -> BillingConfirmationFixture {
     assert_eq!(customer_plan.activation_status, "PENDING_INITIAL_PAYMENT");
     let request_id = insert_billing_records(
         &usage.repository,
-        usage.workspace_id,
+        usage.account_id,
         customer_plan.customer_plan_id,
         paid_plan.plan_version_id,
     )
     .await;
     BillingConfirmationFixture {
         repository: usage.repository,
-        workspace_id: usage.workspace_id,
+        account_id: usage.account_id,
         customer_plan_id: customer_plan.customer_plan_id,
         collection_request_id: request_id,
     }
@@ -574,7 +574,7 @@ async fn create_paid_plan(
 
 async fn insert_billing_records(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     plan_version_id: Uuid,
 ) -> Uuid {
@@ -583,19 +583,19 @@ async fn insert_billing_records(
     let binding_id = Uuid::new_v4();
     let request_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+        "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
          external_account_reference,secret_reference,capabilities,status) \
          VALUES ($1,$2,'FAKE',$3,'secret://fake',ARRAY['CARD'],'ACTIVE')",
     )
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(format!("account-{connection_id}"))
     .execute(&pool)
     .await
     .expect("billing connection");
     insert_binding(
         &pool,
-        workspace_id,
+        account_id,
         customer_plan_id,
         connection_id,
         binding_id,
@@ -603,7 +603,7 @@ async fn insert_billing_records(
     .await;
     insert_request(
         &pool,
-        workspace_id,
+        account_id,
         customer_plan_id,
         plan_version_id,
         binding_id,
@@ -615,19 +615,19 @@ async fn insert_billing_records(
 
 async fn insert_binding(
     pool: &sqlx::PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     connection_id: Uuid,
     binding_id: Uuid,
 ) {
     sqlx::query(
         "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-         workspace_id,customer_id,customer_plan_id,payment_method, \
+         account_id,customer_id,customer_plan_id,payment_method, \
          provider_payment_method_reference,status) VALUES ($1,$2,$3,$3,$4,'CARD',$5,'ACTIVE')",
     )
     .bind(binding_id)
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_plan_id)
     .bind(format!("pm-{binding_id}"))
     .execute(pool)
@@ -637,20 +637,20 @@ async fn insert_binding(
 
 async fn insert_request(
     pool: &sqlx::PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     plan_version_id: Uuid,
     binding_id: Uuid,
     request_id: Uuid,
 ) {
     sqlx::query(
-        "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id,customer_plan_id, \
+        "INSERT INTO collection_requests (collection_request_id,account_id,customer_id,customer_plan_id, \
          plan_version_id,payment_method_binding_id,request_kind,amount_minor,currency,granted_credit_units, \
          status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
          VALUES ($1,$2,$2,$3,$4,$5,'INITIAL',1500,'BRL',100,'SCHEDULED',$6,$7,$8,now(),now()+interval '15 minutes')",
     )
     .bind(request_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_plan_id)
     .bind(plan_version_id)
     .bind(binding_id)
@@ -716,7 +716,7 @@ async fn assert_confirmation_effects(fixture: &BillingConfirmationFixture) {
             .fetch_one(&pool)
             .await
             .expect("customer id");
-    assert_eq!(customer_id, fixture.workspace_id);
+    assert_eq!(customer_id, fixture.account_id);
 }
 
 fn provider_payment_id(command: &CollectionCommand) -> String {

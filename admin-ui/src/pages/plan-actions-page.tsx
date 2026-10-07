@@ -49,45 +49,45 @@ interface TransitionInput {
 }
 
 export function PlanActionsPage() {
-  const { workspaceId, planId } = useParams();
-  if (!workspaceId || !planId) return <p>Plano ou workspace ausente.</p>;
-  return <PlanActions workspaceId={workspaceId} planId={planId} />;
+  const { accountId, planId } = useParams();
+  if (!accountId || !planId) return <p>Plano ou account ausente.</p>;
+  return <PlanActions accountId={accountId} planId={planId} />;
 }
 
 function PlanActions({
-  workspaceId,
+  accountId,
   planId,
 }: {
-  workspaceId: string;
+  accountId: string;
   planId: string;
 }) {
   const client = useQueryClient();
   const [transitionReview, setTransitionReview] =
     useState<TransitionInput | null>(null);
   const plan = useQuery({
-    queryKey: ["customer-plan", workspaceId, planId],
-    queryFn: () => getCustomerPlan(workspaceId, planId),
+    queryKey: ["customer-plan", accountId, planId],
+    queryFn: () => getCustomerPlan(accountId, planId),
   });
   const refresh = async () => {
     await client.invalidateQueries({
-      queryKey: ["customer-plan", workspaceId, planId],
+      queryKey: ["customer-plan", accountId, planId],
     });
-    await client.invalidateQueries({ queryKey: ["plans", workspaceId] });
+    await client.invalidateQueries({ queryKey: ["plans", accountId] });
   };
   const cancel = useMutation({
-    mutationFn: () => cancelCustomerPlan(workspaceId, planId),
+    mutationFn: () => cancelCustomerPlan(accountId, planId),
     onSuccess: refresh,
   });
   const revoke = useMutation({
     mutationFn: (body: { reason: string; actor_reference: string }) =>
-      revokeCustomerPlan(workspaceId, planId, body),
+      revokeCustomerPlan(accountId, planId, body),
     onSuccess: refresh,
   });
   const transition = useMutation({
     mutationFn: async (input: TransitionInput) => {
-      const scope = `transition:${workspaceId}:${planId}`;
+      const scope = `transition:${accountId}:${planId}`;
       const result = await transitionCustomerPlan(
-        workspaceId,
+        accountId,
         planId,
         pendingKey(scope, input.transactionId),
         {
@@ -130,9 +130,9 @@ function PlanActions({
       <header className="flex flex-col gap-2">
         <Link
           className="text-sm text-primary hover:underline"
-          to={`/workspaces/${workspaceId}`}
+          to={`/accounts/${accountId}`}
         >
-          ← Voltar ao workspace
+          ← Voltar ao account
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight">
           Ações do plano

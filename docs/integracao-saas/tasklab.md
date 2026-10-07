@@ -17,7 +17,7 @@ flowchart LR
 
 - `example/web` cuida da interface, sessão no navegador, formulários e
   apresentação de saldo, checkouts e execuções.
-- `example/backend` autentica a conta da POC, associa-a a um workspace da
+- `example/backend` autentica a conta da POC, associa-a a um account da
   Subscription e chama a Subscription via `SubscriptionClient` (`reqwest`).
 - A Subscription é dona do catálogo comercial, plano do cliente, billing,
   carteiras, extratos, elegibilidade, medição de uso e confirmação de pagamento.
@@ -27,16 +27,16 @@ flowchart LR
 - No sandbox, o Stripe CLI encaminha webhooks diretamente para a Subscription.
   TaskLab não recebe webhooks de pagamento.
 
-## Identidade e provisionamento do workspace
+## Identidade e provisionamento do account
 
-Ao registrar uma conta, TaskLab gera UUIDs separados para o usuário, o workspace
-de cobrança da Subscription, os eventos `workspace.created` e
-`workspace.activated` e o `correlation_id`. O workspace identifica a conta que
-paga; não representa cada tarefa ou workspace de infraestrutura.
+Ao registrar uma conta, TaskLab gera UUIDs separados para o usuário, o account
+de cobrança da Subscription, os eventos `account.created` e
+`account.activated` e o `correlation_id`. O account identifica a conta que
+paga; não representa cada tarefa ou account de infraestrutura.
 
-Depois do registro e também no login, `provision_workspace` envia os dois
-eventos para `POST /v1/internal/accounts/workspace-events`, na ordem `sequence`
-1 e 2. O envelope tem `schema_version: 1`, `aggregate_id` e `workspace_id` com o
+Depois do registro e também no login, `provision_account` envia os dois
+eventos para `POST /v1/internal/accounts/account-events`, na ordem `sequence`
+1 e 2. O envelope tem `schema_version: 1`, `aggregate_id` e `account_id` com o
 mesmo UUID, os IDs estáveis de evento e a relação de causação do evento de
 ativação. A TaskLab assina os bytes serializados do corpo com HMAC-SHA256 de
 `<timestamp Unix>.<corpo>` e envia `x-runvibe-timestamp` e
@@ -44,7 +44,7 @@ ativação. A TaskLab assina os bytes serializados do corpo com HMAC-SHA256 de
 `ACCOUNTS_WEBHOOK_SECRET` nos dois serviços. Reenvios no login reutilizam IDs e
 conteúdo, permitindo à inbox da Subscription deduplicar a entrega.
 
-O UUID de workspace é criado localmente pela TaskLab e enviado no evento; a API
+O UUID de account é criado localmente pela TaskLab e enviado no evento; a API
 de aplicação não provisiona uma identidade de usuário ou associação de membros
 na Subscription. Autenticação, senha (hash Argon2), sessões e autorização da
 conta pertencem à TaskLab.
@@ -79,13 +79,13 @@ SQLite para evitar criar outro catálogo. As chamadas relevantes são
 O onboarding oferece duas opções:
 
 1. **Pré-pago:** `POST /api/plan` chama `choose_plan`, que cria um customer plan
-   para o plano FREE via `POST /v1/workspaces/{workspace_id}/customer-plans`.
+   para o plano FREE via `POST /v1/accounts/{account_id}/customer-plans`.
    A chave de idempotência usada na Subscription é
-   `tasklab-free:{workspace_id}`. A TaskLab persiste `plan_model=PREPAID` e o
+   `tasklab-free:{account_id}`. A TaskLab persiste `plan_model=PREPAID` e o
    `customer_plan_id`.
 2. **Assinatura mensal:** o onboarding inicia diretamente um checkout inicial.
    O backend ativa `recurring_credit_enabled` em
-   `/v1/workspaces/{workspace_id}/billing-config` com controle otimista por
+   `/v1/accounts/{account_id}/billing-config` com controle otimista por
    `expected_version`, cria o customer plan do plano PAID com chave
    `tasklab-plan:{transaction_id}`, e guarda `plan_model=SUBSCRIPTION` e o ID
    localmente antes de solicitar o checkout.
@@ -112,10 +112,10 @@ envia à Subscription:
 ```
 
 Para o checkout `INITIAL`, `on_demand_plan_id` é omitido. A rota remota é
-`POST /v1/workspaces/{workspace_id}/checkouts`; a resposta fornece
+`POST /v1/accounts/{account_id}/checkouts`; a resposta fornece
 `checkout_id`, status, valor, moeda, créditos concedidos e, se criado, a
 referência de cobrança. TaskLab persiste uma referência e consulta o estado em
-`GET /v1/workspaces/{workspace_id}/checkouts/{checkout_id}`. A resposta de
+`GET /v1/accounts/{account_id}/checkouts/{checkout_id}`. A resposta de
 criação `PENDING` é devolvida como HTTP 202 pela API TaskLab; o frontend consulta
 até sair de `PENDING` e então atualiza o painel.
 
@@ -139,9 +139,9 @@ TaskLab.
    cobranças futuras `off_session`.
 3. Após a confirmação, a Stripe retorna à TaskLab com
    `payment_method_setup_id`. O backend encaminha esse ID e o nome opcional à
-   `POST /v1/workspaces/{workspace_id}/payment-method-bindings`.
+   `POST /v1/accounts/{account_id}/payment-method-bindings`.
 4. Subscription recupera e valida o Checkout Session e o SetupIntent, confere
-   workspace, Customer, CustomerPlan e integração ativa e então cria o vínculo.
+   account, Customer, CustomerPlan e integração ativa e então cria o vínculo.
    TaskLab usa o ID do vínculo em checkouts futuros. Ao cancelar, o usuário volta
    à TaskLab sem criar vínculo.
 
@@ -152,15 +152,15 @@ navegador durante o redirecionamento e só é salvo com o vínculo confirmado.
 Para sandbox, configure `BILLING_SANDBOX_ENABLED=true`, `STRIPE_SECRET_KEY`
 `sk_test_...` e `STRIPE_WEBHOOK_SECRET` `whsec_...` no ambiente da Subscription.
 No primeiro setup, a Subscription provisiona e ativa a integração Stripe
-`TEST` daquele workspace. Use um cartão de teste na página hospedada da
+`TEST` daquele account. Use um cartão de teste na página hospedada da
 Stripe. `make run` inicia o Stripe CLI quando o sandbox está ligado; o script
 valida o segredo do listener e encaminha `checkout.session.completed` (que
 confirma pagamentos hospedados), além dos eventos `payment_intent.*` usados
 pelas cobranças de renovação off-session, diretamente à Subscription.
 
 Em produção, configure as credenciais padrão `LIVE` e o segredo de webhook na
-área administrativa da Subscription. No primeiro setup, cada workspace recebe
-sua integração Stripe `LIVE`; isso também recupera workspaces criados antes da
+área administrativa da Subscription. No primeiro setup, cada account recebe
+sua integração Stripe `LIVE`; isso também recupera accounts criados antes da
 configuração dos padrões. O usuário percorre a mesma página hospedada e o mesmo
 retorno. A Subscription escolhe a integração e as credenciais a partir do
 ambiente configurado, sem alternância de fluxo na TaskLab.
@@ -169,15 +169,15 @@ ambiente configurado, sem alternância de fluxo na TaskLab.
 
 `GET /api/dashboard` combina dados locais com leituras da Subscription:
 
-- `/v1/workspaces/{workspace_id}/customer-wallet/statement?limit=50`: extrato
+- `/v1/accounts/{account_id}/customer-wallet/statement?limit=50`: extrato
   da carteira principal, incluindo créditos concedidos e débitos;
-- `/v1/workspaces/{workspace_id}/products/{product_id}/eligibility`: acesso ao
+- `/v1/accounts/{account_id}/products/{product_id}/eligibility`: acesso ao
   produto e saldo elegível;
-- `/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet`: medidor e custo
+- `/v1/accounts/{account_id}/items/{item_id}/item-wallet`: medidor e custo
   do próximo bloco;
-- `/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement?limit=50`:
+- `/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement?limit=50`:
   histórico do medidor;
-- `/v1/workspaces/{workspace_id}/payment-method-bindings`: cartões tokenizados
+- `/v1/accounts/{account_id}/payment-method-bindings`: cartões tokenizados
   salvos para a conta;
 - SQLite local: últimas 20 referências de checkout e últimas 20 execuções.
 
@@ -187,8 +187,8 @@ exibe créditos usando os dados retornados pela Subscription, não calcula saldo
 partir do SQLite.
 
 Para remover um cartão salvo, TaskLab chama a rota autenticada
-`DELETE /v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}` da
-Subscription. A Subscription valida o workspace, desanexa o método na Stripe e
+`DELETE /v1/accounts/{account_id}/payment-method-bindings/{binding_id}` da
+Subscription. A Subscription valida o account, desanexa o método na Stripe e
 marca o vínculo como `DETACHED`, preservando o histórico de cobranças. A remoção
 é idempotente para vínculos já desanexados.
 
@@ -201,7 +201,7 @@ medidor. Essas leituras são informativas: a TaskLab ainda precisa chamar o
 comando transacional de uso, que revalida saldo, entitlement, carteira e preço
 na Subscription.
 
-A chamada é `POST /v1/workspaces/{workspace_id}/usage-events`, com uma chave
+A chamada é `POST /v1/accounts/{account_id}/usage-events`, com uma chave
 `tasklab-usage:{user_id}:{transaction_id}` e corpo equivalente a:
 
 ```json
@@ -231,8 +231,8 @@ Rotas em `example/backend/src/routes.rs`:
 
 | Método e caminho | Uso |
 | --- | --- |
-| `POST /api/auth/register` | Cria conta, provisiona workspace, abre sessão |
-| `POST /api/auth/login` | Autentica, reenvia eventos de workspace, abre sessão |
+| `POST /api/auth/register` | Cria conta, provisiona account, abre sessão |
+| `POST /api/auth/login` | Autentica, reenvia eventos de account, abre sessão |
 | `POST /api/auth/logout`, `GET /api/me` | Encerra ou consulta sessão |
 | `POST /api/plan` | Seleciona a opção pré-paga FREE |
 | `GET /api/dashboard` | Agrega carteira, catálogo, medidor e histórico |
@@ -258,7 +258,7 @@ desenvolvimento encaminha à API local.
 | `APP_HOST`, `APP_PORT` | Listener do backend TaskLab; padrão `127.0.0.1:3001` |
 | `DATABASE_URL` | SQLite local da TaskLab |
 | `SUBSCRIPTION_API_URL` | Endereço HTTP da Subscription; local padrão `:3000` |
-| `ACCOUNTS_WEBHOOK_SECRET` | Segredo compartilhado para assinar eventos de workspace |
+| `ACCOUNTS_WEBHOOK_SECRET` | Segredo compartilhado para assinar eventos de account |
 | `APP_PUBLIC_URL` | Origin público do frontend TaskLab usado nas URLs de retorno; HTTPS em produção e `http://localhost:5174` local |
 
 Copie para `example/.env`, use o mesmo segredo de webhook nos dois serviços,

@@ -29,7 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_billing_connection))
         .routes(routes!(get_billing_capabilities))
         .routes(routes!(create_payment_method_setup_session))
-        .routes(routes!(create_workspace_payment_method_setup_session))
+        .routes(routes!(create_account_payment_method_setup_session))
         .routes(routes!(create_payment_method_from_card))
         .routes(routes!(receive_shared_stripe_webhook))
         .routes(routes!(create_payment_method_binding))
@@ -44,14 +44,14 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_renewal_regularization))
 }
 
-#[utoipa::path(get, path = "/v1/admin/workspaces/{workspace_id}/billing/unmatched-payments", tag = "Operations",
-    params(("workspace_id" = Uuid, Path)), responses((status = 200, body = [UnmatchedPaymentCaseResponse])))]
+#[utoipa::path(get, path = "/v1/admin/accounts/{account_id}/billing/unmatched-payments", tag = "Operations",
+    params(("account_id" = Uuid, Path)), responses((status = 200, body = [UnmatchedPaymentCaseResponse])))]
 async fn list_unmatched_payments(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<UnmatchedPaymentCaseResponse>>> {
     Ok(Json(
-        billing::list_unmatched_payments(&state.database(), workspace_id).await?,
+        billing::list_unmatched_payments(&state.database(), account_id).await?,
     ))
 }
 
@@ -63,19 +63,19 @@ async fn get_billing_operations(
     Ok(Json(state.database().billing_operations().await?))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/collection-requests", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/collection-requests", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateInitialCollectionRequest,
     responses((status = 202, body = CollectionRequestResponse), (status = 409, body = ErrorResponse)))]
 async fn create_initial_collection(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(request): Json<CreateInitialCollectionRequest>,
 ) -> ApiResult<(StatusCode, Json<CollectionRequestResponse>)> {
     let response = billing::create_initial_collection(
         &state.database(),
-        workspace_id,
+        account_id,
         customer_plan_id,
         idempotency_key(&headers)?,
         &request,
@@ -84,34 +84,34 @@ async fn create_initial_collection(
     Ok((StatusCode::ACCEPTED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/collection-requests/{collection_request_id}", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("collection_request_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/collection-requests/{collection_request_id}", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("collection_request_id" = Uuid, Path)),
     responses((status = 200, body = CollectionRequestResponse), (status = 404, body = ErrorResponse)))]
 async fn get_collection_request(
     State(state): State<AppState>,
-    Path((workspace_id, collection_request_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, collection_request_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<CollectionRequestResponse>> {
     Ok(Json(
         state
             .database()
-            .find_collection_request(workspace_id, collection_request_id)
+            .find_collection_request(account_id, collection_request_id)
             .await?,
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/on-demand-purchases", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/on-demand-purchases", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateOnDemandPurchaseRequest,
     responses((status = 201, body = CollectionRequestResponse), (status = 409, body = ErrorResponse)))]
 async fn create_on_demand_purchase(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(request): Json<CreateOnDemandPurchaseRequest>,
 ) -> ApiResult<(StatusCode, Json<CollectionRequestResponse>)> {
     let response = billing::create_on_demand_purchase(
         &state.database(),
-        workspace_id,
+        account_id,
         customer_plan_id,
         idempotency_key(&headers)?,
         &request,
@@ -183,19 +183,19 @@ async fn receive_shared_stripe_webhook(
     Ok(Json(result))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/billing-connections/{connection_id}/payment-method-setup-sessions", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("connection_id" = Uuid, Path)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/billing-connections/{connection_id}/payment-method-setup-sessions", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("connection_id" = Uuid, Path)),
     request_body = CreatePaymentMethodSetupSessionRequest,
     responses((status = 201, body = PaymentMethodSetupSessionResponse), (status = 422, body = ErrorResponse)))]
 async fn create_payment_method_setup_session(
     State(state): State<AppState>,
-    Path((workspace_id, connection_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, connection_id)): Path<(Uuid, Uuid)>,
     Json(request): Json<CreatePaymentMethodSetupSessionRequest>,
 ) -> ApiResult<(StatusCode, Json<PaymentMethodSetupSessionResponse>)> {
-    billing::get_billing_connection(&state.database(), workspace_id, connection_id).await?;
+    billing::get_billing_connection(&state.database(), account_id, connection_id).await?;
     let response = billing::create_payment_method_setup_session(
         &state.database(),
-        workspace_id,
+        account_id,
         connection_id,
         &request,
     )
@@ -203,40 +203,40 @@ async fn create_payment_method_setup_session(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/payment-method-setup-sessions", tag = "Billing",
-    params(("workspace_id" = Uuid, Path)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/payment-method-setup-sessions", tag = "Billing",
+    params(("account_id" = Uuid, Path)),
     request_body = CreatePaymentMethodSetupSessionRequest,
     responses((status = 201, body = PaymentMethodSetupSessionResponse), (status = 422, body = ErrorResponse)))]
-async fn create_workspace_payment_method_setup_session(
+async fn create_account_payment_method_setup_session(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     Json(request): Json<CreatePaymentMethodSetupSessionRequest>,
 ) -> ApiResult<(StatusCode, Json<PaymentMethodSetupSessionResponse>)> {
     let sandbox_config = state.billing_checkout_config();
-    let response = billing::create_workspace_payment_method_setup_session(
+    let response = billing::create_account_payment_method_setup_session(
         &state.database(),
         sandbox_config.as_ref(),
-        workspace_id,
+        account_id,
         &request,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/payment-methods/from-card", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/payment-methods/from-card", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreatePaymentMethodFromCardRequest,
     responses((status = 201, body = CreatePaymentMethodFromCardResponse), (status = 422, body = ErrorResponse)))]
 async fn create_payment_method_from_card(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     headers: HeaderMap,
     Json(request): Json<CreatePaymentMethodFromCardRequest>,
 ) -> ApiResult<(StatusCode, Json<CreatePaymentMethodFromCardResponse>)> {
     let response = billing::create_payment_method_from_card(
         &state.database(),
         state.billing_checkout_config().as_ref(),
-        workspace_id,
+        account_id,
         idempotency_key(&headers)?,
         &request,
     )
@@ -244,82 +244,82 @@ async fn create_payment_method_from_card(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/billing-connections", tag = "Billing",
-    params(("workspace_id" = Uuid, Path)), request_body = CreateBillingConnectionRequest,
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/billing-connections", tag = "Billing",
+    params(("account_id" = Uuid, Path)), request_body = CreateBillingConnectionRequest,
     responses((status = 201, body = BillingConnectionResponse), (status = 422, body = ErrorResponse)))]
 async fn create_billing_connection(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     Json(request): Json<CreateBillingConnectionRequest>,
 ) -> ApiResult<(StatusCode, Json<BillingConnectionResponse>)> {
     let response =
-        billing::create_billing_connection(&state.database(), workspace_id, &request).await?;
+        billing::create_billing_connection(&state.database(), account_id, &request).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/billing-connections/{connection_id}", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("connection_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/billing-connections/{connection_id}", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("connection_id" = Uuid, Path)),
     responses((status = 200, body = BillingConnectionResponse), (status = 404, body = ErrorResponse)))]
 async fn get_billing_connection(
     State(state): State<AppState>,
-    Path((workspace_id, connection_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<BillingConnectionResponse>> {
     Ok(Json(
-        billing::get_billing_connection(&state.database(), workspace_id, connection_id).await?,
+        billing::get_billing_connection(&state.database(), account_id, connection_id).await?,
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/billing-connections/{connection_id}/capabilities", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("connection_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/billing-connections/{connection_id}/capabilities", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("connection_id" = Uuid, Path)),
     responses((status = 200, body = BillingCapabilitiesResponse), (status = 404, body = ErrorResponse)))]
 async fn get_billing_capabilities(
     State(state): State<AppState>,
-    Path((workspace_id, connection_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, connection_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<BillingCapabilitiesResponse>> {
-    billing::get_billing_connection(&state.database(), workspace_id, connection_id).await?;
+    billing::get_billing_connection(&state.database(), account_id, connection_id).await?;
     Ok(Json(billing::billing_capabilities()))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/payment-method-bindings", tag = "Billing",
-    params(("workspace_id" = Uuid, Path)), request_body = CreatePaymentMethodBindingRequest,
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/payment-method-bindings", tag = "Billing",
+    params(("account_id" = Uuid, Path)), request_body = CreatePaymentMethodBindingRequest,
     responses((status = 201, body = CustomerPaymentMethodBindingResponse), (status = 409, body = ErrorResponse)))]
 async fn create_payment_method_binding(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     Json(request): Json<CreatePaymentMethodBindingRequest>,
 ) -> ApiResult<(StatusCode, Json<CustomerPaymentMethodBindingResponse>)> {
     let response =
-        billing::create_payment_method_binding(&state.database(), workspace_id, &request).await?;
+        billing::create_payment_method_binding(&state.database(), account_id, &request).await?;
     Ok((StatusCode::CREATED, Json(response.into())))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/payment-method-bindings", tag = "Billing",
-    params(("workspace_id" = Uuid, Path)), responses((status = 200, body = [CustomerPaymentMethodBindingResponse])))]
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/payment-method-bindings", tag = "Billing",
+    params(("account_id" = Uuid, Path)), responses((status = 200, body = [CustomerPaymentMethodBindingResponse])))]
 async fn list_payment_method_bindings(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<CustomerPaymentMethodBindingResponse>>> {
-    let bindings = billing::list_payment_method_bindings(&state.database(), workspace_id).await?;
+    let bindings = billing::list_payment_method_bindings(&state.database(), account_id).await?;
     Ok(Json(bindings.into_iter().map(Into::into).collect()))
 }
 
-#[utoipa::path(delete, path = "/v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}", tag = "Billing",
-    params(("workspace_id" = Uuid, Path), ("binding_id" = Uuid, Path)),
+#[utoipa::path(delete, path = "/v1/accounts/{account_id}/payment-method-bindings/{binding_id}", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("binding_id" = Uuid, Path)),
     responses((status = 204), (status = 404, body = ErrorResponse), (status = 409, body = ErrorResponse)))]
 async fn remove_payment_method_binding(
     State(state): State<AppState>,
-    Path((workspace_id, binding_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, binding_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<StatusCode> {
-    billing::remove_payment_method_binding(&state.database(), workspace_id, binding_id).await?;
+    billing::remove_payment_method_binding(&state.database(), account_id, binding_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
     post,
-    path = "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/renewal-regularizations",
+    path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/renewal-regularizations",
     tag = "Billing",
     params(
-        ("workspace_id" = Uuid, Path),
+        ("account_id" = Uuid, Path),
         ("customer_plan_id" = Uuid, Path),
         ("Idempotency-Key" = String, Header)
     ),
@@ -333,13 +333,13 @@ async fn remove_payment_method_binding(
 )]
 async fn create_renewal_regularization(
     State(state): State<AppState>,
-    Path((workspace_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
     headers: HeaderMap,
     Json(request): Json<CreateRenewalRegularizationRequest>,
 ) -> ApiResult<(StatusCode, Json<CollectionRequestResponse>)> {
     let response = billing::create_renewal_regularization(
         &state.database(),
-        workspace_id,
+        account_id,
         customer_plan_id,
         idempotency_key(&headers)?,
         &request,

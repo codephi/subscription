@@ -22,7 +22,7 @@ pub struct StartedCollectionAttempt {
 
 pub struct DueCollectionAttempt {
     pub collection_request_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub external_account_reference: String,
@@ -32,7 +32,7 @@ pub struct DueCollectionAttempt {
 impl DatabaseRepository {
     pub async fn find_due_collection_attempt(&self) -> ApiResult<Option<DueCollectionAttempt>> {
         let row = sqlx::query(
-            "SELECT cr.collection_request_id,bc.workspace_id,bc.billing_connection_id,bc.provider,bc.external_account_reference,bc.secret_reference \
+            "SELECT cr.collection_request_id,bc.account_id,bc.billing_connection_id,bc.provider,bc.external_account_reference,bc.secret_reference \
              FROM collection_requests cr JOIN payment_method_bindings pmb USING(payment_method_binding_id) \
              JOIN billing_connections bc USING(billing_connection_id) WHERE cr.status='SCHEDULED' \
              AND cr.attempts_started=0 AND cr.scheduled_at<=clock_timestamp() \
@@ -44,7 +44,7 @@ impl DatabaseRepository {
         .await?;
         Ok(row.map(|row| DueCollectionAttempt {
             collection_request_id: row.get("collection_request_id"),
-            workspace_id: row.get("workspace_id"),
+            account_id: row.get("account_id"),
             billing_connection_id: row.get("billing_connection_id"),
             provider: row.get("provider"),
             external_account_reference: row.get("external_account_reference"),
@@ -113,9 +113,9 @@ async fn lock_scheduled_request(
            AS provider_customer_reference \
          FROM collection_requests cr JOIN payment_method_bindings pmb \
            ON pmb.payment_method_binding_id=cr.payment_method_binding_id \
-           AND pmb.workspace_id=cr.workspace_id AND pmb.customer_id=cr.customer_id \
+           AND pmb.account_id=cr.account_id AND pmb.customer_id=cr.customer_id \
          JOIN billing_connections bc ON bc.billing_connection_id=pmb.billing_connection_id \
-           AND bc.workspace_id=cr.workspace_id \
+           AND bc.account_id=cr.account_id \
          WHERE cr.collection_request_id=$1 AND cr.status='SCHEDULED' \
            AND cr.attempts_started=0 AND cr.scheduled_at<=clock_timestamp() FOR UPDATE OF cr",
     )
@@ -361,8 +361,8 @@ async fn insert_attempt_event(
     event_type: &str,
     sequence: i64,
 ) -> ApiResult<()> {
-    let workspace_id: Uuid = sqlx::query_scalar(
-        "SELECT workspace_id FROM collection_requests WHERE collection_request_id=$1",
+    let account_id: Uuid = sqlx::query_scalar(
+        "SELECT account_id FROM collection_requests WHERE collection_request_id=$1",
     )
     .bind(attempt.request_id)
     .fetch_one(&mut **transaction)
@@ -375,14 +375,14 @@ async fn insert_attempt_event(
     .fetch_one(&mut **transaction)
     .await?;
     let payload = json!({"billing_event_id":event_id,"event_type":event_type,"schema_version":1,
-        "occurred_at":Utc::now(),"workspace_id":workspace_id,"correlation_id":correlation_id,
+        "occurred_at":Utc::now(),"account_id":account_id,"correlation_id":correlation_id,
         "collection_request_id":attempt.request_id,"collection_attempt_id":attempt.attempt_id,"attempt_number":1});
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) VALUES ($1,$2,'collection_request',$3,$4,$5,$6,$7)",
+         account_id,correlation_id,payload) VALUES ($1,$2,'collection_request',$3,$4,$5,$6,$7)",
     )
     .bind(event_id).bind(event_type).bind(attempt.request_id).bind(sequence)
-    .bind(workspace_id).bind(correlation_id).bind(payload)
+    .bind(account_id).bind(correlation_id).bind(payload)
     .execute(&mut **transaction).await?;
     Ok(())
 }

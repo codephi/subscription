@@ -1,16 +1,16 @@
 import { api, unwrapResponse } from "./client";
 import type { components } from "./generated";
-import { listWorkspaces } from "./client";
+import { listAccounts } from "./client";
 import { listCatalogEntries } from "./catalog-api";
 
 type QuoteRequest = components["schemas"]["CheckoutQuoteRequest"];
 type CreateRequest = components["schemas"]["CreateCheckoutRequest"];
 
 /** Quote a coupon against a published initial plan or on-demand credit offer. */
-export async function quoteCheckout(workspaceId: string, body: QuoteRequest) {
+export async function quoteCheckout(accountId: string, body: QuoteRequest) {
   return unwrapResponse(
-    await api.POST("/v1/workspaces/{workspace_id}/checkout-quotes", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.POST("/v1/accounts/{account_id}/checkout-quotes", {
+      params: { path: { account_id: accountId } },
       body,
     }),
   );
@@ -18,14 +18,14 @@ export async function quoteCheckout(workspaceId: string, body: QuoteRequest) {
 
 /** Start an idempotent checkout and retain the server's checkout identifier. */
 export async function createCheckout(
-  workspaceId: string,
+  accountId: string,
   idempotencyKey: string,
   body: CreateRequest,
 ) {
   return unwrapResponse(
-    await api.POST("/v1/workspaces/{workspace_id}/checkouts", {
+    await api.POST("/v1/accounts/{account_id}/checkouts", {
       params: {
-        path: { workspace_id: workspaceId },
+        path: { account_id: accountId },
         header: { "Idempotency-Key": idempotencyKey },
       },
       body,
@@ -34,16 +34,16 @@ export async function createCheckout(
 }
 
 /** Recover a checkout after a lost response or page reload. */
-export async function getCheckout(workspaceId: string, checkoutId: string) {
+export async function getCheckout(accountId: string, checkoutId: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/checkouts/{checkout_id}", {
-      params: { path: { workspace_id: workspaceId, checkout_id: checkoutId } },
+    await api.GET("/v1/accounts/{account_id}/checkouts/{checkout_id}", {
+      params: { path: { account_id: accountId, checkout_id: checkoutId } },
     }),
   );
 }
 
-export async function listCheckoutWorkspaces() {
-  return listWorkspaces();
+export async function listCheckoutAccounts() {
+  return listAccounts();
 }
 
 export async function listCheckoutPlans() {
@@ -54,32 +54,32 @@ export async function listCheckoutOffers(subscriptionId?: string) {
   return listCatalogEntries("on-demand", undefined, subscriptionId);
 }
 
-export async function listCheckoutCustomerPlans(workspaceId: string) {
+export async function listCheckoutCustomerPlans(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/admin/workspaces/{workspace_id}/customer-plans", {
-      params: { path: { workspace_id: workspaceId }, query: { limit: 100 } },
+    await api.GET("/v1/admin/accounts/{account_id}/customer-plans", {
+      params: { path: { account_id: accountId }, query: { limit: 100 } },
     }),
   );
 }
 
-export async function getCheckoutPaymentMethods(workspaceId: string) {
+export async function getCheckoutPaymentMethods(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/payment-method-bindings", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.GET("/v1/accounts/{account_id}/payment-method-bindings", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
 export async function createCheckoutCustomerPlan(
-  workspaceId: string,
+  accountId: string,
   idempotencyKey: string,
   planVersionId: string,
   transactionId: string,
 ) {
   return unwrapResponse(
-    await api.POST("/v1/workspaces/{workspace_id}/customer-plans", {
+    await api.POST("/v1/accounts/{account_id}/customer-plans", {
       params: {
-        path: { workspace_id: workspaceId },
+        path: { account_id: accountId },
         header: { "Idempotency-Key": idempotencyKey },
       },
       body: { plan_version_id: planVersionId, transaction_id: transactionId },

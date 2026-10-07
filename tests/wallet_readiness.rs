@@ -20,7 +20,7 @@ async fn returning_scope_requires_active_hierarchy_before_any_new_effect() {
     let fixture = setup_two_item_usage(1, 10).await;
     let original = fixture
         .repository
-        .find_wallet_hierarchy(fixture.workspace_id)
+        .find_wallet_hierarchy(fixture.account_id)
         .await
         .unwrap();
     change_first_item(&fixture, CatalogStatus::Inactive).await;
@@ -32,7 +32,7 @@ async fn returning_scope_requires_active_hierarchy_before_any_new_effect() {
     assert_recovered_scope(&fixture, original.scope_version).await;
     let restored = fixture
         .repository
-        .find_wallet_hierarchy(fixture.workspace_id)
+        .find_wallet_hierarchy(fixture.account_id)
         .await
         .unwrap();
     assert_eq!(
@@ -61,7 +61,7 @@ async fn historical_provisioning_counts_do_not_hide_missing_wallet_components() 
         statement
             .push(table)
             .push(" WHERE wallet_id=(SELECT wallet_id FROM wallets WHERE customer_id=")
-            .push_bind(fixture.workspace_id)
+            .push_bind(fixture.account_id)
             .push(" AND item_id=")
             .push_bind(fixture.item_ids[0])
             .push(")");
@@ -71,7 +71,7 @@ async fn historical_provisioning_counts_do_not_hide_missing_wallet_components() 
         reconcile_scope(&fixture).await;
         let restored = fixture
             .repository
-            .find_wallet_hierarchy(fixture.workspace_id)
+            .find_wallet_hierarchy(fixture.account_id)
             .await
             .unwrap();
         assert!(restored.ready);
@@ -102,7 +102,7 @@ async fn change_first_item(fixture: &MultiItemUsageFixture, status: CatalogStatu
 async fn reconcile_scope(fixture: &MultiItemUsageFixture) {
     let result = fixture
         .repository
-        .reconcile_wallets(fixture.workspace_id, Some("test:readiness"))
+        .reconcile_wallets(fixture.account_id, Some("test:readiness"))
         .await
         .unwrap();
     assert_eq!(result.status, WalletStatus::Active);
@@ -111,13 +111,13 @@ async fn reconcile_scope(fixture: &MultiItemUsageFixture) {
 async fn assert_unready_scope(fixture: &MultiItemUsageFixture) {
     let hierarchy = fixture
         .repository
-        .find_wallet_hierarchy(fixture.workspace_id)
+        .find_wallet_hierarchy(fixture.account_id)
         .await
         .unwrap();
     assert!(!hierarchy.ready);
     let provisioning = fixture
         .repository
-        .find_wallet_provisioning(fixture.workspace_id)
+        .find_wallet_provisioning(fixture.account_id)
         .await
         .unwrap();
     assert_eq!(provisioning.status, WalletStatus::Provisioning);
@@ -128,24 +128,21 @@ async fn assert_incomplete_scope_rejects_effects(fixture: &MultiItemUsageFixture
     let before = readiness_financial_snapshot(fixture).await;
     let credit = credits::grant_direct_credit(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "readiness-credit",
         readiness_credit_request(),
     )
     .await
     .unwrap_err();
     assert_eq!(credit.code(), "wallet_not_provisioned");
-    let eligibility = usage::eligibility(
-        &fixture.repository,
-        fixture.workspace_id,
-        fixture.product_id,
-    )
-    .await
-    .unwrap_err();
+    let eligibility =
+        usage::eligibility(&fixture.repository, fixture.account_id, fixture.product_id)
+            .await
+            .unwrap_err();
     assert_eq!(eligibility.code(), "wallet_not_provisioned");
     let consumption = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "readiness-usage",
         readiness_usage_request(fixture),
     )
@@ -158,7 +155,7 @@ async fn assert_incomplete_scope_rejects_effects(fixture: &MultiItemUsageFixture
 async fn assert_recovered_scope(fixture: &MultiItemUsageFixture, scope: uuid::Uuid) {
     let hierarchy = fixture
         .repository
-        .find_wallet_hierarchy(fixture.workspace_id)
+        .find_wallet_hierarchy(fixture.account_id)
         .await
         .unwrap();
     assert!(hierarchy.ready);
@@ -172,7 +169,7 @@ async fn assert_recovered_scope(fixture: &MultiItemUsageFixture, scope: uuid::Uu
     assert_eq!(readiness_financial_snapshot(fixture).await, before_retry);
     let credit = credits::grant_direct_credit(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "readiness-credit",
         readiness_credit_request(),
     )
@@ -181,7 +178,7 @@ async fn assert_recovered_scope(fixture: &MultiItemUsageFixture, scope: uuid::Uu
     assert_eq!(credit.entry.balance_after_credit_units.value(), 11);
     usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "readiness-usage",
         readiness_usage_request(fixture),
     )

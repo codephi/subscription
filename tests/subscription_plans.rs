@@ -39,7 +39,7 @@ use uuid::Uuid;
 
 use subscription_plan_contract::{assert_plan_swagger, get_json};
 use subscription_plan_requests::{
-    apply_workspace_event, customer_plan_request, paid_plan_request, plan_request,
+    apply_account_event, customer_plan_request, paid_plan_request, plan_request,
     revoke_plan_request, subscription_request,
 };
 use subscription_plan_transition::{
@@ -52,30 +52,30 @@ static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn subscription_cycle_grant_and_expiry_are_unique() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (router, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (router, pool, repository, account_id, product_id) = setup_active_account().await;
     let plan = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 100).await;
-    let customer_plan = join_plan(&repository, workspace_id, plan.plan_version_id, "cycle").await;
+    let customer_plan = join_plan(&repository, account_id, plan.plan_version_id, "cycle").await;
     let first_end = customer_plan
         .current_cycle
         .expect("initial cycle")
         .current_period_end
         .expect("period end");
 
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 100).await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 100).await;
     let advanced = plans::run_due_cycles(&repository, first_end)
         .await
         .expect("advance cycle");
     assert_eq!(advanced.created_cycles, 1);
-    assert_plan_state(&pool, workspace_id, 1, 2, 3, 100).await;
+    assert_plan_state(&pool, account_id, 1, 2, 3, 100).await;
     let repeated = plans::run_due_cycles(&repository, first_end)
         .await
         .expect("repeat cycle");
     assert_eq!(repeated.created_cycles, 0);
-    assert_plan_state(&pool, workspace_id, 1, 2, 3, 100).await;
+    assert_plan_state(&pool, account_id, 1, 2, 3, 100).await;
 
     let statement = get_json(
         &router,
-        &format!("/v1/workspaces/{workspace_id}/customer-wallet/statement?limit=10"),
+        &format!("/v1/accounts/{account_id}/customer-wallet/statement?limit=10"),
     )
     .await;
     assert_eq!(
@@ -92,24 +92,24 @@ async fn subscription_cycle_grant_and_expiry_are_unique() {
         4
     );
     let expiry_events: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_events WHERE workspace_id=$1 AND event_type='credit.expired'",
+        "SELECT count(*) FROM outbox_events WHERE account_id=$1 AND event_type='credit.expired'",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&pool)
     .await
     .expect("expiry event count");
     assert_eq!(expiry_events, 1);
-    revoke_for_cleanup(&repository, workspace_id, customer_plan.customer_plan_id).await;
+    revoke_for_cleanup(&repository, account_id, customer_plan.customer_plan_id).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn subscription_cycle_executes_once() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let plan = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 40).await;
     let customer_plan = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         plan.plan_version_id,
         "concurrent-cycle",
     )
@@ -130,14 +130,14 @@ async fn subscription_cycle_executes_once() {
         first.expect("first runner").created_cycles + second.expect("second runner").created_cycles,
         1
     );
-    assert_plan_state(&pool, workspace_id, 1, 2, 3, 40).await;
-    revoke_for_cleanup(&repository, workspace_id, customer_plan.customer_plan_id).await;
+    assert_plan_state(&pool, account_id, 1, 2, 3, 40).await;
+    revoke_for_cleanup(&repository, account_id, customer_plan.customer_plan_id).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn customer_plan_exclusivity_and_lifecycle_are_atomic() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let plan = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 25).await;
     let first_repository = repository.clone();
     let second_repository = repository.clone();
@@ -147,13 +147,13 @@ async fn customer_plan_exclusivity_and_lifecycle_are_atomic() {
     let (first, second) = tokio::join!(
         plans::create_customer_plan(
             &first_repository,
-            workspace_id,
+            account_id,
             "exclusive-key-1",
             first_request
         ),
         plans::create_customer_plan(
             &second_repository,
-            workspace_id,
+            account_id,
             "exclusive-key-2",
             second_request
         )
@@ -167,15 +167,15 @@ async fn customer_plan_exclusivity_and_lifecycle_are_atomic() {
             .code(),
         "active_customer_plan_already_exists"
     );
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 25).await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 25).await;
 
     let customer_plan_id: Uuid =
         sqlx::query_scalar("SELECT customer_plan_id FROM customer_plans WHERE customer_id=$1")
-            .bind(workspace_id)
+            .bind(account_id)
             .fetch_one(&pool)
             .await
             .expect("customer plan");
-    let canceled = plans::cancel_customer_plan(&repository, workspace_id, customer_plan_id)
+    let canceled = plans::cancel_customer_plan(&repository, account_id, customer_plan_id)
         .await
         .expect("schedule cancel");
     assert!(canceled.cancel_at_period_end);
@@ -189,12 +189,12 @@ async fn customer_plan_exclusivity_and_lifecycle_are_atomic() {
         .await
         .expect("finish canceled plan");
     assert_eq!(outcome.canceled_customer_plans, 1);
-    assert_plan_state(&pool, workspace_id, 0, 1, 2, 0).await;
+    assert_plan_state(&pool, account_id, 0, 1, 2, 0).await;
 
     let source = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 60).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         source.plan_version_id,
         "transition",
     )
@@ -214,19 +214,19 @@ async fn customer_plan_exclusivity_and_lifecycle_are_atomic() {
     assert_downgrade(
         &repository,
         &pool,
-        workspace_id,
+        account_id,
         current.customer_plan_id,
         target.plan_version_id,
     )
     .await;
-    assert_plan_state(&pool, workspace_id, 1, 3, 3, 60).await;
-    revoke_for_cleanup(&repository, workspace_id, current.customer_plan_id).await;
+    assert_plan_state(&pool, account_id, 1, 3, 3, 60).await;
+    revoke_for_cleanup(&repository, account_id, current.customer_plan_id).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn commercial_catalog_validation_and_swagger_are_enforced() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (router, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (router, pool, repository, account_id, product_id) = setup_active_account().await;
     let subscription = plans::create_subscription(&repository, subscription_request())
         .await
         .expect("subscription");
@@ -254,7 +254,7 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
             .expect("free card plan");
     let pending = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         card_plan.plan_version_id,
         "card-pending",
     )
@@ -262,7 +262,7 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
     assert_eq!(pending.activation_status, "PENDING_CARD_VALIDATION");
     let revoked_customer = plans::revoke_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         pending.customer_plan_id,
         RevokeCustomerPlanRequest {
             reason: "risk decision".to_string(),
@@ -283,7 +283,7 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
         "operator:test",
     )
     .await;
-    assert_plan_state(&pool, workspace_id, 0, 0, 0, 0).await;
+    assert_plan_state(&pool, account_id, 0, 0, 0, 0).await;
 
     let paid_plan = plans::create_plan(
         &repository,
@@ -294,14 +294,14 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
     .expect("paid plan");
     let paid_pending = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         paid_plan.plan_version_id,
         "paid-pending",
     )
     .await;
     assert_eq!(paid_pending.activation_status, "PENDING_INITIAL_PAYMENT");
     assert!(paid_pending.current_cycle.is_none());
-    plans::cancel_customer_plan(&repository, workspace_id, paid_pending.customer_plan_id)
+    plans::cancel_customer_plan(&repository, account_id, paid_pending.customer_plan_id)
         .await
         .expect("cancel pending plan");
     plans::create_on_demand_plan(
@@ -337,13 +337,13 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
     .await;
     let plans_before: i64 =
         sqlx::query_scalar("SELECT count(*) FROM customer_plans WHERE customer_id=$1")
-            .bind(workspace_id)
+            .bind(account_id)
             .fetch_one(&pool)
             .await
             .expect("plan count before rejected join");
     let join = plans::create_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         "revoked-key",
         customer_plan_request(plan.plan_version_id, "revoked-transaction"),
     )
@@ -354,7 +354,7 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM customer_plans WHERE customer_id=$1")
-            .bind(workspace_id)
+            .bind(account_id)
             .fetch_one(&pool)
             .await
             .expect("plan count"),
@@ -367,19 +367,19 @@ async fn commercial_catalog_validation_and_swagger_are_enforced() {
     .execute(&pool)
     .await
     .is_err());
-    apply_workspace_event(&repository, workspace_id, "workspace.blocked", 3).await;
-    assert_blocked_join(&repository, workspace_id, card_plan.plan_version_id).await;
+    apply_account_event(&repository, account_id, "account.blocked", 3).await;
+    assert_blocked_join(&repository, account_id, card_plan.plan_version_id).await;
     assert_plan_swagger(&router).await;
 }
 
-async fn setup_active_workspace() -> (Router, PgPool, DatabaseRepository, Uuid, Uuid) {
+async fn setup_active_account() -> (Router, PgPool, DatabaseRepository, Uuid, Uuid) {
     let (router, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let product_id = create_metered_product(&repository).await;
-    let workspace_id = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace_id, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace_id, "workspace.activated", 2).await;
-    (router, pool, repository, workspace_id, product_id)
+    let account_id = Uuid::new_v4();
+    apply_account_event(&repository, account_id, "account.created", 1).await;
+    apply_account_event(&repository, account_id, "account.activated", 2).await;
+    (router, pool, repository, account_id, product_id)
 }
 
 async fn create_metered_product(repository: &DatabaseRepository) -> Uuid {
@@ -473,13 +473,13 @@ async fn create_free_plan(
 
 async fn join_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     plan_id: Uuid,
     suffix: &str,
 ) -> subscription::dto::plans::CustomerPlanResponse {
     plans::create_customer_plan(
         repository,
-        workspace_id,
+        account_id,
         &format!("key-{suffix}"),
         customer_plan_request(plan_id, &format!("transaction-{suffix}")),
     )

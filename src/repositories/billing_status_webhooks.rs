@@ -60,13 +60,7 @@ impl DatabaseRepository {
         if request_status == "EXHAUSTED" {
             apply_definitive_failure(&mut transaction, webhook.collection_request_id).await?;
         }
-        insert_status_event(
-            &mut transaction,
-            webhook,
-            row.get("workspace_id"),
-            event_type,
-        )
-        .await?;
+        insert_status_event(&mut transaction, webhook, row.get("account_id"), event_type).await?;
         mark_webhook(&mut transaction, webhook, "APPLIED", None).await?;
         transaction.commit().await?;
         Ok(PaymentStatusWebhookResult::Applied)
@@ -77,7 +71,7 @@ async fn lock_payment(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<sqlx::postgres::PgRow> {
-    sqlx::query("SELECT cr.workspace_id,cr.status request_status,bp.billing_payment_id,bp.provider, \
+    sqlx::query("SELECT cr.account_id,cr.status request_status,bp.billing_payment_id,bp.provider, \
          bp.provider_payment_id,bp.amount_minor,bp.currency,ca.collection_attempt_id \
          FROM collection_requests cr JOIN billing_payments bp USING(collection_request_id) \
          JOIN collection_attempts ca USING(collection_attempt_id) WHERE cr.collection_request_id=$1 \
@@ -150,7 +144,7 @@ async fn apply_definitive_failure(
 async fn insert_status_event(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
-    workspace_id: Uuid,
+    account_id: Uuid,
     event_type: &str,
 ) -> ApiResult<()> {
     let event_id = Uuid::new_v4();
@@ -168,11 +162,11 @@ async fn insert_status_event(
     .fetch_one(&mut **transaction)
     .await?;
     let payload = json!({"billing_event_id":event_id,"event_type":event_type,"schema_version":1,
-        "occurred_at":webhook.occurred_at,"workspace_id":workspace_id,"correlation_id":correlation_id,
+        "occurred_at":webhook.occurred_at,"account_id":account_id,"correlation_id":correlation_id,
         "collection_request_id":webhook.collection_request_id,"provider_payment_id":webhook.provider_payment_id});
     sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) VALUES ($1,$2,'collection_request',$3,$4,$5,$6,$7)")
+         account_id,correlation_id,payload) VALUES ($1,$2,'collection_request',$3,$4,$5,$6,$7)")
         .bind(event_id).bind(event_type).bind(webhook.collection_request_id).bind(sequence)
-        .bind(workspace_id).bind(correlation_id).bind(payload).execute(&mut **transaction).await?;
+        .bind(account_id).bind(correlation_id).bind(payload).execute(&mut **transaction).await?;
     Ok(())
 }

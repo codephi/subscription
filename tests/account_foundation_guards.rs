@@ -4,9 +4,9 @@ use axum::{body::Body, http::Request, Router};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use subscription::{
-    dto::events::{WorkspaceEventEnvelope, WorkspaceEventPayload, WorkspaceEventType},
+    dto::events::{AccountEventEnvelope, AccountEventPayload, AccountEventType},
     repositories::database::DatabaseRepository,
-    services::{signatures, workspace_events::process_workspace_event},
+    services::{account_events::process_account_event, signatures},
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -21,7 +21,7 @@ async fn accounts_invalid_credentials_and_context_leave_foundation_unchanged() {
     for field in ["aggregate_id", "payload"] {
         let mut changed = original.clone();
         changed[field] = if field == "payload" {
-            json!({"workspace_id":Uuid::new_v4()})
+            json!({"account_id":Uuid::new_v4()})
         } else {
             json!(Uuid::new_v4())
         };
@@ -35,33 +35,33 @@ async fn accounts_invalid_credentials_and_context_leave_foundation_unchanged() {
         assert_eq!(response.status(), 422);
         assert_eq!(
             support::response_json(response).await["error"]["code"],
-            "workspace_context_mismatch"
+            "account_context_mismatch"
         );
     }
     assert_eq!(foundation_snapshot(&pool).await, before);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn workspace_precommit_failure_rolls_back_and_postcommit_retry_has_one_effect() {
+async fn account_precommit_failure_rolls_back_and_postcommit_retry_has_one_effect() {
     let (_, pool) = support::setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let event = created_event();
     let before = foundation_snapshot(&pool).await;
     install_commit_failure(&pool).await;
-    assert!(process_workspace_event(&repository, event.clone())
+    assert!(process_account_event(&repository, event.clone())
         .await
         .is_err());
     assert_eq!(foundation_snapshot(&pool).await, before);
-    sqlx::query("DROP TRIGGER fail_workspace_commit ON audit_events")
+    sqlx::query("DROP TRIGGER fail_account_commit ON audit_events")
         .execute(&pool)
         .await
         .unwrap();
-    process_workspace_event(&repository, event.clone())
+    process_account_event(&repository, event.clone())
         .await
         .expect("retry after rollback");
     let committed = foundation_snapshot(&pool).await;
     assert_ne!(committed, before);
-    let duplicate = process_workspace_event(&repository, event)
+    let duplicate = process_account_event(&repository, event)
         .await
         .expect("response lost after commit");
     assert_eq!(
@@ -72,32 +72,32 @@ async fn workspace_precommit_failure_rolls_back_and_postcommit_retry_has_one_eff
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn workspace_event_identity_cannot_be_reused_with_different_content() {
+async fn account_event_identity_cannot_be_reused_with_different_content() {
     let (_, pool) = support::setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let original = created_event();
-    process_workspace_event(&repository, original.clone())
+    process_account_event(&repository, original.clone())
         .await
         .unwrap();
     let committed = foundation_snapshot(&pool).await;
     for changed in conflicting_events(&original) {
-        let error = process_workspace_event(&repository, changed)
+        let error = process_account_event(&repository, changed)
             .await
             .expect_err("identity conflict");
-        assert_eq!(error.code(), "workspace_event_identity_conflict");
+        assert_eq!(error.code(), "account_event_identity_conflict");
         assert_eq!(foundation_snapshot(&pool).await, committed);
     }
 }
 
-fn conflicting_events(original: &WorkspaceEventEnvelope) -> [WorkspaceEventEnvelope; 2] {
+fn conflicting_events(original: &AccountEventEnvelope) -> [AccountEventEnvelope; 2] {
     let mut payload = original.clone();
-    payload.event_type = WorkspaceEventType::Activated;
+    payload.event_type = AccountEventType::Activated;
     payload.sequence = 2;
-    let mut workspace = original.clone();
-    workspace.workspace_id = Uuid::new_v4();
-    workspace.aggregate_id = workspace.workspace_id;
-    workspace.payload.workspace_id = workspace.workspace_id;
-    [payload, workspace]
+    let mut account = original.clone();
+    account.account_id = Uuid::new_v4();
+    account.aggregate_id = account.account_id;
+    account.payload.account_id = account.account_id;
+    [payload, account]
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -108,8 +108,7 @@ async fn accounts_openapi_declares_signed_event_rejections() {
         .await
         .unwrap();
     let document = support::response_json(response).await;
-    let responses =
-        &document["paths"]["/v1/internal/accounts/workspace-events"]["post"]["responses"];
+    let responses = &document["paths"]["/v1/internal/accounts/account-events"]["post"]["responses"];
     for status in ["202", "401", "409", "422", "503"] {
         assert!(
             responses.get(status).is_some(),
@@ -118,19 +117,19 @@ async fn accounts_openapi_declares_signed_event_rejections() {
     }
 }
 
-fn created_event() -> WorkspaceEventEnvelope {
-    let workspace_id = Uuid::new_v4();
-    WorkspaceEventEnvelope {
+fn created_event() -> AccountEventEnvelope {
+    let account_id = Uuid::new_v4();
+    AccountEventEnvelope {
         event_id: Uuid::new_v4(),
-        event_type: WorkspaceEventType::Created,
+        event_type: AccountEventType::Created,
         schema_version: 1,
-        aggregate_id: workspace_id,
+        aggregate_id: account_id,
         sequence: 1,
         occurred_at: chrono::Utc::now(),
-        workspace_id,
+        account_id,
         correlation_id: Uuid::new_v4(),
         causation_id: None,
-        payload: WorkspaceEventPayload { workspace_id },
+        payload: AccountEventPayload { account_id },
     }
 }
 
@@ -144,7 +143,7 @@ async fn assert_rejected_signatures(router: &Router, event: &Value) {
             401
         );
     }
-    let unsigned = Request::post("/v1/internal/accounts/workspace-events")
+    let unsigned = Request::post("/v1/internal/accounts/account-events")
         .header("content-type", "application/json")
         .body(Body::from(event.to_string()))
         .unwrap();
@@ -162,7 +161,7 @@ async fn send_event(
 ) -> axum::response::Response {
     let body = event.to_string();
     let signature = signatures::sign_body(secret, timestamp, body.as_bytes()).unwrap();
-    let request = Request::post("/v1/internal/accounts/workspace-events")
+    let request = Request::post("/v1/internal/accounts/account-events")
         .header("content-type", "application/json")
         .header("x-runvibe-timestamp", timestamp.to_string())
         .header("x-runvibe-signature", signature)
@@ -174,10 +173,10 @@ async fn send_event(
 async fn install_commit_failure(pool: &PgPool) {
     // A deferred trigger fails at COMMIT after inbox, projection, wallet and outbox writes.
     sqlx::raw_sql(
-        "CREATE FUNCTION reject_workspace_commit() RETURNS trigger LANGUAGE plpgsql AS $$ \
-        BEGIN RAISE EXCEPTION 'injected workspace commit failure'; END $$; \
-        CREATE CONSTRAINT TRIGGER fail_workspace_commit AFTER INSERT ON audit_events \
-        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_workspace_commit();",
+        "CREATE FUNCTION reject_account_commit() RETURNS trigger LANGUAGE plpgsql AS $$ \
+        BEGIN RAISE EXCEPTION 'injected account commit failure'; END $$; \
+        CREATE CONSTRAINT TRIGGER fail_account_commit AFTER INSERT ON audit_events \
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_account_commit();",
     )
     .execute(pool)
     .await
@@ -187,7 +186,7 @@ async fn install_commit_failure(pool: &PgPool) {
 async fn foundation_snapshot(pool: &PgPool) -> Vec<Value> {
     let mut snapshot = Vec::new();
     for table in [
-        "workspace_projections",
+        "account_projections",
         "integration_inbox",
         "integration_inbox_quarantine",
         "outbox_events",

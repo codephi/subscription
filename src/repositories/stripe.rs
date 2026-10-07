@@ -47,7 +47,7 @@ impl StripeConnector {
         }
     }
 
-    pub async fn identify_account(&self) -> Result<String, BillingConnectorError> {
+    pub async fn identify_stripe_account(&self) -> Result<String, BillingConnectorError> {
         let response = self
             .client
             .get(format!("{}/v1/account", self.api_base))
@@ -60,11 +60,11 @@ impl StripeConnector {
         if !status.is_success() {
             return Err(api_error(status.as_u16(), &body));
         }
-        let account_id = required_string(&body, "id")?;
-        if !account_id.starts_with("acct_") {
-            return Err(invalid_response("id", &account_id));
+        let stripe_account_id = required_string(&body, "id")?;
+        if !stripe_account_id.starts_with("acct_") {
+            return Err(invalid_response("id", &stripe_account_id));
         }
-        Ok(account_id)
+        Ok(stripe_account_id)
     }
 
     pub async fn validate_customer(&self, customer_id: &str) -> Result<(), BillingConnectorError> {
@@ -209,14 +209,14 @@ impl StripeConnector {
         )
     }
 
-    pub async fn create_workspace_customer(
+    pub async fn create_account_customer(
         &self,
-        workspace_id: &str,
+        account_id: &str,
         connection_id: &str,
     ) -> Result<String, BillingConnectorError> {
         let fields = vec![
-            ("name", format!("Workspace {workspace_id}")),
-            ("metadata[workspace_id]", workspace_id.to_string()),
+            ("name", format!("Account {account_id}")),
+            ("metadata[account_id]", account_id.to_string()),
             ("metadata[billing_connection_id]", connection_id.to_string()),
         ];
         let value = self

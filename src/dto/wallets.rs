@@ -53,7 +53,7 @@ pub struct ItemWalletResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WalletHierarchyResponse {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub scope_version: Uuid,
     pub ready: bool,
     pub customer_wallet: CustomerWalletResponse,
@@ -62,7 +62,7 @@ pub struct WalletHierarchyResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WalletProvisioningResponse {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub scope_version: Uuid,
     pub status: WalletStatus,
     pub expected_item_wallets: i64,

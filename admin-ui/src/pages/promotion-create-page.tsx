@@ -31,7 +31,7 @@ export function PromotionCreatePage() {
     const common = {
       code: String(form.get("code") ?? "").trim(), name: String(form.get("name") ?? "").trim(),
       description: nullable("description"), valid_from: dateOrNull(nullable("valid_from")), valid_until: dateOrNull(nullable("valid_until")),
-      max_total_uses: limit("max_total_uses", null), max_uses_per_workspace: limit("max_uses_per_workspace", "1"),
+      max_total_uses: limit("max_total_uses", null), max_uses_per_account: limit("max_uses_per_account", "1"),
     };
     if (voucher) {
       create.mutate({ ...common, credit_units: String(form.get("credit_units") ?? "").trim() });
@@ -44,7 +44,7 @@ export function PromotionCreatePage() {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6">
       <header><h1 className="text-3xl font-semibold tracking-tight">Cadastrar {voucher ? "voucher" : "cupom"}</h1><p className="mt-2 text-sm text-muted-foreground">O código fica fixo. Validade e limites podem ser alterados depois.</p></header>
-      <Card><CardHeader><CardTitle>{voucher ? "Créditos do voucher" : "Desconto do cupom"}</CardTitle><CardDescription>Um código pode ser resgatado por até uma utilização em cada workspace por padrão.</CardDescription></CardHeader>
+      <Card><CardHeader><CardTitle>{voucher ? "Créditos do voucher" : "Desconto do cupom"}</CardTitle><CardDescription>Um código pode ser resgatado por até uma utilização em cada account por padrão.</CardDescription></CardHeader>
         <CardContent>
           <form onSubmit={submit} className="flex flex-col gap-5">
             <FieldGroup>
@@ -56,7 +56,7 @@ export function PromotionCreatePage() {
                 <Field><FieldLabel htmlFor="valid-from">Válido a partir de</FieldLabel><Input id="valid-from" name="valid_from" type="datetime-local" /><FieldDescription>Vazio significa sem data inicial.</FieldDescription></Field>
                 <Field><FieldLabel htmlFor="valid-until">Válido até</FieldLabel><Input id="valid-until" name="valid_until" type="datetime-local" /><FieldDescription>Vazio significa sem expiração.</FieldDescription></Field>
                 <Field><FieldLabel htmlFor="max-total-uses">Limite total de usos</FieldLabel><Input id="max-total-uses" name="max_total_uses" type="number" min="1" placeholder="Sem limite total" /><FieldDescription>Deixe vazio para permitir usos ilimitados.</FieldDescription></Field>
-                <Field><FieldLabel htmlFor="max-workspace-uses">Usos por workspace</FieldLabel><Input id="max-workspace-uses" name="max_uses_per_workspace" type="number" min="1" defaultValue="1" /><FieldDescription>Defina um número ou deixe vazio para ilimitado.</FieldDescription></Field>
+                <Field><FieldLabel htmlFor="max-account-uses">Usos por account</FieldLabel><Input id="max-account-uses" name="max_uses_per_account" type="number" min="1" defaultValue="1" /><FieldDescription>Defina um número ou deixe vazio para ilimitado.</FieldDescription></Field>
               </div>
             </FieldGroup>
             {create.error && <QueryError error={create.error} />}

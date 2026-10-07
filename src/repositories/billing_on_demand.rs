@@ -15,13 +15,13 @@ use crate::{
 impl DatabaseRepository {
     pub async fn create_on_demand_purchase(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
         idempotency_key: &str,
         request: &CreateOnDemandPurchaseRequest,
     ) -> ApiResult<CollectionRequestResponse> {
         self.create_on_demand_purchase_for_checkout(
-            workspace_id,
+            account_id,
             customer_plan_id,
             idempotency_key,
             request,
@@ -32,30 +32,30 @@ impl DatabaseRepository {
 
     pub async fn create_on_demand_purchase_for_checkout(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
         idempotency_key: &str,
         request: &CreateOnDemandPurchaseRequest,
         checkout: Option<(Uuid, &str)>,
     ) -> ApiResult<CollectionRequestResponse> {
         let mut transaction = self.pool().begin().await?;
-        lock_active_customer_wallet(&mut transaction, workspace_id).await?;
-        lock_key(&mut transaction, workspace_id, idempotency_key).await?;
+        lock_active_customer_wallet(&mut transaction, account_id).await?;
+        lock_key(&mut transaction, account_id, idempotency_key).await?;
         if let Some(existing) =
-            existing_purchase(&mut transaction, workspace_id, idempotency_key).await?
+            existing_purchase(&mut transaction, account_id, idempotency_key).await?
         {
             validate_existing(&existing, customer_plan_id, request)?;
             transaction.commit().await?;
             return Ok(existing);
         }
         let terms =
-            lock_purchase_terms(&mut transaction, workspace_id, customer_plan_id, request).await?;
+            lock_purchase_terms(&mut transaction, account_id, customer_plan_id, request).await?;
         let collection_id = Uuid::new_v4();
         let coupon = if let Some((_, code)) = checkout {
             Some(
                 super::billing_checkouts::lock_coupon_discount(
                     &mut transaction,
-                    workspace_id,
+                    account_id,
                     crate::dto::checkouts::CheckoutKind::OnDemand,
                     code,
                     terms.amount_minor,
@@ -69,7 +69,7 @@ impl DatabaseRepository {
         let collection = insert_purchase(
             &mut transaction,
             PurchaseInsert {
-                workspace_id,
+                account_id,
                 customer_plan_id,
                 key: idempotency_key,
                 request,
@@ -82,7 +82,7 @@ impl DatabaseRepository {
         if let (Some((checkout_id, _)), Some(coupon)) = (checkout, coupon.as_ref()) {
             super::billing_checkouts::store_coupon_reservation(
                 &mut transaction,
-                workspace_id,
+                account_id,
                 checkout_id,
                 collection_id,
                 crate::dto::checkouts::CheckoutKind::OnDemand,
@@ -90,7 +90,7 @@ impl DatabaseRepository {
             )
             .await?;
         }
-        insert_purchase_event(&mut transaction, workspace_id, &collection).await?;
+        insert_purchase_event(&mut transaction, account_id, &collection).await?;
         transaction.commit().await?;
         Ok(collection)
     }
@@ -107,11 +107,11 @@ struct PurchaseTerms {
 
 async fn lock_key(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-        .bind(format!("billing:{workspace_id}:{key}"))
+        .bind(format!("billing:{account_id}:{key}"))
         .execute(&mut **transaction)
         .await?;
     Ok(())
@@ -119,13 +119,13 @@ async fn lock_key(
 
 async fn existing_purchase(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
 ) -> Result<Option<CollectionRequestResponse>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT * FROM collection_requests WHERE workspace_id=$1 AND idempotency_key=$2 FOR UPDATE",
+        "SELECT * FROM collection_requests WHERE account_id=$1 AND idempotency_key=$2 FOR UPDATE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(key)
     .fetch_optional(&mut **transaction)
     .await?;
@@ -156,7 +156,7 @@ fn validate_existing(
 
 async fn lock_purchase_terms(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     request: &CreateOnDemandPurchaseRequest,
 ) -> ApiResult<PurchaseTerms> {
@@ -178,14 +178,14 @@ async fn lock_purchase_terms(
          FROM customer_plans cp JOIN subscription_plan_versions sp USING(plan_version_id) \
          JOIN subscriptions s USING(subscription_id) JOIN on_demand_plans od USING(subscription_id) \
          JOIN payment_method_bindings pmb ON pmb.payment_method_binding_id=$4 \
-           AND pmb.workspace_id=$1 AND pmb.customer_id=$1 \
+           AND pmb.account_id=$1 AND pmb.customer_id=$1 \
          WHERE cp.customer_plan_id=$2 AND cp.customer_id=$1 AND od.on_demand_plan_id=$3 \
          FOR UPDATE OF cp,sp,od,pmb",
     )
-    .bind(workspace_id).bind(customer_plan_id).bind(request.on_demand_plan_id)
+    .bind(account_id).bind(customer_plan_id).bind(request.on_demand_plan_id)
     .bind(request.payment_method_binding_id).fetch_optional(&mut **transaction).await?
     .ok_or_else(|| ApiError::not_found("on_demand_purchase_not_found", format!(
-        "customer plan {customer_plan_id}, on-demand plan {}, and binding {} must share workspace {workspace_id}",
+        "customer plan {customer_plan_id}, on-demand plan {}, and binding {} must share account {account_id}",
         request.on_demand_plan_id, request.payment_method_binding_id
     )))?;
     validate_purchase_state(customer_plan_id, &row)?;
@@ -253,7 +253,7 @@ fn validate_purchase_state(customer_plan_id: Uuid, row: &sqlx::postgres::PgRow) 
 }
 
 struct PurchaseInsert<'a> {
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     key: &'a str,
     request: &'a CreateOnDemandPurchaseRequest,
@@ -267,7 +267,7 @@ async fn insert_purchase(
     input: PurchaseInsert<'_>,
 ) -> ApiResult<CollectionRequestResponse> {
     let PurchaseInsert {
-        workspace_id,
+        account_id,
         customer_plan_id,
         key,
         request,
@@ -276,12 +276,12 @@ async fn insert_purchase(
         coupon,
     } = input;
     let row = sqlx::query(
-        "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id,customer_plan_id, \
+        "INSERT INTO collection_requests (collection_request_id,account_id,customer_id,customer_plan_id, \
          plan_version_id,on_demand_plan_id,payment_method_binding_id,request_kind,amount_minor,currency, \
          granted_credit_units,credit_quantity,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at,
          coupon_id,coupon_code,base_amount_minor,discount_amount_minor,coupon_version) \
          VALUES ($1,$2,$2,$3,$4,$5,$6,'ON_DEMAND',$7,$8,$9,$10,'SCHEDULED',$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING *",
-    ).bind(collection_id).bind(workspace_id).bind(customer_plan_id).bind(terms.plan_version_id)
+    ).bind(collection_id).bind(account_id).bind(customer_plan_id).bind(terms.plan_version_id)
       .bind(request.on_demand_plan_id).bind(request.payment_method_binding_id)
       .bind(coupon.map_or(terms.amount_minor, |value| value.final_amount_minor))
       .bind(&terms.currency).bind(terms.credit_units).bind(request.quantity).bind(&request.transaction_id).bind(key)
@@ -295,17 +295,17 @@ async fn insert_purchase(
 
 async fn insert_purchase_event(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     collection: &CollectionRequestResponse,
 ) -> ApiResult<()> {
     let event_id = Uuid::new_v4();
     let payload = json!({"billing_event_id":event_id,"event_type":"collection.on_demand_created",
-        "schema_version":1,"occurred_at":collection.scheduled_at,"workspace_id":workspace_id,
+        "schema_version":1,"occurred_at":collection.scheduled_at,"account_id":account_id,
         "collection_request_id":collection.collection_request_id,"customer_plan_id":collection.customer_plan_id});
     sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) SELECT $1,'collection.on_demand_created','collection_request', \
+         account_id,correlation_id,payload) SELECT $1,'collection.on_demand_created','collection_request', \
          $2,1,$3,correlation_id,$4 FROM collection_requests WHERE collection_request_id=$2")
-        .bind(event_id).bind(collection.collection_request_id).bind(workspace_id).bind(payload)
+        .bind(event_id).bind(collection.collection_request_id).bind(account_id).bind(payload)
         .execute(&mut **transaction).await?;
     Ok(())
 }

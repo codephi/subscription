@@ -25,7 +25,7 @@ impl CredentialVault {
 
     pub fn seal(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         purpose: &str,
         secret: &str,
@@ -38,7 +38,7 @@ impl CredentialVault {
                 &Nonce::from(nonce),
                 Payload {
                     msg: secret.as_bytes(),
-                    aad: &associated_data(workspace_id, connection_id, purpose),
+                    aad: &associated_data(account_id, connection_id, purpose),
                 },
             )
             .map_err(|_| vault_error("credential_encrypt_failed"))?;
@@ -50,7 +50,7 @@ impl CredentialVault {
 
     pub fn open(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         purpose: &str,
         sealed: &str,
@@ -74,7 +74,7 @@ impl CredentialVault {
                 &Nonce::from(nonce_bytes),
                 Payload {
                     msg: ciphertext,
-                    aad: &associated_data(workspace_id, connection_id, purpose),
+                    aad: &associated_data(account_id, connection_id, purpose),
                 },
             )
             .map_err(|_| vault_error("credential_decrypt_failed"))?;
@@ -82,8 +82,8 @@ impl CredentialVault {
     }
 }
 
-fn associated_data(workspace_id: Uuid, connection_id: Uuid, purpose: &str) -> Vec<u8> {
-    format!("billing-credential:v1:{workspace_id}:{connection_id}:{purpose}").into_bytes()
+fn associated_data(account_id: Uuid, connection_id: Uuid, purpose: &str) -> Vec<u8> {
+    format!("billing-credential:v1:{account_id}:{connection_id}:{purpose}").into_bytes()
 }
 
 fn invalid_key() -> ApiError {
@@ -111,18 +111,18 @@ mod tests {
     }
 
     #[test]
-    fn encrypted_credentials_round_trip_only_for_their_workspace_and_purpose() {
+    fn encrypted_credentials_round_trip_only_for_their_account_and_purpose() {
         let vault = vault();
-        let workspace_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
         let connection_id = Uuid::new_v4();
         let sealed = vault
-            .seal(workspace_id, connection_id, "stripe_api", "sk_test_secret")
+            .seal(account_id, connection_id, "stripe_api", "sk_test_secret")
             .expect("encrypt secret");
 
         assert!(!sealed.contains("sk_test_secret"));
         assert_eq!(
             vault
-                .open(workspace_id, connection_id, "stripe_api", &sealed)
+                .open(account_id, connection_id, "stripe_api", &sealed)
                 .expect("decrypt secret"),
             "sk_test_secret"
         );
@@ -130,7 +130,7 @@ mod tests {
             .open(Uuid::new_v4(), connection_id, "stripe_api", &sealed)
             .is_err());
         assert!(vault
-            .open(workspace_id, connection_id, "stripe_webhook", &sealed)
+            .open(account_id, connection_id, "stripe_webhook", &sealed)
             .is_err());
     }
 }

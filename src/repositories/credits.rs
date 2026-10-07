@@ -7,10 +7,10 @@ mod credit_conflicts;
 use crate::{
     dto::{
         credits::{
+            AccountBillingConfigResponse, AccountTransactionResponse,
             CreditLedgerReconciliationResponse, CustomerWalletStatementResponse,
             DirectCreditRequest, DirectCreditResponse, PendingUsageTransactionResponse,
-            UpdateWorkspaceBillingConfigRequest, WorkspaceBillingConfigResponse,
-            WorkspaceTransactionResponse,
+            UpdateAccountBillingConfigRequest,
         },
         units::{CreditUnits, ItemUnitBoundary, ItemUnits},
     },
@@ -28,17 +28,17 @@ use crate::{
 impl DatabaseRepository {
     pub async fn insert_direct_credit(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         idempotency_key: &str,
         request_hash: &str,
         request: &DirectCreditRequest,
     ) -> ApiResult<DirectCreditResponse> {
         let mut transaction = self.pool().begin().await?;
-        let wallet = lock_active_customer_wallet(&mut transaction, workspace_id).await?;
-        ensure_direct_credit_enabled(&mut transaction, workspace_id).await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, account_id).await?;
+        ensure_direct_credit_enabled(&mut transaction, account_id).await?;
         reserve_idempotency(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             request_hash,
             "DIRECT_CREDIT",
@@ -46,7 +46,7 @@ impl DatabaseRepository {
         .await?;
         reserve_transaction(
             &mut transaction,
-            workspace_id,
+            account_id,
             &request.transaction_id,
             "DIRECT_CREDIT",
         )
@@ -55,11 +55,11 @@ impl DatabaseRepository {
         let direct_credit_id = Uuid::new_v4();
         let entry_id = Uuid::new_v4();
         let lot_id = Uuid::new_v4();
-        insert_direct_credit_row(&mut transaction, workspace_id, direct_credit_id, request).await?;
+        insert_direct_credit_row(&mut transaction, account_id, direct_credit_id, request).await?;
         let entry_row = insert_entry(
             &mut transaction,
             &wallet,
-            workspace_id,
+            account_id,
             entry_id,
             balance_after,
             request,
@@ -68,7 +68,7 @@ impl DatabaseRepository {
         update_wallet_balance(&mut transaction, wallet.wallet_id, balance_after).await?;
         insert_credit_lot(
             &mut transaction,
-            workspace_id,
+            account_id,
             lot_id,
             entry_id,
             request.credit_units,
@@ -84,7 +84,7 @@ impl DatabaseRepository {
         .await?;
         complete_reservations(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             &request.transaction_id,
             direct_credit_id,
@@ -92,14 +92,14 @@ impl DatabaseRepository {
         .await?;
         insert_credit_outbox(
             &mut transaction,
-            workspace_id,
+            account_id,
             wallet.wallet_id,
             wallet.next_sequence,
             entry_id,
             request.credit_units,
         )
         .await?;
-        insert_credit_audit(&mut transaction, workspace_id, direct_credit_id, entry_id).await?;
+        insert_credit_audit(&mut transaction, account_id, direct_credit_id, entry_id).await?;
         transaction.commit().await?;
         let references = load_references(&self.pool(), entry_id).await?;
         Ok(DirectCreditResponse {
@@ -111,32 +111,32 @@ impl DatabaseRepository {
 
     pub async fn find_customer_wallet_transaction(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         transaction_id: &str,
-    ) -> ApiResult<WorkspaceTransactionResponse> {
+    ) -> ApiResult<AccountTransactionResponse> {
         let row = sqlx::query(
             "SELECT * FROM customer_wallet_entries WHERE customer_id=$1 AND transaction_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(transaction_id)
         .fetch_optional(&self.pool())
         .await?;
         if let Some(row) = row {
             let entry_id = row.get("customer_wallet_entry_id");
             let references = load_references(&self.pool(), entry_id).await?;
-            return Ok(WorkspaceTransactionResponse::CustomerWalletEntry(
+            return Ok(AccountTransactionResponse::CustomerWalletEntry(
                 entry_from_row(&row, references),
             ));
         }
-        self.find_pending_usage_transaction(workspace_id, transaction_id)
+        self.find_pending_usage_transaction(account_id, transaction_id)
             .await
     }
 
     async fn find_pending_usage_transaction(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         transaction_id: &str,
-    ) -> ApiResult<WorkspaceTransactionResponse> {
+    ) -> ApiResult<AccountTransactionResponse> {
         let row = sqlx::query(
             "SELECT u.transaction_id,u.usage_event_id,u.item_wallet_id,u.product_id,u.item_id, \
              u.item_units,u.pending_item_units_after,u.metadata,u.accepted_at,e.item_wallet_entry_id \
@@ -144,12 +144,12 @@ impl DatabaseRepository {
              WHERE u.customer_id=$1 AND u.transaction_id=$2 AND NOT EXISTS \
              (SELECT 1 FROM debits d WHERE d.usage_event_id=u.usage_event_id)",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(transaction_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| entry_not_found(workspace_id, transaction_id))?;
-        Ok(WorkspaceTransactionResponse::PendingUsage(
+        .ok_or_else(|| entry_not_found(account_id, transaction_id))?;
+        Ok(AccountTransactionResponse::PendingUsage(
             PendingUsageTransactionResponse {
                 transaction_id: row.get("transaction_id"),
                 usage_event_id: row.get("usage_event_id"),
@@ -169,7 +169,7 @@ impl DatabaseRepository {
 
     pub async fn list_customer_wallet_entries(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         cursor: Option<i64>,
         limit: i64,
     ) -> ApiResult<CustomerWalletStatementResponse> {
@@ -179,7 +179,7 @@ impl DatabaseRepository {
              AND ($2::bigint IS NULL OR e.entry_sequence<$2) \
              ORDER BY e.entry_sequence DESC LIMIT $3",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(cursor)
         .bind(limit + 1)
         .fetch_all(&self.pool())
@@ -201,23 +201,23 @@ impl DatabaseRepository {
 
     pub async fn reconcile_credit_ledger(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
     ) -> ApiResult<CreditLedgerReconciliationResponse> {
         let row = sqlx::query(include_str!("credit_reconciliation.sql"))
-            .bind(workspace_id)
+            .bind(account_id)
             .fetch_optional(&self.pool())
             .await?
             .ok_or_else(|| {
                 ApiError::service_unavailable(
                     "wallet_not_provisioned",
-                    format!("workspace {workspace_id} has no customer wallet"),
+                    format!("account {account_id} has no customer wallet"),
                 )
             })?;
         let wallet_balance: i64 = row.get("balance_credit_units");
         let ledger_balance: i64 = row.get("ledger_balance");
         let lot_balance: i64 = row.get("lot_balance");
         Ok(CreditLedgerReconciliationResponse {
-            workspace_id,
+            account_id,
             wallet_balance_credit_units: CreditUnits::new(wallet_balance),
             ledger_balance_credit_units: CreditUnits::new(ledger_balance),
             available_lot_credit_units: CreditUnits::new(lot_balance),
@@ -229,16 +229,16 @@ impl DatabaseRepository {
 
     pub async fn find_billing_config(
         &self,
-        workspace_id: Uuid,
-    ) -> ApiResult<WorkspaceBillingConfigResponse> {
-        let row = sqlx::query("SELECT * FROM workspace_billing_configs WHERE workspace_id=$1")
-            .bind(workspace_id)
+        account_id: Uuid,
+    ) -> ApiResult<AccountBillingConfigResponse> {
+        let row = sqlx::query("SELECT * FROM account_billing_configs WHERE account_id=$1")
+            .bind(account_id)
             .fetch_optional(&self.pool())
             .await?
             .ok_or_else(|| {
                 ApiError::not_found(
                     "billing_config_not_found",
-                    format!("workspace {workspace_id} has no billing config"),
+                    format!("account {account_id} has no billing config"),
                 )
             })?;
         Ok(billing_config_from_row(&row))
@@ -246,15 +246,15 @@ impl DatabaseRepository {
 
     pub async fn update_billing_config(
         &self,
-        workspace_id: Uuid,
-        request: &UpdateWorkspaceBillingConfigRequest,
-    ) -> ApiResult<WorkspaceBillingConfigResponse> {
+        account_id: Uuid,
+        request: &UpdateAccountBillingConfigRequest,
+    ) -> ApiResult<AccountBillingConfigResponse> {
         let row = sqlx::query(
-            "UPDATE workspace_billing_configs SET direct_credit_enabled=$2, \
-             recurring_credit_enabled=$3,version=version+1 WHERE workspace_id=$1 AND version=$4 \
+            "UPDATE account_billing_configs SET direct_credit_enabled=$2, \
+             recurring_credit_enabled=$3,version=version+1 WHERE account_id=$1 AND version=$4 \
              RETURNING *",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(request.direct_credit_enabled)
         .bind(request.recurring_credit_enabled)
         .bind(request.expected_version)
@@ -264,7 +264,7 @@ impl DatabaseRepository {
             ApiError::conflict(
                 "billing_config_version_conflict",
                 format!(
-                    "workspace {workspace_id} billing config must be version {}",
+                    "account {account_id} billing config must be version {}",
                     request.expected_version
                 ),
             )
@@ -282,22 +282,22 @@ pub(super) struct LockedWallet {
 
 pub(super) async fn lock_active_customer_wallet(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<LockedWallet> {
-    let workspace = sqlx::query(
+    let account = sqlx::query(
         "SELECT operational_status,EXISTS(SELECT 1 FROM integration_inbox_quarantine q \
-         JOIN integration_inbox i ON i.event_id=q.event_id WHERE i.workspace_id=$1 \
-         AND q.replayed_at IS NULL) has_gap FROM workspace_projections WHERE workspace_id=$1 FOR UPDATE",
+         JOIN integration_inbox i ON i.event_id=q.event_id WHERE i.account_id=$1 \
+         AND q.replayed_at IS NULL) has_gap FROM account_projections WHERE account_id=$1 FOR UPDATE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_optional(&mut **transaction)
     .await?
-    .ok_or_else(|| ApiError::not_found("workspace_not_found", format!("workspace {workspace_id} does not exist")))?;
-    let status: String = workspace.get("operational_status");
-    if status != "ACTIVE" || workspace.get::<bool, _>("has_gap") {
+    .ok_or_else(|| ApiError::not_found("account_not_found", format!("account {account_id} does not exist")))?;
+    let status: String = account.get("operational_status");
+    if status != "ACTIVE" || account.get::<bool, _>("has_gap") {
         return Err(ApiError::conflict(
-            "workspace_not_operational",
-            format!("workspace {workspace_id} must be ACTIVE without event gaps, found {status}"),
+            "account_not_operational",
+            format!("account {account_id} must be ACTIVE without event gaps, found {status}"),
         ));
     }
     let row = sqlx::query(
@@ -309,14 +309,14 @@ pub(super) async fn lock_active_customer_wallet(
            AND p.expected_item_wallets=p.materialized_item_wallets \
          FOR UPDATE OF cw",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| ApiError::service_unavailable(
         "wallet_not_provisioned",
-        format!("workspace {workspace_id} wallet hierarchy is not active for the current scope"),
+        format!("account {account_id} wallet hierarchy is not active for the current scope"),
     ))?;
-    super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut **transaction, workspace_id)
+    super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut **transaction, account_id)
         .await?;
     let wallet_id = row.get("wallet_id");
     let next_sequence = sqlx::query_scalar(
@@ -335,12 +335,12 @@ pub(super) async fn lock_active_customer_wallet(
 
 async fn ensure_direct_credit_enabled(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<()> {
     let direct_enabled: bool = sqlx::query_scalar(
-        "SELECT direct_credit_enabled FROM workspace_billing_configs WHERE workspace_id=$1",
+        "SELECT direct_credit_enabled FROM account_billing_configs WHERE account_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&mut **transaction)
     .await?;
     if direct_enabled {
@@ -348,22 +348,22 @@ async fn ensure_direct_credit_enabled(
     }
     Err(ApiError::conflict(
         "direct_credit_disabled",
-        format!("workspace {workspace_id} has direct credits disabled"),
+        format!("account {account_id} has direct credits disabled"),
     ))
 }
 
 pub(super) async fn reserve_idempotency(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
     request_hash: &str,
     operation_kind: &str,
 ) -> ApiResult<()> {
     let inserted = sqlx::query(
-        "INSERT INTO idempotency_records (workspace_id,idempotency_key,operation_kind,request_hash) \
+        "INSERT INTO idempotency_records (account_id,idempotency_key,operation_kind,request_hash) \
          VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(key)
     .bind(operation_kind)
     .bind(request_hash)
@@ -374,29 +374,25 @@ pub(super) async fn reserve_idempotency(
     }
     let conflict = ApiError::conflict(
         "idempotency_key_already_used",
-        format!("Idempotency-Key {key:?} was already used in workspace {workspace_id}"),
+        format!("Idempotency-Key {key:?} was already used in account {account_id}"),
     );
-    Err(credit_conflicts::attach_committed_operation(
-        transaction,
-        workspace_id,
-        key,
-        true,
-        conflict,
+    Err(
+        credit_conflicts::attach_committed_operation(transaction, account_id, key, true, conflict)
+            .await?,
     )
-    .await?)
 }
 
 pub(super) async fn reserve_transaction(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     transaction_id: &str,
     operation_kind: &str,
 ) -> ApiResult<()> {
     let inserted = sqlx::query(
-        "INSERT INTO transaction_reservations (workspace_id,transaction_id,operation_kind) \
+        "INSERT INTO transaction_reservations (account_id,transaction_id,operation_kind) \
          VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(transaction_id)
     .bind(operation_kind)
     .execute(&mut **transaction)
@@ -406,11 +402,11 @@ pub(super) async fn reserve_transaction(
     }
     let conflict = ApiError::conflict(
         "transaction_already_exists",
-        format!("transaction_id {transaction_id:?} already exists in workspace {workspace_id}"),
+        format!("transaction_id {transaction_id:?} already exists in account {account_id}"),
     );
     Err(credit_conflicts::attach_committed_operation(
         transaction,
-        workspace_id,
+        account_id,
         transaction_id,
         false,
         conflict,

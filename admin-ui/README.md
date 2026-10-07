@@ -5,7 +5,7 @@ fluxos, integração com a API, arquitetura e limites está na
 [documentação funcional](../docs/frontend-administrativo.md). O plano por fases
 está em [plano do frontend](../docs/plano-frontend-administrativo.md).
 
-O painel inclui visão geral de Billing, consulta e criação de workspaces, planos e
+O painel inclui visão geral de Billing, consulta e criação de accounts, planos e
 carteiras, investigação de filas de cobrança, catálogo, ações administrativas,
 auditoria e inbox de eventos Accounts. Ele não tem autenticação e deve ficar
 restrito à rede local ou VPN.

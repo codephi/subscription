@@ -15,7 +15,7 @@ use crate::{
 
 pub(super) async fn apply_usage_debit(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     usage_event_id: Uuid,
     meter: &LockedMeter,
     conversion: &Conversion,
@@ -35,14 +35,14 @@ pub(super) async fn apply_usage_debit(
         return Err(ApiError::conflict(
             "insufficient_credit",
             format!(
-                "workspace {workspace_id} balance {balance_before} cannot cover {} credits",
+                "account {account_id} balance {balance_before} cannot cover {} credits",
                 conversion.debited_credits
             ),
         ));
     }
     let debit = insert_debit_entry(
         transaction,
-        workspace_id,
+        account_id,
         usage_event_id,
         meter,
         conversion,
@@ -53,7 +53,7 @@ pub(super) async fn apply_usage_debit(
     .await?;
     allocate_credit_lots(
         transaction,
-        workspace_id,
+        account_id,
         debit.debit_id,
         conversion.debited_credits,
         accepted_at,
@@ -65,7 +65,7 @@ pub(super) async fn apply_usage_debit(
 #[allow(clippy::too_many_arguments)]
 async fn insert_debit_entry(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     usage_event_id: Uuid,
     meter: &LockedMeter,
     conversion: &Conversion,
@@ -90,7 +90,7 @@ async fn insert_debit_entry(
     )
     .bind(entry_id)
     .bind(meter.customer_wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(sequence)
     .bind(-conversion.debited_credits)
     .bind(balance_before)
@@ -128,7 +128,7 @@ async fn insert_debit_entry(
 
 async fn allocate_credit_lots(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     debit_id: Uuid,
     required: i64,
     accepted_at: DateTime<Utc>,
@@ -139,7 +139,7 @@ async fn allocate_credit_lots(
          ORDER BY CASE WHEN source_kind='SUBSCRIPTION' AND expires_at IS NOT NULL THEN 0 \
            WHEN expires_at IS NULL THEN 1 ELSE 2 END,expires_at NULLS LAST,created_at,credit_lot_id FOR UPDATE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(accepted_at)
     .fetch_all(&mut **transaction)
     .await?;
@@ -166,7 +166,7 @@ async fn allocate_credit_lots(
     Err(ApiError::conflict(
         "insufficient_credit",
         format!(
-            "workspace {workspace_id} eligible credit lots are short by {remaining} for debit {required}"
+            "account {account_id} eligible credit lots are short by {remaining} for debit {required}"
         ),
     ))
 }
@@ -209,7 +209,7 @@ pub(super) async fn persist_usage(
     transaction: &mut Transaction<'_, Postgres>,
     usage_id: Uuid,
     item_entry_id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     request: &CreateUsageEventRequest,
     accepted_at: DateTime<Utc>,
     meter: &LockedMeter,
@@ -225,7 +225,7 @@ pub(super) async fn persist_usage(
     insert_usage_event(
         transaction,
         usage_id,
-        workspace_id,
+        account_id,
         request,
         accepted_at,
         meter,
@@ -250,7 +250,7 @@ pub(super) async fn persist_usage(
         transaction,
         usage_id,
         item_entry_id,
-        workspace_id,
+        account_id,
         request.item_id,
         meter,
         conversion,
@@ -263,7 +263,7 @@ pub(super) async fn persist_usage(
     }
     insert_usage_outbox(
         transaction,
-        workspace_id,
+        account_id,
         usage_id,
         meter,
         conversion,
@@ -278,7 +278,7 @@ pub(super) async fn persist_usage(
 async fn insert_usage_event(
     transaction: &mut Transaction<'_, Postgres>,
     usage_id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     request: &CreateUsageEventRequest,
     accepted_at: DateTime<Utc>,
     meter: &LockedMeter,
@@ -293,7 +293,7 @@ async fn insert_usage_event(
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",
     )
     .bind(usage_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(meter.wallet_id)
     .bind(&request.transaction_id)
     .bind(request.product_id)
@@ -392,7 +392,7 @@ async fn insert_billing_blocks(
     transaction: &mut Transaction<'_, Postgres>,
     usage_id: Uuid,
     item_entry_id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
     meter: &LockedMeter,
     conversion: &Conversion,
@@ -407,7 +407,7 @@ async fn insert_billing_blocks(
             transaction,
             usage_id,
             item_entry_id,
-            workspace_id,
+            account_id,
             item_id,
             meter,
             debit,
@@ -428,7 +428,7 @@ async fn insert_billing_block(
     transaction: &mut Transaction<'_, Postgres>,
     usage_id: Uuid,
     item_entry_id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
     meter: &LockedMeter,
     debit: &DebitResult,
@@ -453,7 +453,7 @@ async fn insert_billing_block(
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)",
     )
     .bind(Uuid::new_v4())
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(meter.wallet_id)
     .bind(item_id)
     .bind(global_sequence)

@@ -15,7 +15,7 @@ use crate::{
 impl DatabaseRepository {
     pub async fn create_paid_plan_upgrade(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
         key: &str,
         request: &CreatePlanTransitionRequest,
@@ -30,16 +30,16 @@ impl DatabaseRepository {
             )
         })?;
         let mut transaction = self.pool().begin().await?;
-        lock_active_customer_wallet(&mut transaction, workspace_id).await?;
-        lock_key(&mut transaction, workspace_id, key).await?;
-        if let Some(existing) = existing(&mut transaction, workspace_id, key).await? {
+        lock_active_customer_wallet(&mut transaction, account_id).await?;
+        lock_key(&mut transaction, account_id, key).await?;
+        if let Some(existing) = existing(&mut transaction, account_id, key).await? {
             validate_existing(&existing, customer_plan_id, binding_id, request)?;
             transaction.commit().await?;
             return Ok(existing);
         }
         let terms = lock_terms(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             binding_id,
             request,
@@ -47,13 +47,13 @@ impl DatabaseRepository {
         .await?;
         super::admission::ensure_admission_evidence(
             &mut transaction,
-            workspace_id,
+            account_id,
             request.new_plan_version_id,
         )
         .await?;
         let collection = insert_upgrade(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             binding_id,
             key,
@@ -70,7 +70,7 @@ impl DatabaseRepository {
         .bind(&request.actor_reference)
         .execute(&mut *transaction)
         .await?;
-        insert_event(&mut transaction, workspace_id, &collection).await?;
+        insert_event(&mut transaction, account_id, &collection).await?;
         transaction.commit().await?;
         Ok(collection)
     }
@@ -87,11 +87,11 @@ struct UpgradeTerms {
 
 async fn lock_key(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-        .bind(format!("billing:{workspace_id}:{key}"))
+        .bind(format!("billing:{account_id}:{key}"))
         .execute(&mut **transaction)
         .await?;
     Ok(())
@@ -99,13 +99,13 @@ async fn lock_key(
 
 async fn existing(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
 ) -> Result<Option<CollectionRequestResponse>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT * FROM collection_requests WHERE workspace_id=$1 AND idempotency_key=$2 FOR UPDATE",
+        "SELECT * FROM collection_requests WHERE account_id=$1 AND idempotency_key=$2 FOR UPDATE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(key)
     .fetch_optional(&mut **transaction)
     .await?;
@@ -136,7 +136,7 @@ fn validate_existing(
 
 async fn lock_terms(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     binding_id: Uuid,
     request: &CreatePlanTransitionRequest,
@@ -149,11 +149,11 @@ async fn lock_terms(
          statement_timestamp() scheduled_at,statement_timestamp()+s.payment_completion_window payment_expires_at \
          FROM customer_plans cp JOIN subscription_plan_versions current_plan ON current_plan.plan_version_id=cp.plan_version_id \
          JOIN subscription_plan_versions target ON target.plan_version_id=$3 JOIN subscriptions s ON s.subscription_id=target.subscription_id \
-         JOIN payment_method_bindings pmb ON pmb.payment_method_binding_id=$4 AND pmb.workspace_id=$1 AND pmb.customer_id=$1 \
+         JOIN payment_method_bindings pmb ON pmb.payment_method_binding_id=$4 AND pmb.account_id=$1 AND pmb.customer_id=$1 \
          WHERE cp.customer_plan_id=$2 AND cp.customer_id=$1 FOR UPDATE OF cp,current_plan,target,pmb")
-        .bind(workspace_id).bind(customer_plan_id).bind(request.new_plan_version_id).bind(binding_id)
+        .bind(account_id).bind(customer_plan_id).bind(request.new_plan_version_id).bind(binding_id)
         .fetch_optional(&mut **transaction).await?.ok_or_else(|| ApiError::not_found(
-            "plan_upgrade_resources_not_found", format!("upgrade resources must belong to workspace {workspace_id}"),
+            "plan_upgrade_resources_not_found", format!("upgrade resources must belong to account {account_id}"),
         ))?;
     validate_state(customer_plan_id, &row)?;
     let previous_amount: i64 = row.get("previous_amount_minor");
@@ -210,18 +210,18 @@ fn validate_state(customer_plan_id: Uuid, row: &sqlx::postgres::PgRow) -> ApiRes
 #[allow(clippy::too_many_arguments)]
 async fn insert_upgrade(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     binding_id: Uuid,
     key: &str,
     request: &CreatePlanTransitionRequest,
     terms: &UpgradeTerms,
 ) -> ApiResult<CollectionRequestResponse> {
-    let row = sqlx::query("INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id, \
+    let row = sqlx::query("INSERT INTO collection_requests (collection_request_id,account_id,customer_id, \
          customer_plan_id,plan_version_id,payment_method_binding_id,request_kind,amount_minor,currency, \
          granted_credit_units,status,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
          VALUES ($1,$2,$2,$3,$4,$5,'PLAN_UPGRADE',$6,$7,$8,'SCHEDULED',$9,$10,$11,$12,$13) RETURNING *")
-        .bind(Uuid::new_v4()).bind(workspace_id).bind(customer_plan_id).bind(request.new_plan_version_id)
+        .bind(Uuid::new_v4()).bind(account_id).bind(customer_plan_id).bind(request.new_plan_version_id)
         .bind(binding_id).bind(terms.amount_minor).bind(&terms.currency).bind(terms.credit_units)
         .bind(&request.transaction_id).bind(key).bind(Uuid::new_v4()).bind(terms.scheduled_at)
         .bind(terms.payment_expires_at).fetch_one(&mut **transaction).await?;
@@ -230,17 +230,17 @@ async fn insert_upgrade(
 
 async fn insert_event(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     collection: &CollectionRequestResponse,
 ) -> ApiResult<()> {
     let event_id = Uuid::new_v4();
     let payload = json!({"billing_event_id":event_id,"event_type":"collection.plan_upgrade_created",
-        "schema_version":1,"occurred_at":collection.scheduled_at,"workspace_id":workspace_id,
+        "schema_version":1,"occurred_at":collection.scheduled_at,"account_id":account_id,
         "collection_request_id":collection.collection_request_id,"customer_plan_id":collection.customer_plan_id});
     sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) SELECT $1,'collection.plan_upgrade_created','collection_request',$2,1,$3,correlation_id,$4 \
+         account_id,correlation_id,payload) SELECT $1,'collection.plan_upgrade_created','collection_request',$2,1,$3,correlation_id,$4 \
          FROM collection_requests WHERE collection_request_id=$2")
-        .bind(event_id).bind(collection.collection_request_id).bind(workspace_id).bind(payload)
+        .bind(event_id).bind(collection.collection_request_id).bind(account_id).bind(payload)
         .execute(&mut **transaction).await?;
     Ok(())
 }

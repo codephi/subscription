@@ -70,7 +70,7 @@ export function PromotionsPage() {
           />
         </CardContent>
       </Card>
-      <Card><CardContent className="flex items-center gap-3 py-5"><TicketPercent aria-hidden="true" /><p className="text-sm text-muted-foreground">O limite por workspace começa em 1 uso. Limites vazios são ilimitados.</p></CardContent></Card>
+      <Card><CardContent className="flex items-center gap-3 py-5"><TicketPercent aria-hidden="true" /><p className="text-sm text-muted-foreground">O limite por account começa em 1 uso. Limites vazios são ilimitados.</p></CardContent></Card>
     </main>
   );
 }

@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import {
   getProvisioning,
   getWallets,
-  getWorkspace,
+  getAccount,
   reconcileProvisioning,
 } from "@/api/client";
 import { QueryError, QueryLoading } from "@/components/query-feedback";
@@ -24,90 +24,90 @@ import {
   CreditsPanel,
   ItemUsagePanel,
   PlansPanel,
-} from "@/pages/workspace-panels";
+} from "@/pages/account-panels";
 
-export function WorkspacePage() {
-  const { workspaceId } = useParams<{ workspaceId: string }>();
-  if (!workspaceId) return <p>Workspace ID ausente.</p>;
-  return <WorkspaceContent key={workspaceId} workspaceId={workspaceId} />;
+export function AccountPage() {
+  const { accountId } = useParams<{ accountId: string }>();
+  if (!accountId) return <p>Account ID ausente.</p>;
+  return <AccountContent key={accountId} accountId={accountId} />;
 }
 
-function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
+function AccountContent({ accountId }: { accountId: string }) {
   const queryClient = useQueryClient();
   const selectItem = usePanelStore((state) => state.selectItem);
-  const workspace = useQuery({
-    queryKey: ["workspace", workspaceId],
-    queryFn: () => getWorkspace(workspaceId),
+  const account = useQuery({
+    queryKey: ["account", accountId],
+    queryFn: () => getAccount(accountId),
   });
   const wallets = useQuery({
-    queryKey: ["wallets", workspaceId],
-    queryFn: () => getWallets(workspaceId),
+    queryKey: ["wallets", accountId],
+    queryFn: () => getWallets(accountId),
   });
   const provisioning = useQuery({
-    queryKey: ["provisioning", workspaceId],
-    queryFn: () => getProvisioning(workspaceId),
+    queryKey: ["provisioning", accountId],
+    queryFn: () => getProvisioning(accountId),
   });
   const provisionWallets = useMutation({
-    mutationFn: () => reconcileProvisioning(workspaceId),
+    mutationFn: () => reconcileProvisioning(accountId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
-        queryKey: ["provisioning", workspaceId],
+        queryKey: ["provisioning", accountId],
       });
       await queryClient.invalidateQueries({
-        queryKey: ["wallets", workspaceId],
+        queryKey: ["wallets", accountId],
       });
     },
   });
-  useEffect(() => selectItem(null), [workspaceId, selectItem]);
+  useEffect(() => selectItem(null), [accountId, selectItem]);
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-3">
         <Link
-          to="/workspaces"
+          to="/accounts"
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
-          Workspaces
+          Accounts
         </Link>
         <div>
           <p className="text-sm font-medium text-muted-foreground">
             DETALHE OPERACIONAL
           </p>
           <h1 className="break-all text-2xl font-semibold tracking-tight md:text-3xl">
-            {workspaceId}
+            {accountId}
           </h1>
         </div>
         <Button
           variant="outline"
           nativeButton={false}
-          render={<Link to={`/workspaces/${workspaceId}/actions`} />}
+          render={<Link to={`/accounts/${accountId}/actions`} />}
         >
           Ações administrativas
         </Button>
         <Button
           variant="outline"
           nativeButton={false}
-          render={<Link to={`/workspaces/${workspaceId}/integrations`} />}
+          render={<Link to={`/accounts/${accountId}/integrations`} />}
         >
           Integrações
         </Button>
       </header>
-      {workspace.isLoading && <QueryLoading />}
-      {workspace.error && <QueryError error={workspace.error} />}
-      {workspace.data && (
+      {account.isLoading && <QueryLoading />}
+      {account.error && <QueryError error={account.error} />}
+      {account.data && (
         <div className="grid gap-4 md:grid-cols-3">
           <Card>
             <CardHeader>
-              <CardDescription>Estado do workspace</CardDescription>
+              <CardDescription>Estado do account</CardDescription>
               <CardTitle>
                 <Badge variant="outline">
-                  {workspace.data.operational_status}
+                  {account.data.operational_status}
                 </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground">
-              Sequência externa {workspace.data.external_sequence} · atualizado{" "}
-              {formatDate(workspace.data.updated_at)}
+              Sequência externa {account.data.external_sequence} · atualizado{" "}
+              {formatDate(account.data.updated_at)}
             </CardContent>
           </Card>
           <Card>
@@ -143,7 +143,7 @@ function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
                   ? "Carregando…"
                   : "Sem estado disponível"}
               <p className="mt-2">
-                Materializa a carteira do workspace e as item-wallets do
+                Materializa a carteira do account e as item-wallets do
                 catálogo atual. A operação pode ser repetida com segurança.
               </p>
               <Button
@@ -172,18 +172,18 @@ function WorkspaceContent({ workspaceId }: { workspaceId: string }) {
           </Card>
         </div>
       )}
-      {workspace.data && (wallets.error || provisioning.error) && (
+      {account.data && (wallets.error || provisioning.error) && (
         <div className="grid gap-3">
           {wallets.error && <QueryError error={wallets.error} />}
           {provisioning.error && <QueryError error={provisioning.error} />}
         </div>
       )}
-      {workspace.data && <PlansPanel workspaceId={workspaceId} />}
-      {workspace.data && <CreditsPanel workspaceId={workspaceId} />}
-      {workspace.data && wallets.isLoading && <QueryLoading />}
-      {workspace.data && wallets.data && (
+      {account.data && <PlansPanel accountId={accountId} />}
+      {account.data && <CreditsPanel accountId={accountId} />}
+      {account.data && wallets.isLoading && <QueryLoading />}
+      {account.data && wallets.data && (
         <ItemUsagePanel
-          workspaceId={workspaceId}
+          accountId={accountId}
           items={wallets.data.item_wallets}
         />
       )}

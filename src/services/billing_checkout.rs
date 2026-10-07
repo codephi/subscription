@@ -46,7 +46,7 @@ impl BillingCheckoutConfig {
 pub async fn create(
     repository: &DatabaseRepository,
     config: Option<&BillingCheckoutConfig>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     idempotency_key: &str,
     request: CreateCheckoutRequest,
 ) -> ApiResult<CheckoutResponse> {
@@ -59,23 +59,23 @@ pub async fn create(
     }
     let request_hash = checkout_request_hash(&request);
     let claim = repository
-        .claim_checkout(workspace_id, idempotency_key, &request, &request_hash)
+        .claim_checkout(account_id, idempotency_key, &request, &request_hash)
         .await?;
     create_or_resume(repository, config, claim, request).await
 }
 
 pub async fn get(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     checkout_id: Uuid,
 ) -> ApiResult<CheckoutResponse> {
-    let record = repository.checkout(checkout_id, Some(workspace_id)).await?;
+    let record = repository.checkout(checkout_id, Some(account_id)).await?;
     response_for_record(repository, record).await
 }
 
 pub async fn quote(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     request: CheckoutQuoteRequest,
 ) -> ApiResult<CheckoutQuoteResponse> {
     if request.coupon_code.trim().is_empty() || request.coupon_code.len() > 64 {
@@ -87,7 +87,7 @@ pub async fn quote(
             ),
         ));
     }
-    repository.quote_checkout(workspace_id, &request).await
+    repository.quote_checkout(account_id, &request).await
 }
 
 async fn create_or_resume(
@@ -119,7 +119,7 @@ async fn resume_hosted_checkout(
         return Ok(());
     };
     let secrets = repository
-        .integration_secrets(record.workspace_id, recovery.billing_connection_id)
+        .integration_secrets(record.account_id, recovery.billing_connection_id)
         .await?;
     let customer_id = billing_integrations::ensure_customer(repository, &secrets).await?;
     create_hosted_session(
@@ -156,7 +156,7 @@ async fn process_claim_inner(
     if request.coupon_code.is_some() {
         let quote = repository
             .quote_checkout(
-                record.workspace_id,
+                record.account_id,
                 &CheckoutQuoteRequest {
                     customer_plan_id: request.customer_plan_id,
                     checkout_kind: request.checkout_kind,
@@ -172,7 +172,7 @@ async fn process_claim_inner(
             return response_for_record(
                 repository,
                 repository
-                    .checkout(record.checkout_id, Some(record.workspace_id))
+                    .checkout(record.checkout_id, Some(record.account_id))
                     .await?,
             )
             .await;
@@ -199,7 +199,7 @@ async fn process_claim_inner(
             response_for_record(
                 repository,
                 repository
-                    .checkout(record.checkout_id, Some(record.workspace_id))
+                    .checkout(record.checkout_id, Some(record.account_id))
                     .await?,
             )
             .await
@@ -238,28 +238,31 @@ async fn prepare_payment_method(
 )> {
     if let Some(binding_id) = record.payment_method_binding_id {
         return repository
-            .find_payment_method_binding_by_id(record.workspace_id, binding_id)
+            .find_payment_method_binding_by_id(record.account_id, binding_id)
             .await
             .map(|binding| (binding, None));
     }
     let config = required_config(config)?;
     let connector = StripeConnector::new(config.api_secret.clone(), None);
-    let account_id = connector.identify_account().await.map_err(stripe_error)?;
+    let stripe_account_id = connector
+        .identify_stripe_account()
+        .await
+        .map_err(stripe_error)?;
     let integration =
-        ensure_integration(repository, config, record.workspace_id, &account_id).await?;
+        ensure_integration(repository, config, record.account_id, &stripe_account_id).await?;
     let secrets = repository
-        .integration_secrets(record.workspace_id, integration.billing_connection_id)
+        .integration_secrets(record.account_id, integration.billing_connection_id)
         .await?;
     let customer_id = billing_integrations::ensure_customer(repository, &secrets).await?;
     let binding_id = repository
         .ensure_hosted_payment_binding(
             record.checkout_id,
-            record.workspace_id,
+            record.account_id,
             integration.billing_connection_id,
         )
         .await?;
     let binding = repository
-        .find_payment_method_binding_by_id(record.workspace_id, binding_id)
+        .find_payment_method_binding_by_id(record.account_id, binding_id)
         .await?;
     Ok((binding, Some(HostedCheckout { customer_id })))
 }
@@ -361,54 +364,60 @@ fn return_url(value: &str, checkout_id: Uuid, success: bool) -> ApiResult<String
 async fn ensure_integration(
     repository: &DatabaseRepository,
     config: &BillingCheckoutConfig,
-    workspace_id: Uuid,
-    account_id: &str,
-) -> ApiResult<crate::dto::billing::WorkspaceIntegrationResponse> {
+    account_id: Uuid,
+    stripe_account_id: &str,
+) -> ApiResult<crate::dto::billing::AccountIntegrationResponse> {
     let current = repository
-        .find_test_stripe_integration(workspace_id, account_id)
+        .find_test_stripe_integration(account_id, stripe_account_id)
         .await?;
     let integration = match current {
         Some(integration) => integration,
-        None => create_integration(repository, workspace_id, account_id, config).await?,
+        None => create_integration(repository, account_id, stripe_account_id, config).await?,
     };
     if integration_is_ready(&integration) {
         return Ok(integration);
     }
-    configure_integration(repository, workspace_id, &integration, config).await
+    configure_integration(repository, account_id, &integration, config).await
 }
 
 pub(crate) async fn ensure_sandbox_integration(
     repository: &DatabaseRepository,
     config: &BillingCheckoutConfig,
-    workspace_id: Uuid,
-) -> ApiResult<crate::dto::billing::WorkspaceIntegrationResponse> {
-    let account_id = StripeConnector::new(config.api_secret.clone(), None)
-        .identify_account()
+    account_id: Uuid,
+) -> ApiResult<crate::dto::billing::AccountIntegrationResponse> {
+    let stripe_account_id = StripeConnector::new(config.api_secret.clone(), None)
+        .identify_stripe_account()
         .await
         .map_err(stripe_error)?;
-    ensure_integration(repository, config, workspace_id, &account_id).await
+    ensure_integration(repository, config, account_id, &stripe_account_id).await
 }
 
 async fn create_integration(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
-    account_id: &str,
+    account_id: Uuid,
+    stripe_account_id: &str,
     config: &BillingCheckoutConfig,
-) -> ApiResult<crate::dto::billing::WorkspaceIntegrationResponse> {
+) -> ApiResult<crate::dto::billing::AccountIntegrationResponse> {
     repository
-        .create_stripe_integration(workspace_id, account_id, "TEST", None, &config.api_secret)
+        .create_stripe_integration(
+            account_id,
+            stripe_account_id,
+            "TEST",
+            None,
+            &config.api_secret,
+        )
         .await
 }
 
 async fn configure_integration(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
-    integration: &crate::dto::billing::WorkspaceIntegrationResponse,
+    account_id: Uuid,
+    integration: &crate::dto::billing::AccountIntegrationResponse,
     config: &BillingCheckoutConfig,
-) -> ApiResult<crate::dto::billing::WorkspaceIntegrationResponse> {
+) -> ApiResult<crate::dto::billing::AccountIntegrationResponse> {
     let configured = billing_integrations::update_stripe(
         repository,
-        workspace_id,
+        account_id,
         integration.billing_connection_id,
         &UpdateStripeIntegrationRequest {
             expected_version: integration.configuration_version,
@@ -422,14 +431,14 @@ async fn configure_integration(
     }
     repository
         .activate_stripe_integration(
-            workspace_id,
+            account_id,
             configured.billing_connection_id,
             configured.configuration_version,
         )
         .await
 }
 
-fn integration_is_ready(integration: &crate::dto::billing::WorkspaceIntegrationResponse) -> bool {
+fn integration_is_ready(integration: &crate::dto::billing::AccountIntegrationResponse) -> bool {
     let active = integration.status == "ACTIVE";
     active && integration.webhook_secret_configured
 }
@@ -448,7 +457,7 @@ async fn create_collection(
         crate::dto::checkouts::CheckoutKind::Initial => {
             repository
                 .create_initial_collection_for_checkout(
-                    checkout.workspace_id,
+                    checkout.account_id,
                     checkout.customer_plan_id,
                     &checkout.idempotency_key,
                     &CreateInitialCollectionRequest {
@@ -462,7 +471,7 @@ async fn create_collection(
         crate::dto::checkouts::CheckoutKind::OnDemand => {
             repository
                 .create_on_demand_purchase_for_checkout(
-                    checkout.workspace_id,
+                    checkout.account_id,
                     checkout.customer_plan_id,
                     &checkout.idempotency_key,
                     &CreateOnDemandPurchaseRequest {
@@ -478,7 +487,7 @@ async fn create_collection(
         crate::dto::checkouts::CheckoutKind::PlanUpgrade => {
             crate::services::billing::create_paid_plan_upgrade(
                 repository,
-                checkout.workspace_id,
+                checkout.account_id,
                 checkout.customer_plan_id,
                 &checkout.idempotency_key,
                 &CreatePlanTransitionRequest {
@@ -488,7 +497,7 @@ async fn create_collection(
                     transition_kind: PlanTransitionKind::Upgrade,
                     payment_method_binding_id: Some(binding_id),
                     transaction_id: checkout.transaction_id.clone(),
-                    actor_reference: format!("workspace:{}", checkout.workspace_id),
+                    actor_reference: format!("account:{}", checkout.account_id),
                 },
             )
             .await
@@ -522,7 +531,7 @@ async fn response_for_record(
     }
     if let Some(collection_id) = record.collection_request_id {
         let collection = repository
-            .find_collection_request(record.workspace_id, collection_id)
+            .find_collection_request(record.account_id, collection_id)
             .await?;
         let mut response = repository.response_for_checkout(record.clone(), Some(&collection));
         response.redirect_url = repository
@@ -631,7 +640,7 @@ fn stripe_error(error: impl std::fmt::Display) -> ApiError {
 mod tests {
     use super::{integration_is_ready, return_url, validate_request, validate_return_urls};
     use crate::dto::{
-        billing::WorkspaceIntegrationResponse,
+        billing::AccountIntegrationResponse,
         checkouts::{CheckoutKind, CreateCheckoutRequest},
     };
     use uuid::Uuid;
@@ -661,7 +670,7 @@ mod tests {
 
     #[test]
     fn configured_checkout_integration_is_not_activated_twice() {
-        let mut integration = WorkspaceIntegrationResponse {
+        let mut integration = AccountIntegrationResponse {
             billing_connection_id: Uuid::new_v4(),
             provider: "STRIPE".into(),
             account_reference: "acct_test".into(),

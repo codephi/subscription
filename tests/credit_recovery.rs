@@ -99,12 +99,12 @@ async fn credit_lost_response_recovers_original_resource_from_either_conflict() 
 
 async fn assert_recovery_reference(fixture: &CreditFixture, conflict: &Value) {
     let reference = &conflict["error"]["existing_operation"];
-    assert_eq!(reference["workspace_id"], fixture.workspace_id.to_string());
+    assert_eq!(reference["account_id"], fixture.account_id.to_string());
     assert_eq!(reference["operation_kind"], "DIRECT_CREDIT");
     assert_eq!(reference["transaction_id"], "lost-transaction");
     let uri = format!(
-        "/v1/workspaces/{}/customer-wallet/transactions/{}",
-        fixture.workspace_id,
+        "/v1/accounts/{}/customer-wallet/transactions/{}",
+        fixture.account_id,
         reference["transaction_id"].as_str().unwrap()
     );
     let response = fixture.get(&uri).await;
@@ -131,11 +131,11 @@ async fn credit_outbox_is_invisible_before_commit_and_excludes_private_context()
     install_credit_commit_barrier(&fixture.pool).await;
     let before = fixture.snapshot().await;
     let repository = fixture.repository.clone();
-    let workspace_id = fixture.workspace_id;
+    let account_id = fixture.account_id;
     let worker = tokio::spawn(async move {
         subscription::services::credits::grant_direct_credit(
             &repository,
-            workspace_id,
+            account_id,
             "visible-after-commit",
             credit_request("visible-after-commit", 9),
         )
@@ -173,20 +173,20 @@ async fn wait_for_credit_commit(pool: &PgPool) {
 }
 
 async fn assert_private_credit_event(fixture: &CreditFixture) {
-    let rows: Vec<(Value, uuid::Uuid, uuid::Uuid)> = sqlx::query_as("SELECT payload,event_id,correlation_id FROM outbox_events WHERE workspace_id=$1 AND event_type='credit.granted'")
-        .bind(fixture.workspace_id).fetch_all(&fixture.pool).await.unwrap();
+    let rows: Vec<(Value, uuid::Uuid, uuid::Uuid)> = sqlx::query_as("SELECT payload,event_id,correlation_id FROM outbox_events WHERE account_id=$1 AND event_type='credit.granted'")
+        .bind(fixture.account_id).fetch_all(&fixture.pool).await.unwrap();
     assert_eq!(rows.len(), 1);
     let (event, event_id, correlation_id) = &rows[0];
     assert_eq!(event["event_id"], event_id.to_string());
     assert_eq!(event["correlation_id"], correlation_id.to_string());
-    assert_eq!(event["workspace_id"], fixture.workspace_id.to_string());
+    assert_eq!(event["account_id"], fixture.account_id.to_string());
     assert_eq!(event["schema_version"], 1);
     assert_eq!(event["payload"]["credit_units"], "9");
     assert_eq!(event["payload"].as_object().unwrap().len(), 2);
     let entry: uuid::Uuid = sqlx::query_scalar(
         "SELECT customer_wallet_entry_id FROM customer_wallet_entries WHERE customer_id=$1",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();

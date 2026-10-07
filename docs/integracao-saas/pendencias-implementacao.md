@@ -15,15 +15,15 @@ conhecidas da integração descrita nesses guias.
 ### Identidade e limite de cobrança
 
 - Cada conta pagante do SaaS deve ter um UUID estável usado como
-  `workspace_id` e `customer_id` na Subscription API.
-- Os workspaces, pipelines e execuções internos continuam identificados no
+  `account_id` e `customer_id` na Subscription API.
+- Os accounts, pipelines e execuções internos continuam identificados no
   banco do SaaS. A Subscription API não oferece saldo ou limite separado por
-  workspace interno; os itens da conta compartilham a `customer_wallet`.
-- O banco do SaaS deve relacionar pelo menos `account_id`, `workspace_id`,
+  account interno; os itens da conta compartilham a `customer_wallet`.
+- O banco do SaaS deve relacionar pelo menos `account_id`, `account_id`,
   Stripe Customer (`cus_...`), conexão de Billing, `customer_plan_id`,
   referências de preço/oferta e IDs de operações de cobrança.
 - Somente o backend autenticado do SaaS deve chamar as rotas de negócio. O
-  cliente não deve poder escolher livremente `workspace_id` nem chamar a API
+  cliente não deve poder escolher livremente `account_id` nem chamar a API
   diretamente.
 
 ### Quem controla a recorrência
@@ -91,10 +91,10 @@ das próximas cobranças.
 
 ### 3. Integrar criação e ativação de conta
 
-1. Criar usuário e conta no serviço de Accounts/SaaS e emitir um `workspace_id`
+1. Criar usuário e conta no serviço de Accounts/SaaS e emitir um `account_id`
    permanente.
-2. Enviar para `/v1/internal/accounts/workspace-events` os envelopes
-   assinados e ordenados `workspace.created` e `workspace.activated`. Guardar
+2. Enviar para `/v1/internal/accounts/account-events` os envelopes
+   assinados e ordenados `account.created` e `account.activated`. Guardar
    IDs de evento e sequência para não reutilizar identidade com outro corpo.
 3. Esperar a projeção operacional ativa e as wallets prontas antes de admitir
    o plano ou aceitar consumo. Reconciliar provisionamento quando a resposta
@@ -141,7 +141,7 @@ das próximas cobranças.
 ### 6. Cobrar pipeline de forma consistente
 
 1. Gerar um ID estável de execução no SaaS antes do enqueue e mapear a conta
-   para `workspace_id`, `product_id` e `item_id` configurados.
+   para `account_id`, `product_id` e `item_id` configurados.
 2. Antes de iniciar o pipeline, chamar `/usage-events` com `item_units`,
    `transaction_id` e `Idempotency-Key` determinísticos para aquela execução.
    Repetições devem representar retry da mesma execução, nunca uma nova
@@ -163,7 +163,7 @@ das próximas cobranças.
    não criam Stripe Product/Price/Subscription.
 2. **Vincular objetos:** persistir `stripe_subscription_id`, Customer,
    referência de preço e, conforme necessário, IDs de invoice/payment intent,
-   todos vinculados ao workspace e ao CustomerPlan internos. Definir restrições
+   todos vinculados ao account e ao CustomerPlan internos. Definir restrições
    de unicidade e integridade para evitar associação cruzada entre contas.
 3. **Definir a autoridade de estado:** mapear os estados da Stripe para estados
    comerciais e de renovação internos; decidir se mudanças são recebidas por
@@ -197,7 +197,7 @@ das próximas cobranças.
    adequado para cobrar uma única vez mesmo após restart ou claims concorrentes.
 2. Garantir criação idempotente e transacional: uma renovação por CustomerPlan
    e ciclo; respeitar cancelamento, transição, expiração e estado comercial;
-   não gerar cobrança para plano encerrado ou workspace bloqueado.
+   não gerar cobrança para plano encerrado ou account bloqueado.
 3. Despachar a cobrança pelo cartão salvo e tratar resposta incerta sem criar
    uma segunda cobrança. Preservar a chave idempotente de provedor e permitir
    reconciliação da tentativa original.
@@ -217,7 +217,7 @@ das próximas cobranças.
 | Já disponível | Continua sendo necessário implementar |
 | --- | --- |
 | Criar produtos, itens, preços, planos comerciais, ofertas avulsas e políticas; publicar preço e ativar produto. | Checkout e seleção de ofertas para clientes. |
-| Consultar workspaces, plano, saldo, extrato, medidor e prontidão das wallets. | Cadastro/login e associação de usuário à conta no SaaS. |
+| Consultar accounts, plano, saldo, extrato, medidor e prontidão das wallets. | Cadastro/login e associação de usuário à conta no SaaS. |
 | Configurar e testar uma integração Stripe gerenciada, validar chave e criar Customer associado à conexão. | Automação escalável de destinos Stripe/webhooks e checkout para o cliente. |
 | Conceder crédito manualmente e ajustar configuração de Billing. | Compra self-service de créditos e configuração self-service de cartão. |
 | Cancelar, transicionar ou revogar CustomerPlan; reconciliar wallets/uso. | Adesão de cliente, assinatura Stripe e geração de renovação automática. |
@@ -245,12 +245,12 @@ interna/VPN até que autenticação e autorização sejam implementadas.
    repetido, resposta perdida, falha de pagamento, autenticação adicional,
    restart/concorrência do worker e nenhuma liberação antes da confirmação.
 8. Antes de produção, proteger rotas de negócio e administrativas com
-   autenticação de serviço e autorização por workspace. A configuração atual
+   autenticação de serviço e autorização por account. A configuração atual
    depende de rede confiável e não oferece login/autorização.
 
 ## Critérios de conclusão
 
-- Uma conta autenticada do SaaS só opera sobre o seu workspace associado.
+- Uma conta autenticada do SaaS só opera sobre o seu account associado.
 - Um cartão só é vinculado depois de SetupIntent confirmado e validado contra
   o Customer correto; dados brutos do cartão nunca passam pelo backend.
 - Compra avulsa só credita após confirmação válida e não duplica com webhook

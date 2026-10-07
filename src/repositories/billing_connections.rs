@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub struct BillingConnectorConfiguration {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub billing_connection_id: Uuid,
     pub provider: String,
     pub external_account_reference: String,
@@ -35,24 +35,24 @@ pub struct PaymentMethodBindingRemoval {
 }
 
 impl DatabaseRepository {
-    pub async fn active_stripe_billing_connection(&self, workspace_id: Uuid) -> ApiResult<Uuid> {
+    pub async fn active_stripe_billing_connection(&self, account_id: Uuid) -> ApiResult<Uuid> {
         let ids: Vec<Uuid> = sqlx::query_scalar(
             "SELECT billing_connection_id FROM billing_connections \
-             WHERE workspace_id=$1 AND provider='STRIPE' AND status='ACTIVE' \
+             WHERE account_id=$1 AND provider='STRIPE' AND status='ACTIVE' \
              ORDER BY created_at,billing_connection_id LIMIT 2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_all(&self.pool())
         .await?;
         match ids.as_slice() {
             [connection_id] => Ok(*connection_id),
             [] => Err(ApiError::conflict(
                 "billing_connection_not_usable",
-                format!("workspace {workspace_id} has no ACTIVE payment integration"),
+                format!("account {account_id} has no ACTIVE payment integration"),
             )),
             _ => Err(ApiError::conflict(
                 "billing_connection_ambiguous",
-                format!("workspace {workspace_id} has multiple ACTIVE payment integrations"),
+                format!("account {account_id} has multiple ACTIVE payment integrations"),
             )),
         }
     }
@@ -60,20 +60,20 @@ impl DatabaseRepository {
     pub async fn record_payment_method_setup_session(
         &self,
         payment_method_setup_id: Uuid,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         customer_plan_id: Uuid,
         provider_setup_id: &str,
     ) -> ApiResult<()> {
         sqlx::query(
             "INSERT INTO payment_method_setup_sessions \
-             (payment_method_setup_id,provider_setup_id,billing_connection_id,workspace_id,customer_plan_id) \
+             (payment_method_setup_id,provider_setup_id,billing_connection_id,account_id,customer_plan_id) \
              VALUES ($1,$2,$3,$4,$5)",
         )
         .bind(payment_method_setup_id)
         .bind(provider_setup_id)
         .bind(connection_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(customer_plan_id)
         .execute(&self.pool())
         .await?;
@@ -82,15 +82,15 @@ impl DatabaseRepository {
 
     pub async fn find_payment_method_setup_session(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
         payment_method_setup_id: Uuid,
     ) -> ApiResult<RegisteredPaymentMethodSetup> {
         let row = sqlx::query(
             "SELECT billing_connection_id,provider_setup_id FROM payment_method_setup_sessions \
-             WHERE workspace_id=$1 AND customer_plan_id=$2 AND payment_method_setup_id=$3",
+             WHERE account_id=$1 AND customer_plan_id=$2 AND payment_method_setup_id=$3",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(customer_plan_id)
         .bind(payment_method_setup_id)
         .fetch_optional(&self.pool())
@@ -107,12 +107,12 @@ impl DatabaseRepository {
 
     pub async fn find_payment_method_binding_by_id(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         binding_id: Uuid,
     ) -> ApiResult<PaymentMethodBindingResponse> {
-        let row = sqlx::query("SELECT * FROM payment_method_bindings WHERE workspace_id=$1 AND payment_method_binding_id=$2")
-            .bind(workspace_id).bind(binding_id).fetch_optional(&self.pool()).await?
-            .ok_or_else(|| ApiError::not_found("payment_method_binding_not_found", format!("payment method binding {binding_id} does not belong to workspace {workspace_id}")))?;
+        let row = sqlx::query("SELECT * FROM payment_method_bindings WHERE account_id=$1 AND payment_method_binding_id=$2")
+            .bind(account_id).bind(binding_id).fetch_optional(&self.pool()).await?
+            .ok_or_else(|| ApiError::not_found("payment_method_binding_not_found", format!("payment method binding {binding_id} does not belong to account {account_id}")))?;
         let binding = binding_from_row(&row);
         if binding.status == "ACTIVE" {
             return Ok(binding);
@@ -125,20 +125,20 @@ impl DatabaseRepository {
 
     pub async fn find_payment_method_binding_for_removal(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         binding_id: Uuid,
     ) -> ApiResult<PaymentMethodBindingRemoval> {
         let row = sqlx::query(
-            "SELECT * FROM payment_method_bindings WHERE workspace_id=$1 AND payment_method_binding_id=$2",
+            "SELECT * FROM payment_method_bindings WHERE account_id=$1 AND payment_method_binding_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(binding_id)
         .fetch_optional(&self.pool())
         .await?
         .ok_or_else(|| {
             ApiError::not_found(
                 "payment_method_binding_not_found",
-                format!("payment method binding {binding_id} does not belong to workspace {workspace_id}"),
+                format!("payment method binding {binding_id} does not belong to account {account_id}"),
             )
         })?;
         Ok(PaymentMethodBindingRemoval {
@@ -149,15 +149,15 @@ impl DatabaseRepository {
 
     pub async fn find_payment_method_binding(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         provider_reference: &str,
     ) -> ApiResult<Option<PaymentMethodBindingResponse>> {
         let row = sqlx::query(
-            "SELECT * FROM payment_method_bindings WHERE workspace_id=$1 \
+            "SELECT * FROM payment_method_bindings WHERE account_id=$1 \
             AND billing_connection_id=$2 AND provider_payment_method_reference=$3",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(connection_id)
         .bind(provider_reference)
         .fetch_optional(&self.pool())
@@ -194,7 +194,7 @@ impl DatabaseRepository {
                 }
             });
         Ok(BillingConnectorConfiguration {
-            workspace_id: row.get("workspace_id"),
+            account_id: row.get("account_id"),
             billing_connection_id: connection_id,
             provider: row.get("provider"),
             external_account_reference: row.get("external_account_reference"),
@@ -211,18 +211,18 @@ impl DatabaseRepository {
 
     pub async fn create_billing_connection(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         request: &CreateBillingConnectionRequest,
     ) -> ApiResult<BillingConnectionResponse> {
-        ensure_active_workspace(&self.pool(), workspace_id).await?;
+        ensure_active_account(&self.pool(), account_id).await?;
         let row = sqlx::query(
-            "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+            "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
              external_account_reference,secret_reference,webhook_secret_reference,capabilities,status) \
              VALUES ($1,$2,$3,$4,$5,$6,ARRAY['CARD','SETUP_SESSION','OFF_SESSION','WEBHOOK'],'ACTIVE') \
              RETURNING *",
         )
         .bind(Uuid::new_v4())
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(&request.provider)
         .bind(&request.external_account_reference)
         .bind(&request.secret_reference)
@@ -234,30 +234,30 @@ impl DatabaseRepository {
 
     pub async fn find_billing_connection(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
     ) -> ApiResult<BillingConnectionResponse> {
         let row = sqlx::query(
-            "SELECT * FROM billing_connections WHERE workspace_id=$1 AND billing_connection_id=$2",
+            "SELECT * FROM billing_connections WHERE account_id=$1 AND billing_connection_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(connection_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_connection(workspace_id, connection_id))?;
+        .ok_or_else(|| missing_connection(account_id, connection_id))?;
         Ok(connection_from_row(&row))
     }
 
-    pub async fn ensure_customer_plan_workspace(
+    pub async fn ensure_customer_plan_account(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
     ) -> ApiResult<()> {
         let exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM customer_plans WHERE customer_plan_id=$1 AND customer_id=$2)",
         )
         .bind(customer_plan_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_one(&self.pool())
         .await?;
         if exists {
@@ -265,19 +265,19 @@ impl DatabaseRepository {
         }
         Err(ApiError::not_found(
             "customer_plan_not_found",
-            format!("customer plan {customer_plan_id} does not belong to workspace {workspace_id}"),
+            format!("customer plan {customer_plan_id} does not belong to account {account_id}"),
         ))
     }
 
     pub async fn create_verified_payment_method_binding(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         customer_plan_id: Option<Uuid>,
         provider_payment_method_reference: &str,
     ) -> ApiResult<PaymentMethodBindingResponse> {
         self.create_verified_payment_method_binding_with_name(
-            workspace_id,
+            account_id,
             connection_id,
             customer_plan_id,
             provider_payment_method_reference,
@@ -288,7 +288,7 @@ impl DatabaseRepository {
 
     pub async fn create_verified_payment_method_binding_with_name(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
         customer_plan_id: Option<Uuid>,
         provider_payment_method_reference: &str,
@@ -297,7 +297,7 @@ impl DatabaseRepository {
         validate_binding_reference(provider_payment_method_reference)?;
         if let Some(existing) = self
             .find_payment_method_binding(
-                workspace_id,
+                account_id,
                 connection_id,
                 provider_payment_method_reference,
             )
@@ -307,15 +307,15 @@ impl DatabaseRepository {
         }
         let row = sqlx::query(
             "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-             workspace_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,display_name,status) \
+             account_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,display_name,status) \
              SELECT $1,bc.billing_connection_id,$2,$2,$3,'CARD',$4,$5,'ACTIVE' FROM billing_connections bc \
-             WHERE bc.billing_connection_id=$6 AND bc.workspace_id=$2 AND bc.status='ACTIVE' \
+             WHERE bc.billing_connection_id=$6 AND bc.account_id=$2 AND bc.status='ACTIVE' \
              AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM customer_plans cp \
                WHERE cp.customer_plan_id=$3 AND cp.customer_id=$2)) \
              ON CONFLICT (billing_connection_id,provider_payment_method_reference) DO NOTHING RETURNING *",
         )
         .bind(Uuid::new_v4())
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(customer_plan_id)
         .bind(provider_payment_method_reference)
         .bind(display_name)
@@ -327,7 +327,7 @@ impl DatabaseRepository {
         }
         if let Some(existing) = self
             .find_payment_method_binding(
-                workspace_id,
+                account_id,
                 connection_id,
                 provider_payment_method_reference,
             )
@@ -335,17 +335,17 @@ impl DatabaseRepository {
         {
             return active_binding(existing);
         }
-        Err(missing_connection(workspace_id, connection_id))
+        Err(missing_connection(account_id, connection_id))
     }
 
     pub async fn list_payment_method_bindings(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
     ) -> ApiResult<Vec<PaymentMethodBindingResponse>> {
         let rows = sqlx::query(
-            "SELECT * FROM payment_method_bindings WHERE workspace_id=$1 ORDER BY created_at,payment_method_binding_id",
+            "SELECT * FROM payment_method_bindings WHERE account_id=$1 ORDER BY created_at,payment_method_binding_id",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_all(&self.pool())
         .await?;
         Ok(rows.iter().map(binding_from_row).collect())
@@ -353,15 +353,15 @@ impl DatabaseRepository {
 
     pub async fn mark_payment_method_binding_detached(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         binding_id: Uuid,
     ) -> ApiResult<()> {
         let row = sqlx::query(
             "UPDATE payment_method_bindings SET status='DETACHED' \
-             WHERE workspace_id=$1 AND payment_method_binding_id=$2 AND status='ACTIVE' \
+             WHERE account_id=$1 AND payment_method_binding_id=$2 AND status='ACTIVE' \
              RETURNING status",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(binding_id)
         .fetch_optional(&self.pool())
         .await?;
@@ -369,7 +369,7 @@ impl DatabaseRepository {
             return Ok(());
         }
         let current = self
-            .find_payment_method_binding_for_removal(workspace_id, binding_id)
+            .find_payment_method_binding_for_removal(account_id, binding_id)
             .await?;
         if current.binding.status == "DETACHED" {
             return Ok(());
@@ -399,19 +399,19 @@ fn active_binding(
     ))
 }
 
-async fn ensure_active_workspace(pool: &sqlx::PgPool, workspace_id: Uuid) -> ApiResult<()> {
+async fn ensure_active_account(pool: &sqlx::PgPool, account_id: Uuid) -> ApiResult<()> {
     let status: Option<String> = sqlx::query_scalar(
-        "SELECT operational_status FROM workspace_projections WHERE workspace_id=$1",
+        "SELECT operational_status FROM account_projections WHERE account_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_optional(pool)
     .await?;
     if status.as_deref() == Some("ACTIVE") {
         return Ok(());
     }
     Err(ApiError::conflict(
-        "workspace_not_operational",
-        format!("workspace {workspace_id} must exist with ACTIVE status"),
+        "account_not_operational",
+        format!("account {account_id} must exist with ACTIVE status"),
     ))
 }
 
@@ -429,7 +429,7 @@ fn connection_from_row(row: &sqlx::postgres::PgRow) -> BillingConnectionResponse
     let id: Uuid = row.get("billing_connection_id");
     BillingConnectionResponse {
         billing_connection_id: id,
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         provider: row.get("provider"),
         external_account_reference: row.get("external_account_reference"),
         capabilities: row.get("capabilities"),
@@ -444,7 +444,7 @@ fn binding_from_row(row: &sqlx::postgres::PgRow) -> PaymentMethodBindingResponse
     PaymentMethodBindingResponse {
         payment_method_binding_id: row.get("payment_method_binding_id"),
         billing_connection_id: row.get("billing_connection_id"),
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         customer_plan_id: row.get("customer_plan_id"),
         payment_method: row.get("payment_method"),
         display_name: row.get("display_name"),
@@ -453,9 +453,9 @@ fn binding_from_row(row: &sqlx::postgres::PgRow) -> PaymentMethodBindingResponse
     }
 }
 
-fn missing_connection(workspace_id: Uuid, connection_id: Uuid) -> ApiError {
+fn missing_connection(account_id: Uuid, connection_id: Uuid) -> ApiError {
     ApiError::not_found(
         "billing_connection_not_found",
-        format!("billing connection {connection_id} does not exist in workspace {workspace_id}"),
+        format!("billing connection {connection_id} does not exist in account {account_id}"),
     )
 }

@@ -1,5 +1,5 @@
 use super::{
-    apply_workspace_event, create_billable_catalog, setup_router_with_options, DatabaseRepository,
+    apply_account_event, create_billable_catalog, setup_router_with_options, DatabaseRepository,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -8,14 +8,14 @@ use uuid::Uuid;
 async fn provisioning_failure_and_concurrent_retry_preserve_one_error_and_recover() {
     let (router, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
-    let workspace = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace, "workspace.activated", 2).await;
+    let account = Uuid::new_v4();
+    apply_account_event(&repository, account, "account.created", 1).await;
+    apply_account_event(&repository, account, "account.activated", 2).await;
     create_billable_catalog(&repository, 1).await;
     FakeWalletMaterializationFailure::install(&pool).await;
     let (first, second) = tokio::join!(
-        repository.reconcile_wallets(workspace, Some("test:failure")),
-        repository.reconcile_wallets(workspace, Some("test:failure"))
+        repository.reconcile_wallets(account, Some("test:failure")),
+        repository.reconcile_wallets(account, Some("test:failure"))
     );
     for result in [first, second] {
         let response = result.expect("persisted failure response");
@@ -29,20 +29,20 @@ async fn provisioning_failure_and_concurrent_retry_preserve_one_error_and_recove
         );
         assert!(response.error_detail.unwrap().contains("database_error"));
     }
-    let hierarchy = repository.find_wallet_hierarchy(workspace).await.unwrap();
+    let hierarchy = repository.find_wallet_hierarchy(account).await.unwrap();
     assert!(!hierarchy.ready);
     assert_eq!(hierarchy.customer_wallet.status.as_str(), "ERROR");
     assert!(hierarchy.item_wallets.is_empty());
-    assert_failure_history(&pool, workspace).await;
+    assert_failure_history(&pool, account).await;
     let response = super::post_json(
         &router,
-        &format!("/v1/admin/workspaces/{workspace}/wallet-provisioning/reconcile"),
+        &format!("/v1/admin/accounts/{account}/wallet-provisioning/reconcile"),
     )
     .await;
     assert_eq!(response["status"], "ERROR");
     let openapi = super::get_json(&router, "/openapi.json").await;
     let responses = &openapi["paths"]
-        ["/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile"]["post"]["responses"];
+        ["/v1/admin/accounts/{account_id}/wallet-provisioning/reconcile"]["post"]["responses"];
     assert!(responses["200"]["description"]
         .as_str()
         .unwrap()
@@ -50,12 +50,12 @@ async fn provisioning_failure_and_concurrent_retry_preserve_one_error_and_recove
     assert!(responses.get("500").is_some());
     create_billable_catalog(&repository, 1).await;
     let next_scope = repository
-        .reconcile_wallets(workspace, Some("test:new-scope"))
+        .reconcile_wallets(account, Some("test:new-scope"))
         .await
         .unwrap();
     assert_eq!(next_scope.expected_item_wallets, 2);
     let failures: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_events WHERE event_type='workspace_provisioning.failed'",
+        "SELECT count(*) FROM outbox_events WHERE event_type='account_provisioning.failed'",
     )
     .fetch_one(&pool)
     .await
@@ -63,14 +63,14 @@ async fn provisioning_failure_and_concurrent_retry_preserve_one_error_and_recove
     assert_eq!(failures, 2);
     FakeWalletMaterializationFailure::remove(&pool).await;
     let (first, second) = tokio::join!(
-        repository.reconcile_wallets(workspace, Some("test:recovery")),
-        repository.reconcile_wallets(workspace, Some("test:recovery"))
+        repository.reconcile_wallets(account, Some("test:recovery")),
+        repository.reconcile_wallets(account, Some("test:recovery"))
     );
     assert_eq!(first.unwrap().status.as_str(), "ACTIVE");
     assert_eq!(second.unwrap().status.as_str(), "ACTIVE");
     assert_eq!(
         repository
-            .find_wallet_hierarchy(workspace)
+            .find_wallet_hierarchy(account)
             .await
             .unwrap()
             .item_wallets
@@ -85,25 +85,25 @@ async fn provisioning_failure_and_concurrent_retry_preserve_one_error_and_recove
     assert_eq!(
         &events[4..],
         [
-            "workspace_provisioning.started",
-            "workspace_provisioning.failed",
-            "workspace_provisioning.started",
-            "workspace_provisioning.failed",
-            "workspace_provisioning.started",
-            "workspace_provisioning.completed"
+            "account_provisioning.started",
+            "account_provisioning.failed",
+            "account_provisioning.started",
+            "account_provisioning.failed",
+            "account_provisioning.started",
+            "account_provisioning.completed"
         ]
     );
 }
 
-async fn assert_failure_history(pool: &PgPool, workspace: Uuid) {
+async fn assert_failure_history(pool: &PgPool, account: Uuid) {
     let failures: i64 =
         sqlx::query_scalar("SELECT count(*) FROM wallet_lifecycle_events WHERE new_status='ERROR'")
             .fetch_one(pool)
             .await
             .unwrap();
     assert_eq!(failures, 1);
-    let envelope: serde_json::Value = sqlx::query_scalar("SELECT payload FROM outbox_events WHERE workspace_id=$1 AND event_type='workspace_provisioning.failed'")
-        .bind(workspace).fetch_one(pool).await.unwrap();
+    let envelope: serde_json::Value = sqlx::query_scalar("SELECT payload FROM outbox_events WHERE account_id=$1 AND event_type='account_provisioning.failed'")
+        .bind(account).fetch_one(pool).await.unwrap();
     assert_eq!(envelope["schema_version"], 1);
     assert_eq!(envelope["payload"]["status"], "ERROR");
     assert_eq!(envelope["payload"]["materialized_item_wallets"], 0);
@@ -127,22 +127,22 @@ async fn assert_failure_history(pool: &PgPool, workspace: Uuid) {
 async fn incomplete_specialization_never_marks_customer_ready() {
     let (_, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
-    let workspace = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace, "workspace.activated", 2).await;
+    let account = Uuid::new_v4();
+    apply_account_event(&repository, account, "account.created", 1).await;
+    apply_account_event(&repository, account, "account.activated", 2).await;
     create_billable_catalog(&repository, 1).await;
     FakeWalletMaterializationFailure::install(&pool).await;
     sqlx::raw_sql("CREATE OR REPLACE FUNCTION fake_wallet_failure() RETURNS trigger AS $$ BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql;")
         .execute(&pool).await.unwrap();
     let response = repository
-        .reconcile_wallets(workspace, Some("test:partial"))
+        .reconcile_wallets(account, Some("test:partial"))
         .await
         .unwrap();
     assert_eq!(response.status.as_str(), "ERROR");
     assert_eq!(response.materialized_item_wallets, 0);
     assert!(
         !repository
-            .find_wallet_hierarchy(workspace)
+            .find_wallet_hierarchy(account)
             .await
             .unwrap()
             .ready
@@ -150,7 +150,7 @@ async fn incomplete_specialization_never_marks_customer_ready() {
     FakeWalletMaterializationFailure::remove(&pool).await;
     assert_eq!(
         repository
-            .reconcile_wallets(workspace, Some("test:repair"))
+            .reconcile_wallets(account, Some("test:repair"))
             .await
             .unwrap()
             .status
@@ -165,15 +165,15 @@ struct FakeWalletMaterializationFailure;
 async fn returning_to_previously_active_scope_records_its_new_failure() {
     let (_, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
-    let workspace = Uuid::new_v4();
+    let account = Uuid::new_v4();
     create_billable_catalog(&repository, 1).await;
-    apply_workspace_event(&repository, workspace, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace, "workspace.activated", 2).await;
+    apply_account_event(&repository, account, "account.created", 1).await;
+    apply_account_event(&repository, account, "account.activated", 2).await;
     let additional = create_billable_catalog(&repository, 1).await;
     FakeWalletMaterializationFailure::install(&pool).await;
     assert_eq!(
         repository
-            .reconcile_wallets(workspace, Some("test:expanded"))
+            .reconcile_wallets(account, Some("test:expanded"))
             .await
             .unwrap()
             .status
@@ -183,7 +183,7 @@ async fn returning_to_previously_active_scope_records_its_new_failure() {
     super::deactivate_product(&repository, additional).await;
     assert_eq!(
         repository
-            .reconcile_wallets(workspace, Some("test:original"))
+            .reconcile_wallets(account, Some("test:original"))
             .await
             .unwrap()
             .status
@@ -191,7 +191,7 @@ async fn returning_to_previously_active_scope_records_its_new_failure() {
         "ERROR"
     );
     let failures: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_events WHERE event_type='workspace_provisioning.failed'",
+        "SELECT count(*) FROM outbox_events WHERE event_type='account_provisioning.failed'",
     )
     .fetch_one(&pool)
     .await
@@ -203,16 +203,16 @@ async fn returning_to_previously_active_scope_records_its_new_failure() {
 async fn failed_outbox_write_rolls_back_the_entire_failure_record() {
     let (_, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
-    let workspace = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace, "workspace.activated", 2).await;
+    let account = Uuid::new_v4();
+    apply_account_event(&repository, account, "account.created", 1).await;
+    apply_account_event(&repository, account, "account.activated", 2).await;
     create_billable_catalog(&repository, 1).await;
     FakeWalletMaterializationFailure::install(&pool).await;
-    sqlx::raw_sql("CREATE FUNCTION fake_failed_outbox() RETURNS trigger AS $$ BEGIN IF NEW.event_type='workspace_provisioning.failed' THEN RAISE EXCEPTION 'fake failed outbox'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql; CREATE TRIGGER fake_failed_outbox BEFORE INSERT ON outbox_events FOR EACH ROW EXECUTE FUNCTION fake_failed_outbox();")
+    sqlx::raw_sql("CREATE FUNCTION fake_failed_outbox() RETURNS trigger AS $$ BEGIN IF NEW.event_type='account_provisioning.failed' THEN RAISE EXCEPTION 'fake failed outbox'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql; CREATE TRIGGER fake_failed_outbox BEFORE INSERT ON outbox_events FOR EACH ROW EXECUTE FUNCTION fake_failed_outbox();")
         .execute(&pool).await.unwrap();
     let before = provisioning_snapshot(&pool).await;
     assert!(repository
-        .reconcile_wallets(workspace, Some("test:atomic"))
+        .reconcile_wallets(account, Some("test:atomic"))
         .await
         .is_err());
     assert_eq!(provisioning_snapshot(&pool).await, before);

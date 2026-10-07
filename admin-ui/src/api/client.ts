@@ -9,7 +9,7 @@ export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string;
   readonly existingOperation?: {
-    workspace_id: string;
+    account_id: string;
     operation_kind: string;
     resource_id: string;
     transaction_id: string;
@@ -20,7 +20,7 @@ export class ApiRequestError extends Error {
     code: string,
     message: string,
     existingOperation?: {
-      workspace_id: string;
+      account_id: string;
       operation_kind: string;
       resource_id: string;
       transaction_id: string;
@@ -46,7 +46,7 @@ export function unwrapResponse<T>(response: {
           code?: string;
           message?: string;
           existing_operation?: {
-            workspace_id: string;
+            account_id: string;
             operation_kind: string;
             resource_id: string;
             transaction_id: string;
@@ -63,48 +63,48 @@ export function unwrapResponse<T>(response: {
   );
 }
 
-/** Page workspace projections; e.g. `listWorkspaces()` for the search table. */
-export async function listWorkspaces(cursor?: string) {
+/** Page account projections; e.g. `listAccounts()` for the search table. */
+export async function listAccounts(cursor?: string) {
   return unwrapResponse(
-    await api.GET("/v1/admin/workspaces", {
+    await api.GET("/v1/admin/accounts", {
       params: { query: { cursor, limit: 20 } },
     }),
   );
 }
 
-/** Read one workspace projection; e.g. `getWorkspace(id)` for its heading. */
-export async function getWorkspace(workspaceId: string) {
+/** Read one account projection; e.g. `getAccount(id)` for its heading. */
+export async function getAccount(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/admin/workspaces/{workspace_id}", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.GET("/v1/admin/accounts/{account_id}", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
-/** Create a workspace from the admin panel; e.g. `createWorkspace("ops@example.com")`. */
-export async function createWorkspace(actorReference: string) {
+/** Create a account from the admin panel; e.g. `createAccount("ops@example.com")`. */
+export async function createAccount(actorReference: string) {
   return unwrapResponse(
-    await api.POST("/v1/admin/workspaces", {
+    await api.POST("/v1/admin/accounts", {
       body: { actor_reference: actorReference },
     }),
   );
 }
 
-/** Terminate a workspace while preserving its billing and audit history. */
-export async function terminateWorkspace(workspaceId: string) {
+/** Terminate a account while preserving its billing and audit history. */
+export async function terminateAccount(accountId: string) {
   return unwrapResponse(
-    await api.POST("/v1/admin/workspaces/{workspace_id}/terminate", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.POST("/v1/admin/accounts/{account_id}/terminate", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
-/** Page customer plans; e.g. `listCustomerPlans(id)` for the workspace panel. */
-export async function listCustomerPlans(workspaceId: string, cursor?: string) {
+/** Page customer plans; e.g. `listCustomerPlans(id)` for the account panel. */
+export async function listCustomerPlans(accountId: string, cursor?: string) {
   return unwrapResponse(
-    await api.GET("/v1/admin/workspaces/{workspace_id}/customer-plans", {
+    await api.GET("/v1/admin/accounts/{account_id}/customer-plans", {
       params: {
-        path: { workspace_id: workspaceId },
+        path: { account_id: accountId },
         query: { cursor, limit: 20 },
       },
     }),
@@ -112,29 +112,29 @@ export async function listCustomerPlans(workspaceId: string, cursor?: string) {
 }
 
 /** Read wallet hierarchy; e.g. `getWallets(id)` for available item wallets. */
-export async function getWallets(workspaceId: string) {
+export async function getWallets(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/wallets", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.GET("/v1/accounts/{account_id}/wallets", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
 /** Read wallet provisioning; e.g. `getProvisioning(id)` for readiness. */
-export async function getProvisioning(workspaceId: string) {
+export async function getProvisioning(accountId: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/wallet-provisioning", {
-      params: { path: { workspace_id: workspaceId } },
+    await api.GET("/v1/accounts/{account_id}/wallet-provisioning", {
+      params: { path: { account_id: accountId } },
     }),
   );
 }
 
 /** Page credit entries; e.g. `getStatement(id)` for recent credit activity. */
-export async function getStatement(workspaceId: string, cursor?: string) {
+export async function getStatement(accountId: string, cursor?: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/customer-wallet/statement", {
+    await api.GET("/v1/accounts/{account_id}/customer-wallet/statement", {
       params: {
-        path: { workspace_id: workspaceId },
+        path: { account_id: accountId },
         query: { cursor, limit: 20 },
       },
     }),
@@ -142,26 +142,26 @@ export async function getStatement(workspaceId: string, cursor?: string) {
 }
 
 /** Read an item meter on demand; e.g. `getItemMeter(id, itemId)` after selection. */
-export async function getItemMeter(workspaceId: string, itemId: string) {
+export async function getItemMeter(accountId: string, itemId: string) {
   return unwrapResponse(
-    await api.GET("/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet", {
-      params: { path: { workspace_id: workspaceId, item_id: itemId } },
+    await api.GET("/v1/accounts/{account_id}/items/{item_id}/item-wallet", {
+      params: { path: { account_id: accountId, item_id: itemId } },
     }),
   );
 }
 
 /** Page item usage entries; e.g. `getItemStatement(id, itemId)` in consumption. */
 export async function getItemStatement(
-  workspaceId: string,
+  accountId: string,
   itemId: string,
   cursor?: string,
 ) {
   return unwrapResponse(
     await api.GET(
-      "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement",
+      "/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement",
       {
         params: {
-          path: { workspace_id: workspaceId, item_id: itemId },
+          path: { account_id: accountId, item_id: itemId },
           query: { cursor, limit: 20 },
         },
       },

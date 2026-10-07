@@ -2,7 +2,7 @@
 
 TaskLab é uma POC para testar uma aplicação cliente da Subscription. O checkout envia o plano, o pacote, uma referência de cartão tokenizado e uma chave de idempotência. Para adicionar cartão, a TaskLab redireciona à página hospedada da Stripe nos ambientes de teste e produção; PAN/CVC são enviados diretamente à Stripe, sem passar pela API TaskLab. O nome opcional do cartão fica no navegador até a Subscription confirmar o vínculo; cartões salvos também podem ser removidos pela mesma integração.
 
-Veja a [documentação completa da integração com a Subscription](../docs/integracao-saas/tasklab.md) para os contratos remotos, provisionamento do workspace, catálogo, checkout, medição de uso e limites atuais.
+Veja a [documentação completa da integração com a Subscription](../docs/integracao-saas/tasklab.md) para os contratos remotos, provisionamento do account, catálogo, checkout, medição de uso e limites atuais.
 
 O frontend usa shadcn/ui com preset Base Nova e Base UI. Os controles visuais vêm dos componentes em `web/src/components/ui`; para consultar a configuração e adicionar novos componentes, use `npm run ui:info` e `npm run ui:add -- <componente>`.
 

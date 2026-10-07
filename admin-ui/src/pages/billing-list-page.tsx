@@ -57,9 +57,9 @@ export function BillingListPage() {
 
 function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const workspace = usePanelStore((state) => state.billingWorkspaceFilter);
-  const setWorkspace = usePanelStore(
-    (state) => state.setBillingWorkspaceFilter,
+  const account = usePanelStore((state) => state.billingAccountFilter);
+  const setAccount = usePanelStore(
+    (state) => state.setBillingAccountFilter,
   );
   const setStatus = usePanelStore((state) => state.setBillingStatusFilter);
   const status = searchParams.get("status") ?? "all";
@@ -67,8 +67,8 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
   const correlationId = searchParams.get("correlation_id") ?? "";
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
-  const validWorkspace =
-    workspace.trim() === "" || uuidPattern.test(workspace.trim());
+  const validAccount =
+    account.trim() === "" || uuidPattern.test(account.trim());
   const validReferences =
     (!collectionId || uuidPattern.test(collectionId)) &&
     (!correlationId || uuidPattern.test(correlationId));
@@ -86,7 +86,7 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
       "billing-records",
       kind,
       cursor,
-      workspace,
+      account,
       selectedStatus,
       collectionId,
       correlationId,
@@ -95,12 +95,12 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
       listBillingRecords(
         kind,
         cursor,
-        workspace.trim() || undefined,
+        account.trim() || undefined,
         selectedStatus === "all" ? undefined : selectedStatus,
         collectionId || undefined,
         correlationId || undefined,
       ),
-    enabled: validWorkspace && validReferences,
+    enabled: validAccount && validReferences,
   });
   return (
     <div className="flex flex-col gap-6">
@@ -116,22 +116,22 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
       <Card>
         <CardHeader>
           <CardTitle>Filtros</CardTitle>
-          <CardDescription>Workspace e estado dos registros.</CardDescription>
+          <CardDescription>Account e estado dos registros.</CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup className="grid gap-4 md:grid-cols-2">
-            <Field data-invalid={!validWorkspace}>
-              <FieldLabel htmlFor="billing-workspace">Workspace ID</FieldLabel>
+            <Field data-invalid={!validAccount}>
+              <FieldLabel htmlFor="billing-account">Account ID</FieldLabel>
               <Input
-                id="billing-workspace"
-                value={workspace}
+                id="billing-account"
+                value={account}
                 onChange={(event) => {
-                  setWorkspace(event.target.value);
+                  setAccount(event.target.value);
                   setCursor(undefined);
                   setHistory([]);
                 }}
-                placeholder="Todos os workspaces"
-                aria-invalid={!validWorkspace}
+                placeholder="Todos os accounts"
+                aria-invalid={!validAccount}
               />
             </Field>
             <Field>
@@ -206,7 +206,7 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {!validWorkspace && (
+          {!validAccount && (
             <p role="alert" className="text-sm text-destructive">
               Informe um UUID válido ou deixe o filtro vazio.
             </p>
@@ -231,7 +231,7 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
                   <TableRow>
                     <TableHead>ID</TableHead>
                     <TableHead>Estado</TableHead>
-                    <TableHead>Workspace</TableHead>
+                    <TableHead>Account</TableHead>
                     <TableHead>Referência</TableHead>
                     <TableHead>Recebido/criado</TableHead>
                   </TableRow>
@@ -251,12 +251,12 @@ function BillingRecords({ kind }: { kind: keyof typeof billingKinds }) {
                         <Badge variant="outline">{record.status}</Badge>
                       </TableCell>
                       <TableCell>
-                        {record.workspace_id ? (
+                        {record.account_id ? (
                           <Link
                             className="font-mono text-xs text-primary hover:underline"
-                            to={`/workspaces/${record.workspace_id}`}
+                            to={`/accounts/${record.account_id}`}
                           >
-                            {shortId(record.workspace_id)}
+                            {shortId(record.account_id)}
                           </Link>
                         ) : (
                           "—"

@@ -28,14 +28,14 @@ const OverviewPage = lazy(() =>
     default: module.OverviewPage,
   })),
 );
-const WorkspaceListPage = lazy(() =>
-  import("@/pages/workspace-list-page").then((module) => ({
-    default: module.WorkspaceListPage,
+const AccountListPage = lazy(() =>
+  import("@/pages/account-list-page").then((module) => ({
+    default: module.AccountListPage,
   })),
 );
-const WorkspacePage = lazy(() =>
-  import("@/pages/workspace-page").then((module) => ({
-    default: module.WorkspacePage,
+const AccountPage = lazy(() =>
+  import("@/pages/account-page").then((module) => ({
+    default: module.AccountPage,
   })),
 );
 const BillingListPage = lazy(() =>
@@ -63,14 +63,14 @@ const CatalogCreatePage = lazy(() =>
     default: module.CatalogCreatePage,
   })),
 );
-const WorkspaceActionsPage = lazy(() =>
-  import("@/pages/workspace-actions-page").then((module) => ({
-    default: module.WorkspaceActionsPage,
+const AccountActionsPage = lazy(() =>
+  import("@/pages/account-actions-page").then((module) => ({
+    default: module.AccountActionsPage,
   })),
 );
-const WorkspaceIntegrationsPage = lazy(() =>
-  import("@/pages/workspace-integrations-page").then((module) => ({
-    default: module.WorkspaceIntegrationsPage,
+const AccountIntegrationsPage = lazy(() =>
+  import("@/pages/account-integrations-page").then((module) => ({
+    default: module.AccountIntegrationsPage,
   })),
 );
 const PlanActionsPage = lazy(() =>
@@ -116,7 +116,7 @@ const queryClient = new QueryClient({
 function Navigation() {
   const links = [
     { to: "/", label: "Visão geral", icon: LayoutDashboard },
-    { to: "/workspaces", label: "Workspaces", icon: Boxes },
+    { to: "/accounts", label: "Accounts", icon: Boxes },
     { to: "/billing/collections", label: "Billing", icon: CreditCard },
     { to: "/catalog/products", label: "Catálogo", icon: Package },
     { to: "/promotions", label: "Promoções", icon: TicketPercent },
@@ -191,21 +191,21 @@ function Shell() {
         <Suspense fallback={<p role="status">Carregando página…</p>}>
           <Routes>
             <Route path="/" element={<OverviewPage />} />
-            <Route path="/workspaces" element={<WorkspaceListPage />} />
+            <Route path="/accounts" element={<AccountListPage />} />
             <Route
-              path="/workspaces/:workspaceId"
-              element={<WorkspacePage />}
+              path="/accounts/:accountId"
+              element={<AccountPage />}
             />
             <Route
-              path="/workspaces/:workspaceId/actions"
-              element={<WorkspaceActionsPage />}
+              path="/accounts/:accountId/actions"
+              element={<AccountActionsPage />}
             />
             <Route
-              path="/workspaces/:workspaceId/integrations"
-              element={<WorkspaceIntegrationsPage />}
+              path="/accounts/:accountId/integrations"
+              element={<AccountIntegrationsPage />}
             />
             <Route
-              path="/workspaces/:workspaceId/plans/:planId/actions"
+              path="/accounts/:accountId/plans/:planId/actions"
               element={<PlanActionsPage />}
             />
             <Route path="/billing/:kind" element={<BillingListPage />} />

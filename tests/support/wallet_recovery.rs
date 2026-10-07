@@ -1,5 +1,5 @@
 use super::{
-    apply_workspace_event, create_billable_catalog, setup_router_with_options, DatabaseRepository,
+    apply_account_event, create_billable_catalog, setup_router_with_options, DatabaseRepository,
 };
 use serde_json::Value;
 use sqlx::PgPool;
@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reconciliation_rebuilds_missing_and_corrupt_projections_without_rewriting_history() {
-    let (pool, workspace) = recovery_fixture().await;
+    let (pool, account) = recovery_fixture().await;
     let repository = DatabaseRepository::new(pool.clone());
     let before = lifecycle_history(&pool).await;
     for statement in [
@@ -16,14 +16,14 @@ async fn reconciliation_rebuilds_missing_and_corrupt_projections_without_rewriti
     ] {
         sqlx::query(statement).execute(&pool).await.unwrap();
         repository
-            .reconcile_wallets(workspace, Some("test:restore"))
+            .reconcile_wallets(account, Some("test:restore"))
             .await
             .unwrap();
         assert_eq!(lifecycle_history(&pool).await, before);
         assert_projection_matches_history(&pool).await;
         assert!(
             repository
-                .find_wallet_hierarchy(workspace)
+                .find_wallet_hierarchy(account)
                 .await
                 .unwrap()
                 .ready
@@ -33,7 +33,7 @@ async fn reconciliation_rebuilds_missing_and_corrupt_projections_without_rewriti
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reconciliation_preserves_durable_error_and_appends_recovery_from_history() {
-    let (pool, workspace) = recovery_fixture().await;
+    let (pool, account) = recovery_fixture().await;
     let wallet: Uuid =
         sqlx::query_scalar("SELECT wallet_id FROM wallets WHERE wallet_type='CUSTOMER'")
             .fetch_one(&pool)
@@ -49,7 +49,7 @@ async fn reconciliation_preserves_durable_error_and_appends_recovery_from_histor
         .unwrap();
     let repository = DatabaseRepository::new(pool.clone());
     repository
-        .reconcile_wallets(workspace, Some("test:recovery"))
+        .reconcile_wallets(account, Some("test:recovery"))
         .await
         .unwrap();
     let recovery: (i64, String, String, String) = sqlx::query_as("SELECT sequence,previous_status,new_status,actor_reference FROM wallet_lifecycle_events WHERE wallet_id=$1 ORDER BY sequence DESC LIMIT 1")
@@ -64,7 +64,7 @@ async fn reconciliation_preserves_durable_error_and_appends_recovery_from_histor
     }
     assert_projection_matches_history(&pool).await;
     repository
-        .reconcile_wallets(workspace, Some("test:retry"))
+        .reconcile_wallets(account, Some("test:retry"))
         .await
         .unwrap();
     assert_eq!(lifecycle_history(&pool).await, after);
@@ -74,10 +74,10 @@ async fn recovery_fixture() -> (PgPool, Uuid) {
     let (_, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     create_billable_catalog(&repository, 1).await;
-    let workspace = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace, "workspace.activated", 2).await;
-    (pool, workspace)
+    let account = Uuid::new_v4();
+    apply_account_event(&repository, account, "account.created", 1).await;
+    apply_account_event(&repository, account, "account.activated", 2).await;
+    (pool, account)
 }
 
 async fn lifecycle_history(pool: &PgPool) -> Value {

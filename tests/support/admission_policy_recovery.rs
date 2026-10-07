@@ -8,7 +8,7 @@ use subscription::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn admission_withdrawal_serializes_with_join_and_failed_commit_leaves_no_decision() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let policy = admission::create_policy(
         &repository,
         CreateAdmissionPolicyRequest {
@@ -35,7 +35,7 @@ async fn admission_withdrawal_serializes_with_join_and_failed_commit_leaves_no_d
         .unwrap();
     admission::receive_evidence(
         &repository,
-        evidence(workspace_id, policy.policy_version_id, 1),
+        evidence(account_id, policy.policy_version_id, 1),
     )
     .await
     .unwrap();
@@ -44,20 +44,20 @@ async fn admission_withdrawal_serializes_with_join_and_failed_commit_leaves_no_d
         .fetch_one(&mut *withdrawal)
         .await
         .unwrap();
-    sqlx::query("SELECT workspace_id FROM workspace_projections WHERE workspace_id=$1 FOR UPDATE")
-        .bind(workspace_id)
+    sqlx::query("SELECT account_id FROM account_projections WHERE account_id=$1 FOR UPDATE")
+        .bind(account_id)
         .fetch_one(&mut *withdrawal)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO subscription_admission_evidence(event_id,workspace_id,policy_version_id,sequence,verified_facts,evidence_reference,valid_until,request_hash) VALUES ($1,$2,$3,2,'{}','accounts:withdrawal',now()+interval '1 hour','test-withdrawal')")
-        .bind(Uuid::new_v4()).bind(workspace_id).bind(policy.policy_version_id).execute(&mut *withdrawal).await.unwrap();
+    sqlx::query("INSERT INTO subscription_admission_evidence(event_id,account_id,policy_version_id,sequence,verified_facts,evidence_reference,valid_until,request_hash) VALUES ($1,$2,$3,2,'{}','accounts:withdrawal',now()+interval '1 hour','test-withdrawal')")
+        .bind(Uuid::new_v4()).bind(account_id).bind(policy.policy_version_id).execute(&mut *withdrawal).await.unwrap();
     let worker_repository = repository.clone();
     let request = customer_plan_request(plan.plan_version_id, "withdrawal-join");
     let worker_request = request.clone();
     let worker = tokio::spawn(async move {
         plans::create_customer_plan(
             &worker_repository,
-            workspace_id,
+            account_id,
             "withdrawal-join",
             worker_request,
         )
@@ -85,10 +85,10 @@ async fn admission_withdrawal_serializes_with_join_and_failed_commit_leaves_no_d
         worker.await.unwrap().unwrap_err().code(),
         "customer_plan_approval_required"
     );
-    assert_plan_state(&pool, workspace_id, 0, 0, 0, 0).await;
+    assert_plan_state(&pool, account_id, 0, 0, 0, 0).await;
     admission::receive_evidence(
         &repository,
-        evidence(workspace_id, policy.policy_version_id, 3),
+        evidence(account_id, policy.policy_version_id, 3),
     )
     .await
     .unwrap();
@@ -96,13 +96,13 @@ async fn admission_withdrawal_serializes_with_join_and_failed_commit_leaves_no_d
         .execute(&pool).await.unwrap();
     assert!(plans::create_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         "withdrawal-join",
         request.clone()
     )
     .await
     .is_err());
-    assert_plan_state(&pool, workspace_id, 0, 0, 0, 0).await;
+    assert_plan_state(&pool, account_id, 0, 0, 0, 0).await;
     let decisions: i64 =
         sqlx::query_scalar("SELECT count(*) FROM subscription_admission_decisions")
             .fetch_one(&pool)
@@ -111,20 +111,20 @@ async fn admission_withdrawal_serializes_with_join_and_failed_commit_leaves_no_d
     assert_eq!(decisions, 0);
     sqlx::raw_sql("DROP TRIGGER fail_admission_commit ON subscription_admission_decisions; DROP FUNCTION fail_admission_commit();")
         .execute(&pool).await.unwrap();
-    plans::create_customer_plan(&repository, workspace_id, "withdrawal-join", request)
+    plans::create_customer_plan(&repository, account_id, "withdrawal-join", request)
         .await
         .unwrap();
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 60).await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 60).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn admission_migration_round_trips_existing_open_contracts() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 30).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "migration-admission",
     )
@@ -143,7 +143,7 @@ async fn admission_migration_round_trips_existing_open_contracts() {
     .await
     .unwrap();
     migration.commit().await.unwrap();
-    let restored = plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
+    let restored = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
         .await
         .unwrap();
     assert_eq!(
@@ -157,5 +157,5 @@ async fn admission_migration_round_trips_existing_open_contracts() {
             .admission_policy_version_id,
         None
     );
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 30).await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 30).await;
 }

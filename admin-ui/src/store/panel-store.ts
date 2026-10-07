@@ -1,23 +1,23 @@
 import { create } from "zustand";
 
 interface PanelState {
-  workspaceSearch: string;
+  accountSearch: string;
   selectedItemId: string | null;
-  billingWorkspaceFilter: string;
+  billingAccountFilter: string;
   billingStatusFilter: string;
-  setWorkspaceSearch: (value: string) => void;
+  setAccountSearch: (value: string) => void;
   selectItem: (value: string | null) => void;
-  setBillingWorkspaceFilter: (value: string) => void;
+  setBillingAccountFilter: (value: string) => void;
   setBillingStatusFilter: (value: string) => void;
 }
 
 export const usePanelStore = create<PanelState>((set) => ({
-  workspaceSearch: "",
+  accountSearch: "",
   selectedItemId: null,
-  billingWorkspaceFilter: "",
+  billingAccountFilter: "",
   billingStatusFilter: "all",
-  setWorkspaceSearch: (workspaceSearch) => set({ workspaceSearch }),
+  setAccountSearch: (accountSearch) => set({ accountSearch }),
   selectItem: (selectedItemId) => set({ selectedItemId }),
-  setBillingWorkspaceFilter: (billingWorkspaceFilter) => set({ billingWorkspaceFilter }),
+  setBillingAccountFilter: (billingAccountFilter) => set({ billingAccountFilter }),
   setBillingStatusFilter: (billingStatusFilter) => set({ billingStatusFilter }),
 }));

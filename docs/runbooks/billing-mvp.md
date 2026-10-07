@@ -11,7 +11,7 @@
 
 ## Pagamento não conciliado
 
-1. Consulte `GET /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments`.
+1. Consulte `GET /v1/admin/accounts/{account_id}/billing/unmatched-payments`.
 2. Compare provider, PaymentIntent, valor, moeda e horário com a solicitação
    local candidata.
 3. Não edite Wallet, razão ou caso operacional. Preserve o caso `OPEN` até uma

@@ -2,10 +2,10 @@
 
 Este procedimento usa um plano `FREE` de acesso, sem franquia, e pacotes
 `OnDemandPlan` pagos. A conta só executa infraestrutura após comprar créditos.
-Cada conta do SaaS corresponde a um `workspace_id` da Subscription API. Leia
+Cada conta do SaaS corresponde a um `account_id` da Subscription API. Leia
 também o [mapeamento e os bloqueios atuais](README.md).
 
-Os exemplos usam `<API>`, `<WORKSPACE_ID>`, `<PRODUCT_ID>`, `<ITEM_ID>`,
+Os exemplos usam `<API>`, `<ACCOUNT_ID>`, `<PRODUCT_ID>`, `<ITEM_ID>`,
 `<SUBSCRIPTION_ID>`, `<PLAN_VERSION_ID>`, `<CUSTOMER_PLAN_ID>`,
 `<ON_DEMAND_PLAN_ID>`, `<CONNECTION_ID>` e `<BINDING_ID>` como valores
 substituíveis. Faça as chamadas de negócio a partir do backend do SaaS.
@@ -89,7 +89,7 @@ description=Conta%20<ACCOUNT_ID>
    `billing_connection_id` e o `webhook_path` da resposta.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/billing-connections
+POST /v1/accounts/<ACCOUNT_ID>/billing-connections
 {"provider":"STRIPE","external_account_reference":"cus_...","secret_reference":"env://STRIPE_SECRET_KEY","webhook_secret_reference":"env://STRIPE_WEBHOOK_SECRET_001"}
 ```
 
@@ -109,46 +109,46 @@ deve cadastrar manualmente um destino por cliente em um SaaS em produção. O
 provisionamento automático ou uma entrada compartilhada de webhooks é trabalho
 de backend indicado no [índice](README.md).
 
-**Admin-ui atual:** `Workspaces > Ações > Conexão Stripe` cadastra a conexão
+**Admin-ui atual:** `Accounts > Ações > Conexão Stripe` cadastra a conexão
 com `cus_...` e referências `env://`. O painel não cria Customer, chaves ou
 destinos no Stripe.
 
 ## 3. Ativar uma conta recém-criada no SaaS
 
 1. Crie a conta no SaaS, gere um UUID estável e use-o como
-   `<WORKSPACE_ID>` de cobrança. Os workspaces internos de agentes e APIs
+   `<ACCOUNT_ID>` de cobrança. Os accounts internos de agentes e APIs
    continuam no banco do SaaS.
 2. O serviço de contas envie dois eventos assinados e sequenciais para
-   `POST /v1/internal/accounts/workspace-events`: `workspace.created` com
-   `sequence=1` e depois `workspace.activated` com `sequence=2`. Cada evento
-   usa um `event_id` novo e imutável; `aggregate_id`, `workspace_id` e
-   `payload.workspace_id` têm o mesmo UUID. A assinatura HMAC e o schema estão
-   no [índice](README.md) e no [contrato](../contracts/accounts-workspace-event-v1.schema.json).
-3. Confira `GET /v1/workspaces/<WORKSPACE_ID>/wallet-provisioning` e
-   `GET /v1/workspaces/<WORKSPACE_ID>/wallets`. Espere `ACTIVE`/`ready=true`;
+   `POST /v1/internal/accounts/account-events`: `account.created` com
+   `sequence=1` e depois `account.activated` com `sequence=2`. Cada evento
+   usa um `event_id` novo e imutável; `aggregate_id`, `account_id` e
+   `payload.account_id` têm o mesmo UUID. A assinatura HMAC e o schema estão
+   no [índice](README.md) e no [contrato](../contracts/accounts-account-event-v1.schema.json).
+3. Confira `GET /v1/accounts/<ACCOUNT_ID>/wallet-provisioning` e
+   `GET /v1/accounts/<ACCOUNT_ID>/wallets`. Espere `ACTIVE`/`ready=true`;
    o segundo retorna `customer_wallet.wallet_id`, saldo e as `item_wallets`
    ligadas aos itens publicados. Se o escopo do catálogo mudou, use a ação de
    reconciliação antes de admitir o cliente.
 4. Crie o `CustomerPlan` gratuito. Guarde `customer_plan_id`; o retorno deve
    estar `activation_status=ACTIVATED`. Esse plano concede o direito de usar os
    produtos, mas, com saldo zero, as execuções serão recusadas até uma recarga.
-   Antes dessa chamada, confira `GET /v1/workspaces/<WORKSPACE_ID>/billing-config`:
+   Antes dessa chamada, confira `GET /v1/accounts/<ACCOUNT_ID>/billing-config`:
    `recurring_credit_enabled` deve ser `true`, inclusive nesse plano sem franquia.
    Se necessário, ajuste via `PUT` usando `expected_version` da leitura.
 
 ```http
-GET /v1/workspaces/<WORKSPACE_ID>/billing-config
-PUT /v1/workspaces/<WORKSPACE_ID>/billing-config
+GET /v1/accounts/<ACCOUNT_ID>/billing-config
+PUT /v1/accounts/<ACCOUNT_ID>/billing-config
 {"direct_credit_enabled":false,"recurring_credit_enabled":true,"expected_version":<VERSAO_LIDA>}
 ```
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/customer-plans
-Idempotency-Key: account:<WORKSPACE_ID>:prepaid-plan
-{"plan_version_id":"<PLAN_VERSION_ID>","transaction_id":"account:<WORKSPACE_ID>:prepaid-plan"}
+POST /v1/accounts/<ACCOUNT_ID>/customer-plans
+Idempotency-Key: account:<ACCOUNT_ID>:prepaid-plan
+{"plan_version_id":"<PLAN_VERSION_ID>","transaction_id":"account:<ACCOUNT_ID>:prepaid-plan"}
 ```
 
-**Admin-ui atual:** exibe workspace, provisionamento, carteiras e planos;
+**Admin-ui atual:** exibe account, provisionamento, carteiras e planos;
 permite reconciliar o provisionamento. A criação de conta vem do SaaS/Accounts
 e a adesão do cliente ao plano ainda exige API.
 
@@ -162,10 +162,10 @@ e a adesão do cliente ao plano ainda exige API.
    de persistir o vínculo. O cliente não fornece referências do provedor.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/payment-method-setup-sessions
+POST /v1/accounts/<ACCOUNT_ID>/payment-method-setup-sessions
 {"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?payment_setup=complete","cancel_url":"https://app.example/return?payment_setup=cancelled"}
 
-POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
+POST /v1/accounts/<ACCOUNT_ID>/payment-method-bindings
 {"customer_plan_id":"<CUSTOMER_PLAN_ID>","payment_method_setup_id":"<PAYMENT_METHOD_SETUP_ID>"}
 ```
 
@@ -175,7 +175,7 @@ POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
    Repetições da mesma intenção reutilizam a chave e a transação.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/customer-plans/<CUSTOMER_PLAN_ID>/on-demand-purchases
+POST /v1/accounts/<ACCOUNT_ID>/customer-plans/<CUSTOMER_PLAN_ID>/on-demand-purchases
 Idempotency-Key: topup:<ID_UNICO_DA_COMPRA>
 {"on_demand_plan_id":"<ON_DEMAND_PLAN_ID>","payment_method_binding_id":"<BINDING_ID>","transaction_id":"topup:<ID_UNICO_DA_COMPRA>"}
 ```
@@ -183,8 +183,8 @@ Idempotency-Key: topup:<ID_UNICO_DA_COMPRA>
 4. O Stripe envia `payment_intent.succeeded` ao webhook. A API valida
    assinatura, conexão, valor, moeda e solicitação; só então confirma a compra
    e lança o lote de créditos na carteira. Acompanhe
-   `GET /v1/workspaces/<WORKSPACE_ID>/collection-requests/<COLLECTION_ID>` e
-   `GET /v1/workspaces/<WORKSPACE_ID>/wallets`. Somente mostre os créditos como
+   `GET /v1/accounts/<ACCOUNT_ID>/collection-requests/<COLLECTION_ID>` e
+   `GET /v1/accounts/<ACCOUNT_ID>/wallets`. Somente mostre os créditos como
    disponíveis após a confirmação. Falha, expiração ou estado incerto não
    concede créditos; investigue a mesma cobrança, sem criar outra por timeout.
    Um `charge.refunded` externo é observado para investigação, mas não retira
@@ -197,9 +197,9 @@ Billing, mas não inicia setup nem a compra avulsa.
 
 ## 5. Cobrar uma execução de infraestrutura
 
-1. O SaaS autentica a conta, identifica o workspace interno e cria um
+1. O SaaS autentica a conta, identifica o account interno e cria um
    `execution_id` estável. Pode consultar
-   `GET /v1/workspaces/<WORKSPACE_ID>/products/<PRODUCT_ID>/eligibility`
+   `GET /v1/accounts/<ACCOUNT_ID>/products/<PRODUCT_ID>/eligibility`
    para exibir saldo e elegibilidade, sabendo que essa leitura não reserva saldo.
 2. Antes de enfileirar a execução, registre uma unidade do item. Use a mesma
    chave e `transaction_id` para identificar um retry da **mesma** execução.
@@ -209,18 +209,18 @@ Billing, mas não inicia setup nem a compra avulsa.
    `balance_after_credit_units` atualizado.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/usage-events
+POST /v1/accounts/<ACCOUNT_ID>/usage-events
 Idempotency-Key: execution:<EXECUTION_ID>
-{"transaction_id":"execution:<EXECUTION_ID>","product_id":"<PRODUCT_ID>","item_id":"<ITEM_ID>","item_units":"1","expected_price_version_id":null,"occurred_at":null,"metadata":{"infra_workspace_id":"<ID_INTERNO>","execution_id":"<EXECUTION_ID>"}}
+{"transaction_id":"execution:<EXECUTION_ID>","product_id":"<PRODUCT_ID>","item_id":"<ITEM_ID>","item_units":"1","expected_price_version_id":null,"occurred_at":null,"metadata":{"infra_account_id":"<ID_INTERNO>","execution_id":"<EXECUTION_ID>"}}
 ```
 
 3. Só enfileire após `201`. `403` indica falta de direito ao produto; `409
    insufficient_credit` indica saldo insuficiente; `503` pode indicar carteira
    ainda não provisionada. A API revalida preço, plano e saldo dentro da
    transação, inclusive com execuções simultâneas.
-4. Mostre o saldo a partir de `GET /v1/workspaces/<WORKSPACE_ID>/wallets` e o
+4. Mostre o saldo a partir de `GET /v1/accounts/<ACCOUNT_ID>/wallets` e o
    histórico em `/customer-wallet/statement`. O SaaS mantém seu próprio índice
-   por workspace interno. Defina a política para falha da infraestrutura depois
+   por account interno. Defina a política para falha da infraestrutura depois
    do débito: a V1 ainda não tem reserva/liberação de créditos nem compensação
    automática dessa execução.
 

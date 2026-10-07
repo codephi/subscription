@@ -3,28 +3,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
-import { WorkspacePage } from "./workspace-page";
+import { AccountPage } from "./account-page";
 
 const { reconcileProvisioning } = vi.hoisted(() => ({
   reconcileProvisioning: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
-  getWorkspace: vi.fn().mockResolvedValue({
-    workspace_id: "workspace-1",
+  getAccount: vi.fn().mockResolvedValue({
+    account_id: "account-1",
     operational_status: "ACTIVE",
     external_sequence: 1,
     updated_at: "2026-09-24T12:00:00Z",
   }),
   getWallets: vi.fn().mockResolvedValue({
-    workspace_id: "workspace-1",
+    account_id: "account-1",
     scope_version: "scope-1",
     ready: false,
     customer_wallet: { balance_credit_units: "0" },
     item_wallets: [],
   }),
   getProvisioning: vi.fn().mockResolvedValue({
-    workspace_id: "workspace-1",
+    account_id: "account-1",
     scope_version: "scope-1",
     status: "PROVISIONING",
     expected_item_wallets: 1,
@@ -33,7 +33,7 @@ vi.mock("@/api/client", () => ({
   reconcileProvisioning,
 }));
 
-vi.mock("@/pages/workspace-panels", () => ({
+vi.mock("@/pages/account-panels", () => ({
   CreditsPanel: () => null,
   ItemUsagePanel: () => null,
   PlansPanel: () => null,
@@ -41,7 +41,7 @@ vi.mock("@/pages/workspace-panels", () => ({
 
 beforeEach(() => {
   reconcileProvisioning.mockReset().mockResolvedValue({
-    workspace_id: "workspace-1",
+    account_id: "account-1",
     scope_version: "scope-1",
     status: "ACTIVE",
     expected_item_wallets: 1,
@@ -49,15 +49,15 @@ beforeEach(() => {
   });
 });
 
-it("provisions workspace wallets from the workspace detail", async () => {
+it("provisions account wallets from the account detail", async () => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/workspaces/workspace-1"]}>
+      <MemoryRouter initialEntries={["/accounts/account-1"]}>
         <Routes>
-          <Route path="/workspaces/:workspaceId" element={<WorkspacePage />} />
+          <Route path="/accounts/:accountId" element={<AccountPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -68,7 +68,7 @@ it("provisions workspace wallets from the workspace detail", async () => {
   );
 
   await waitFor(() => {
-    expect(reconcileProvisioning).toHaveBeenCalledWith("workspace-1");
+    expect(reconcileProvisioning).toHaveBeenCalledWith("account-1");
   });
   expect(
     await screen.findByText("Provisionamento: ACTIVE (1/1 item wallets)."),

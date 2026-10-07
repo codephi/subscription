@@ -61,7 +61,7 @@ impl DatabaseRepository {
         hash: &str,
     ) -> ApiResult<AdmissionEvidenceResponse> {
         let mut transaction = self.pool().begin().await?;
-        lock_evidence_workspace(&mut transaction, request.workspace_id).await?;
+        lock_evidence_account(&mut transaction, request.account_id).await?;
         if evidence_duplicate(&mut transaction, request.event_id, hash).await? {
             transaction.commit().await?;
             return Ok(AdmissionEvidenceResponse {
@@ -82,18 +82,18 @@ impl DatabaseRepository {
     }
 }
 
-async fn lock_evidence_workspace(
+async fn lock_evidence_account(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<()> {
-    sqlx::query("SELECT workspace_id FROM workspace_projections WHERE workspace_id=$1 FOR UPDATE")
-        .bind(workspace_id)
+    sqlx::query("SELECT account_id FROM account_projections WHERE account_id=$1 FOR UPDATE")
+        .bind(account_id)
         .fetch_optional(&mut **transaction)
         .await?
         .ok_or_else(|| {
             ApiError::not_found(
-                "workspace_not_found",
-                format!("workspace {workspace_id} must exist"),
+                "account_not_found",
+                format!("account {account_id} must exist"),
             )
         })?;
     Ok(())
@@ -109,8 +109,8 @@ async fn insert_evidence_row(
         .iter()
         .map(|fact| fact.as_str())
         .collect();
-    sqlx::query("INSERT INTO subscription_admission_evidence(event_id,workspace_id,policy_version_id,sequence,verified_facts,evidence_reference,valid_until,request_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(event_id) DO NOTHING")
-        .bind(request.event_id).bind(request.workspace_id).bind(request.policy_version_id).bind(request.sequence)
+    sqlx::query("INSERT INTO subscription_admission_evidence(event_id,account_id,policy_version_id,sequence,verified_facts,evidence_reference,valid_until,request_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(event_id) DO NOTHING")
+        .bind(request.event_id).bind(request.account_id).bind(request.policy_version_id).bind(request.sequence)
         .bind(facts).bind(&request.evidence_reference).bind(request.valid_until).bind(hash)
         .execute(&mut **transaction).await
 }
@@ -131,7 +131,7 @@ async fn evidence_duplicate(
         Some(previous) if previous == hash => Ok(true),
         Some(_) => Err(ApiError::conflict(
             "admission_evidence_identity_conflict",
-            format!("event {event_id} must retain its original content and workspace"),
+            format!("event {event_id} must retain its original content and account"),
         )),
     }
 }
@@ -140,27 +140,27 @@ async fn validate_evidence_sequence(
     transaction: &mut Transaction<'_, Postgres>,
     request: &AdmissionEvidenceRequest,
 ) -> ApiResult<()> {
-    let previous: i64 = sqlx::query_scalar("SELECT COALESCE(max(sequence),0) FROM subscription_admission_evidence WHERE workspace_id=$1 AND policy_version_id=$2")
-        .bind(request.workspace_id).bind(request.policy_version_id).fetch_one(&mut **transaction).await?;
+    let previous: i64 = sqlx::query_scalar("SELECT COALESCE(max(sequence),0) FROM subscription_admission_evidence WHERE account_id=$1 AND policy_version_id=$2")
+        .bind(request.account_id).bind(request.policy_version_id).fetch_one(&mut **transaction).await?;
     if previous.checked_add(1) == Some(request.sequence) {
         return Ok(());
     }
     Err(ApiError::conflict(
         "admission_evidence_sequence_conflict",
         format!(
-            "sequence {} must immediately follow {previous} for workspace {} and policy {}",
-            request.sequence, request.workspace_id, request.policy_version_id
+            "sequence {} must immediately follow {previous} for account {} and policy {}",
+            request.sequence, request.account_id, request.policy_version_id
         ),
     ))
 }
 
 pub(super) async fn ensure_admission_evidence(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     plan_id: Uuid,
 ) -> ApiResult<Option<Uuid>> {
     let decision = sqlx::query(include_str!("admission_check.sql"))
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(plan_id)
         .fetch_one(&mut **transaction)
         .await?;
@@ -169,7 +169,7 @@ pub(super) async fn ensure_admission_evidence(
     }
     Err(ApiError::conflict(
         "customer_plan_approval_required",
-        format!("workspace {workspace_id} requires current verified evidence for plan {plan_id}"),
+        format!("account {account_id} requires current verified evidence for plan {plan_id}"),
     ))
 }
 

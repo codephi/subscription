@@ -16,7 +16,7 @@ import type { Dashboard, User } from "@/lib/api"
 type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null; redirect_url?: string | null }
 type PaidPlan = { plan_version_id: string; price_amount_minor: number; credit_units: number }
 
-type WorkspaceDashboardProps = {
+type AccountDashboardProps = {
   user: User
   view?: Dashboard
   loading: boolean
@@ -45,7 +45,7 @@ type WorkspaceDashboardProps = {
   onExecute: () => void
 }
 
-export function WorkspaceDashboard(props: WorkspaceDashboardProps) {
+export function AccountDashboard(props: AccountDashboardProps) {
   const { user, view, loading, queryError, actionError, retryDashboard, checkout } = props
 
   return <main className="app-shell">
@@ -114,7 +114,7 @@ function BalanceCard({ user, view, loading }: { user: User; view?: Dashboard; lo
   </Card>
 }
 
-function ExecutionCard(props: WorkspaceDashboardProps) {
+function ExecutionCard(props: AccountDashboardProps) {
   const allowed = props.view?.eligibility?.access_allowed === true
   const buttonDisabled = !props.taskName.trim() || props.executionBusy || (!allowed && !props.pendingExecution)
 
@@ -204,7 +204,7 @@ function PlanCard({ user, plans, currentPlanVersionId, busy, onCheckout, onUpgra
   </Card>
 }
 
-function CheckoutCard(props: WorkspaceDashboardProps) {
+function CheckoutCard(props: AccountDashboardProps) {
   const pending = props.checkout?.status === "PENDING"
   const prepaid = props.user.plan_model === "PREPAID"
 

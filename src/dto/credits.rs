@@ -80,14 +80,14 @@ pub struct PendingUsageTransactionResponse {
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[serde(untagged)]
-pub enum WorkspaceTransactionResponse {
+pub enum AccountTransactionResponse {
     CustomerWalletEntry(CustomerWalletEntryResponse),
     PendingUsage(PendingUsageTransactionResponse),
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct CreditLedgerReconciliationResponse {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub wallet_balance_credit_units: CreditUnits,
     /// Sum of every signed ledger entry, independent of the wallet projection.
     pub ledger_balance_credit_units: CreditUnits,
@@ -97,8 +97,8 @@ pub struct CreditLedgerReconciliationResponse {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct WorkspaceBillingConfigResponse {
-    pub workspace_id: Uuid,
+pub struct AccountBillingConfigResponse {
+    pub account_id: Uuid,
     pub direct_credit_enabled: bool,
     pub recurring_credit_enabled: bool,
     pub version: i64,
@@ -107,7 +107,7 @@ pub struct WorkspaceBillingConfigResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
-pub struct UpdateWorkspaceBillingConfigRequest {
+pub struct UpdateAccountBillingConfigRequest {
     pub direct_credit_enabled: bool,
     pub recurring_credit_enabled: bool,
     pub expected_version: i64,

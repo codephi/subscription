@@ -3,11 +3,11 @@ use super::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn active_plan_slot_tracks_commercial_and_renewal_status() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 20).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "slot-status",
     )
@@ -28,15 +28,15 @@ async fn active_plan_slot_tracks_commercial_and_renewal_status() {
     migration.commit().await.unwrap();
     sqlx::query("UPDATE customer_plans SET commercial_status='PAST_DUE',renewal_status='RENEWAL_INACTIVE' WHERE customer_plan_id=$1")
         .bind(current.customer_plan_id).execute(&pool).await.unwrap();
-    assert_plan_state(&pool, workspace_id, 0, 1, 1, 20).await;
+    assert_plan_state(&pool, account_id, 0, 1, 1, 20).await;
     let replacement = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "slot-replacement",
     )
     .await;
-    assert_plan_state(&pool, workspace_id, 1, 2, 2, 40).await;
+    assert_plan_state(&pool, account_id, 1, 2, 2, 40).await;
     assert!(sqlx::query("UPDATE customer_plans SET commercial_status='ACTIVE',renewal_status='CURRENT' WHERE customer_plan_id=$1")
         .bind(current.customer_plan_id).execute(&pool).await.is_err());
     let preserved: (String, String) = sqlx::query_as(
@@ -47,13 +47,13 @@ async fn active_plan_slot_tracks_commercial_and_renewal_status() {
     .await
     .unwrap();
     assert_eq!(preserved, ("PAST_DUE".into(), "RENEWAL_INACTIVE".into()));
-    revoke_for_cleanup(&repository, workspace_id, replacement.customer_plan_id).await;
+    revoke_for_cleanup(&repository, account_id, replacement.customer_plan_id).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn published_plan_is_fully_immutable_except_for_revocation() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, _, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, _, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 20).await;
     let other_product_id = create_metered_product(&repository).await;
     for query in [
@@ -111,11 +111,11 @@ async fn published_plan_is_fully_immutable_except_for_revocation() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 20).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "offer-revoke",
     )
@@ -137,7 +137,7 @@ async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
     .unwrap();
     let rejected_transition = plans::transition_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         current.customer_plan_id,
         "withdrawn-target",
         subscription::dto::plans::CreatePlanTransitionRequest {
@@ -161,12 +161,12 @@ async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
     plans::revoke_plan(&repository, offer.plan_version_id, revoke_plan_request())
         .await
         .unwrap();
-    let retained = plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
+    let retained = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
         .await
         .unwrap();
     assert_eq!(retained.commercial_status, "ACTIVE");
     let retained_balance: i64 = sqlx::query_scalar("SELECT balance_credit_units FROM customer_wallets w JOIN wallets r ON r.wallet_id=w.wallet_id WHERE r.customer_id=$1")
-        .bind(workspace_id).fetch_one(&pool).await.unwrap();
+        .bind(account_id).fetch_one(&pool).await.unwrap();
     assert_eq!(retained_balance, 20);
     assert_eq!(
         plans::run_due_cycles(&repository, end)
@@ -175,7 +175,7 @@ async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
             .canceled_customer_plans,
         1
     );
-    let expired = plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
+    let expired = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
         .await
         .unwrap();
     assert_eq!(expired.commercial_status, "EXPIRED");
@@ -187,18 +187,18 @@ async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
             .processed_customer_plans,
         0
     );
-    assert_plan_state(&pool, workspace_id, 0, 1, 2, 0).await;
+    assert_plan_state(&pool, account_id, 0, 1, 2, 0).await;
     let other = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 10).await;
     let individual = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         other.plan_version_id,
         "individual-revoke",
     )
     .await;
     let revoked = plans::revoke_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         individual.customer_plan_id,
         RevokeCustomerPlanRequest {
             reason: "administrative".into(),
@@ -211,7 +211,7 @@ async fn plan_and_customer_revocation_have_distinct_idempotent_effects() {
     assert_eq!(revoked.end_reason.as_deref(), Some("ADMIN_REVOKED"));
     let repeated = plans::revoke_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         individual.customer_plan_id,
         RevokeCustomerPlanRequest {
             reason: "ignored retry".into(),

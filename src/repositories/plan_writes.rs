@@ -15,13 +15,13 @@ use crate::{
 
 pub(super) async fn ensure_recurring_credit_enabled(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     _plan: &PlanRecord,
 ) -> ApiResult<()> {
     let enabled: bool = sqlx::query_scalar(
-        "SELECT recurring_credit_enabled FROM workspace_billing_configs WHERE workspace_id=$1",
+        "SELECT recurring_credit_enabled FROM account_billing_configs WHERE account_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&mut **transaction)
     .await?;
     if enabled {
@@ -29,7 +29,7 @@ pub(super) async fn ensure_recurring_credit_enabled(
     }
     Err(ApiError::conflict(
         "recurring_credit_disabled",
-        format!("workspace {workspace_id} has subscription credits disabled"),
+        format!("account {account_id} has subscription credits disabled"),
     ))
 }
 
@@ -61,7 +61,7 @@ pub(super) async fn lock_valid_plan(
 pub(super) async fn insert_customer_plan_row(
     transaction: &mut Transaction<'_, Postgres>,
     customer_plan_id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     plan_id: Uuid,
     anchor_at: DateTime<Utc>,
     commercial_model: crate::dto::plans::CommercialModel,
@@ -80,7 +80,7 @@ pub(super) async fn insert_customer_plan_row(
          VALUES ($1,$2,$3,$4,$5,'CURRENT',$6) RETURNING *",
     )
     .bind(customer_plan_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(plan_id)
     .bind("ACTIVE")
     .bind(activation_status)
@@ -91,7 +91,7 @@ pub(super) async fn insert_customer_plan_row(
 
 pub(super) async fn reserve_active_slot(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     subscription_id: Uuid,
     customer_plan_id: Uuid,
 ) -> ApiResult<()> {
@@ -99,7 +99,7 @@ pub(super) async fn reserve_active_slot(
         "INSERT INTO active_customer_plan_slots (customer_id,subscription_id,customer_plan_id) \
          VALUES ($1,$2,$3) ON CONFLICT (customer_id,subscription_id) DO NOTHING",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(subscription_id)
     .bind(customer_plan_id)
     .execute(&mut **transaction)
@@ -109,7 +109,7 @@ pub(super) async fn reserve_active_slot(
     }
     Err(ApiError::conflict(
         "active_customer_plan_already_exists",
-        format!("workspace {workspace_id} already has a plan for subscription {subscription_id}"),
+        format!("account {account_id} already has a plan for subscription {subscription_id}"),
     ))
 }
 
@@ -117,7 +117,7 @@ pub(super) async fn reserve_active_slot(
 pub(super) async fn activate_customer_plan(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     plan: &PlanRecord,
     anchor_at: DateTime<Utc>,
@@ -148,7 +148,7 @@ pub(super) async fn activate_customer_plan(
         grant_cycle_credit(
             transaction,
             wallet,
-            workspace_id,
+            account_id,
             customer_plan_id,
             cycle_id,
             plan,
@@ -159,7 +159,7 @@ pub(super) async fn activate_customer_plan(
     }
     insert_plan_outbox(
         transaction,
-        workspace_id,
+        account_id,
         customer_plan_id,
         cycle_id,
         "customer_plan.activated",
@@ -194,7 +194,7 @@ pub(super) async fn insert_entitlements(
 pub(super) async fn grant_cycle_credit(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     cycle_id: Uuid,
     plan: &PlanRecord,
@@ -214,7 +214,7 @@ pub(super) async fn grant_cycle_credit(
     )
     .bind(entry_id)
     .bind(wallet.wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(wallet.next_sequence)
     .bind(plan.response.granted_credit_units.value())
     .bind(wallet.balance.value())
@@ -235,7 +235,7 @@ pub(super) async fn grant_cycle_credit(
          original_credit_units,remaining_credit_units,expires_at) VALUES ($1,$2,$3,'SUBSCRIPTION',$4,$4,$5)",
     )
     .bind(lot_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(entry_id)
     .bind(plan.response.granted_credit_units.value())
     .bind(expires_at)
@@ -252,7 +252,7 @@ pub(super) async fn grant_cycle_credit(
     .await?;
     insert_credit_outbox(
         transaction,
-        workspace_id,
+        account_id,
         wallet.wallet_id,
         wallet.next_sequence,
         entry_id,
@@ -313,7 +313,7 @@ async fn insert_reference(
 
 pub(super) async fn insert_plan_outbox(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     aggregate_id: Uuid,
     related_id: Uuid,
     event_type: &str,
@@ -324,18 +324,18 @@ pub(super) async fn insert_plan_outbox(
     let payload = json!({
         "event_id":event_id,"event_type":event_type,"schema_version":1,
         "aggregate_type":"customer_plan","aggregate_id":aggregate_id,"sequence":sequence,
-        "occurred_at":Utc::now(),"workspace_id":workspace_id,"correlation_id":correlation_id,
+        "occurred_at":Utc::now(),"account_id":account_id,"correlation_id":correlation_id,
         "causation_id":null,"payload":{"related_id":related_id}
     });
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) VALUES ($1,$2,'customer_plan',$3,$4,$5,$6,$7)",
+         account_id,correlation_id,payload) VALUES ($1,$2,'customer_plan',$3,$4,$5,$6,$7)",
     )
     .bind(event_id)
     .bind(event_type)
     .bind(aggregate_id)
     .bind(sequence)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(correlation_id)
     .bind(payload)
     .execute(&mut **transaction)

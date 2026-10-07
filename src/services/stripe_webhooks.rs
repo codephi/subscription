@@ -79,7 +79,7 @@ pub async fn process_stripe_webhook(
     }
     let secret = billing::resolve_connection_secret(
         repository,
-        configuration.workspace_id,
+        configuration.account_id,
         connection_id,
         "stripe_webhook",
         &configuration.webhook_secret_reference,
@@ -214,12 +214,12 @@ async fn process_hosted_checkout_webhook(
     let customer_id = json_string(session, "/customer")?;
     let checkout = repository.checkout(checkout_id, None).await?;
     let integration = repository
-        .integration_secrets(checkout.workspace_id, connection_id)
+        .integration_secrets(checkout.account_id, connection_id)
         .await?;
     let managed = integration.secret_reference.starts_with("v1:");
     let api_secret = billing::resolve_connection_secret(
         repository,
-        checkout.workspace_id,
+        checkout.account_id,
         connection_id,
         "stripe_api",
         &integration.secret_reference,

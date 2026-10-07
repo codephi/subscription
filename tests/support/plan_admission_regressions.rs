@@ -5,9 +5,9 @@ use subscription::services::usage;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_or_revoked_subscription_does_not_hide_another_entitlement() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 60).await;
-    let active = join_plan(&repository, workspace_id, offer.plan_version_id, "eligible").await;
+    let active = join_plan(&repository, account_id, offer.plan_version_id, "eligible").await;
     sqlx::query(
         "UPDATE customer_plans SET renewal_status='RENEWAL_INACTIVE' WHERE customer_plan_id=$1",
     )
@@ -31,16 +31,16 @@ async fn pending_or_revoked_subscription_does_not_hide_another_entitlement() {
             .unwrap();
     let pending = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         pending_offer.plan_version_id,
         "pending",
     )
     .await;
     for revoke_pending in [false, true] {
         if revoke_pending {
-            revoke_for_cleanup(&repository, workspace_id, pending.customer_plan_id).await;
+            revoke_for_cleanup(&repository, account_id, pending.customer_plan_id).await;
         }
-        let eligibility = usage::eligibility(&repository, workspace_id, product_id)
+        let eligibility = usage::eligibility(&repository, account_id, product_id)
             .await
             .unwrap();
         assert!(eligibility.access_allowed);
@@ -52,9 +52,9 @@ async fn pending_or_revoked_subscription_does_not_hide_another_entitlement() {
         );
         assert_eq!(eligibility.balance_credit_units.unwrap().value(), 60);
     }
-    revoke_for_cleanup(&repository, workspace_id, active.customer_plan_id).await;
+    revoke_for_cleanup(&repository, account_id, active.customer_plan_id).await;
     assert!(
-        !usage::eligibility(&repository, workspace_id, product_id)
+        !usage::eligibility(&repository, account_id, product_id)
             .await
             .unwrap()
             .access_allowed
@@ -64,15 +64,9 @@ async fn pending_or_revoked_subscription_does_not_hide_another_entitlement() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn downgrade_cannot_bypass_approval_or_card_requirements() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let source = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 60).await;
-    let current = join_plan(
-        &repository,
-        workspace_id,
-        source.plan_version_id,
-        "admission",
-    )
-    .await;
+    let current = join_plan(&repository, account_id, source.plan_version_id, "admission").await;
     let before = serde_json::to_value(&current).unwrap();
     for (approval, expected_code) in [
         (true, "customer_plan_approval_required"),
@@ -101,7 +95,7 @@ async fn downgrade_cannot_bypass_approval_or_card_requirements() {
         };
         let rejected = plans::transition_customer_plan(
             &repository,
-            workspace_id,
+            account_id,
             current.customer_plan_id,
             "reusable-key",
             transition,
@@ -109,12 +103,11 @@ async fn downgrade_cannot_bypass_approval_or_card_requirements() {
         .await
         .unwrap_err();
         assert_eq!(rejected.code(), expected_code);
-        let unchanged =
-            plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
-                .await
-                .unwrap();
+        let unchanged = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
+            .await
+            .unwrap();
         assert_eq!(serde_json::to_value(unchanged).unwrap(), before);
-        assert_plan_state(&pool, workspace_id, 1, 1, 1, 60).await;
+        assert_plan_state(&pool, account_id, 1, 1, 1, 60).await;
         let effects: (i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM customer_plan_transitions), (SELECT count(*) FROM credit_lot_reclassifications)")
             .fetch_one(&pool).await.unwrap();
         assert_eq!(effects, (0, 0));
@@ -133,7 +126,7 @@ async fn downgrade_cannot_bypass_approval_or_card_requirements() {
     .unwrap();
     let accepted = plans::transition_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         current.customer_plan_id,
         "reusable-key",
         CreatePlanTransitionRequest {
@@ -152,7 +145,7 @@ async fn downgrade_cannot_bypass_approval_or_card_requirements() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rejected_admission_creates_no_contract_and_does_not_reserve_keys() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let subscription = plans::create_subscription(&repository, subscription_request())
         .await
         .unwrap();
@@ -168,7 +161,7 @@ async fn rejected_admission_creates_no_contract_and_does_not_reserve_keys() {
         .unwrap();
     let result = plans::create_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         "key-admission",
         customer_plan_request(restricted.plan_version_id, "transaction-admission"),
     )
@@ -177,7 +170,7 @@ async fn rejected_admission_creates_no_contract_and_does_not_reserve_keys() {
         result.unwrap_err().code(),
         "customer_plan_approval_required"
     );
-    assert_plan_state(&pool, workspace_id, 0, 0, 0, 0).await;
+    assert_plan_state(&pool, account_id, 0, 0, 0, 0).await;
     let open = plans::create_plan(
         &repository,
         subscription.subscription_id,
@@ -190,6 +183,6 @@ async fn rejected_admission_creates_no_contract_and_does_not_reserve_keys() {
     )
     .await
     .unwrap();
-    join_plan(&repository, workspace_id, open.plan_version_id, "admission").await;
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 10).await;
+    join_plan(&repository, account_id, open.plan_version_id, "admission").await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 10).await;
 }

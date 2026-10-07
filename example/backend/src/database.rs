@@ -30,7 +30,7 @@ pub async fn initialize(pool: &SqlitePool) -> Result<()> {
 async fn seed_admin(pool: &SqlitePool) -> Result<()> {
     let password_hash = hash_password("admin")?;
     sqlx::query(
-        "INSERT INTO users (user_id,username,password_hash,workspace_id,created_event_id, \
+        "INSERT INTO users (user_id,username,password_hash,account_id,created_event_id, \
         activated_event_id,correlation_id) VALUES ($1,'admin',$2,$3,$4,$5,$6) \
         ON CONFLICT(username) DO NOTHING",
     )

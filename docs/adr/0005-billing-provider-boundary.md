@@ -20,8 +20,8 @@ cancelamento.
 
 ## Credenciais administradas pela API
 
-A configuração Stripe por workspace cifra a chave API e o segredo de assinatura
-em `billing_connections` com AES-256-GCM. O nonce é único por escrita; workspace,
+A configuração Stripe por account cifra a chave API e o segredo de assinatura
+em `billing_connections` com AES-256-GCM. O nonce é único por escrita; account,
 conexão e finalidade são autenticados como dados associados. A chave mestra vem
 de `BILLING_CREDENTIAL_ENCRYPTION_KEY`, em base64, somente no servidor.
 Conexões antigas que guardam `env://` continuam resolvendo segredos do ambiente.

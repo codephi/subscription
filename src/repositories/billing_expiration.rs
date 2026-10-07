@@ -48,7 +48,7 @@ impl DatabaseRepository {
 
 struct DueCollection {
     request_id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Option<Uuid>,
     request_kind: String,
     correlation_id: Uuid,
@@ -64,7 +64,7 @@ async fn lock_due_request(
     as_of: DateTime<Utc>,
 ) -> Result<Option<DueCollection>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT collection_request_id,workspace_id,customer_plan_id,request_kind,correlation_id \
+        "SELECT collection_request_id,account_id,customer_plan_id,request_kind,correlation_id \
          FROM collection_requests WHERE status IN ('SCHEDULED','COLLECTING','PENDING_PAYMENT') \
          AND payment_expires_at<=$1 ORDER BY payment_expires_at,collection_request_id \
          LIMIT 1 FOR UPDATE SKIP LOCKED",
@@ -74,7 +74,7 @@ async fn lock_due_request(
     .await?;
     Ok(row.map(|row| DueCollection {
         request_id: row.get("collection_request_id"),
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         customer_plan_id: row.get("customer_plan_id"),
         request_kind: row.get("request_kind"),
         correlation_id: row.get("correlation_id"),
@@ -154,19 +154,19 @@ async fn insert_expiration_event(
     .fetch_one(&mut **transaction)
     .await?;
     let payload = json!({"billing_event_id":event_id,"event_type":"collection.expired",
-        "schema_version":1,"occurred_at":as_of,"workspace_id":request.workspace_id,
+        "schema_version":1,"occurred_at":as_of,"account_id":request.account_id,
         "correlation_id":request.correlation_id,"collection_request_id":request.request_id,
         "customer_plan_id":request.customer_plan_id,"request_kind":request.request_kind,
         "terminal_reason":"PAYMENT_WINDOW_EXPIRED"});
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) VALUES \
+         account_id,correlation_id,payload) VALUES \
          ($1,'collection.expired','collection_request',$2,$3,$4,$5,$6)",
     )
     .bind(event_id)
     .bind(request.request_id)
     .bind(sequence)
-    .bind(request.workspace_id)
+    .bind(request.account_id)
     .bind(request.correlation_id)
     .bind(payload)
     .execute(&mut **transaction)

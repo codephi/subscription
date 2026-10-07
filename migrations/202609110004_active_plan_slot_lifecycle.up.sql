@@ -8,7 +8,7 @@ BEGIN
     ON CONFLICT(customer_id,subscription_id) DO UPDATE SET customer_plan_id=EXCLUDED.customer_plan_id
     WHERE active_customer_plan_slots.customer_plan_id=EXCLUDED.customer_plan_id;
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'active customer plan already exists for workspace %',NEW.customer_id
+      RAISE EXCEPTION 'active customer plan already exists for account %',NEW.customer_id
         USING ERRCODE='unique_violation';
     END IF;
   ELSE

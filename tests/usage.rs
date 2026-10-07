@@ -28,7 +28,7 @@ async fn usage_unit_conversion_preserves_pending_and_debits_exactly() {
     let fixture = setup_usage(1_000, 100, 500).await;
     let first = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "usage-key-1",
         usage_request(&fixture, "usage-transaction-1", 1_012),
     )
@@ -44,7 +44,7 @@ async fn usage_unit_conversion_preserves_pending_and_debits_exactly() {
 
     let second = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "usage-key-2",
         usage_request(&fixture, "usage-transaction-2", 988),
     )
@@ -58,7 +58,7 @@ async fn usage_unit_conversion_preserves_pending_and_debits_exactly() {
     );
     assert_usage_state(
         &fixture.pool,
-        fixture.workspace_id,
+        fixture.account_id,
         fixture.item_id,
         ExpectedUsageState::new(2_000, 2_000, 0, 2, 2),
     )
@@ -74,13 +74,13 @@ async fn concurrent_partial_usage_forms_one_block() {
     let (first, second) = tokio::join!(
         usage::record_usage(
             &first_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "concurrent-usage-1",
             usage_request(&fixture, "concurrent-transaction-1", 600)
         ),
         usage::record_usage(
             &second_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "concurrent-usage-2",
             usage_request(&fixture, "concurrent-transaction-2", 600)
         )
@@ -88,7 +88,7 @@ async fn concurrent_partial_usage_forms_one_block() {
     assert!(first.is_ok() && second.is_ok());
     assert_usage_state(
         &fixture.pool,
-        fixture.workspace_id,
+        fixture.account_id,
         fixture.item_id,
         ExpectedUsageState::new(1_200, 1_000, 200, 1, 2),
     )
@@ -101,7 +101,7 @@ async fn pending_only_usage_skips_customer_ledger_and_insufficient_is_atomic() {
     let pending = setup_usage(1_000, 100, 500).await;
     let receipt = usage::record_usage(
         &pending.repository,
-        pending.workspace_id,
+        pending.account_id,
         "pending-key",
         usage_request(&pending, "pending-transaction", 999),
     )
@@ -111,7 +111,7 @@ async fn pending_only_usage_skips_customer_ledger_and_insufficient_is_atomic() {
     assert_eq!(receipt.billing_status, "PENDING_BLOCK");
     assert_usage_state(
         &pending.pool,
-        pending.workspace_id,
+        pending.account_id,
         pending.item_id,
         ExpectedUsageState::new(999, 0, 999, 0, 1),
     )
@@ -119,8 +119,8 @@ async fn pending_only_usage_skips_customer_ledger_and_insufficient_is_atomic() {
     let transaction = get_json(
         &pending.router,
         &format!(
-            "/v1/workspaces/{}/customer-wallet/transactions/pending-transaction",
-            pending.workspace_id
+            "/v1/accounts/{}/customer-wallet/transactions/pending-transaction",
+            pending.account_id
         ),
     )
     .await;
@@ -131,7 +131,7 @@ async fn pending_only_usage_skips_customer_ledger_and_insufficient_is_atomic() {
     let insufficient = setup_usage(1, 7, 5).await;
     let result = usage::record_usage(
         &insufficient.repository,
-        insufficient.workspace_id,
+        insufficient.account_id,
         "insufficient-key",
         usage_request(&insufficient, "insufficient-transaction", 1),
     )
@@ -142,7 +142,7 @@ async fn pending_only_usage_skips_customer_ledger_and_insufficient_is_atomic() {
     );
     assert_usage_state(
         &insufficient.pool,
-        insufficient.workspace_id,
+        insufficient.account_id,
         insufficient.item_id,
         ExpectedUsageState::new(0, 0, 0, 0, 0),
     )
@@ -168,7 +168,7 @@ async fn usage_swagger_exposes_decimal_contract() {
     assert_eq!(openapi.status(), StatusCode::OK);
     let body = response_json(openapi).await;
     assert!(body["paths"]
-        .get("/v1/workspaces/{workspace_id}/usage-events")
+        .get("/v1/accounts/{account_id}/usage-events")
         .is_some());
     assert!(body["components"]["schemas"]
         .get("UsageEventResponse")
@@ -179,7 +179,7 @@ async fn usage_swagger_exposes_decimal_contract() {
         "ItemWalletStatementResponse",
         "BillingBlockResponse",
         "UsageReconciliationResponse",
-        "WorkspaceTransactionResponse",
+        "AccountTransactionResponse",
     ] {
         assert!(
             body["components"]["schemas"].get(schema).is_some(),
@@ -187,12 +187,12 @@ async fn usage_swagger_exposes_decimal_contract() {
         );
     }
     for path in [
-        "/v1/workspaces/{workspace_id}/products/{product_id}/eligibility",
-        "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet",
-        "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement",
-        "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement/{entry_id}",
-        "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/pricing-accumulators",
-        "/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile",
+        "/v1/accounts/{account_id}/products/{product_id}/eligibility",
+        "/v1/accounts/{account_id}/items/{item_id}/item-wallet",
+        "/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement",
+        "/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement/{entry_id}",
+        "/v1/accounts/{account_id}/items/{item_id}/item-wallet/pricing-accumulators",
+        "/v1/admin/accounts/{account_id}/items/{item_id}/usage/reconcile",
     ] {
         assert!(
             body["paths"].get(path).is_some(),
@@ -207,7 +207,7 @@ async fn item_meter_statement_eligibility_and_reconciliation_are_correlated() {
     let fixture = setup_usage(10, 3, 20).await;
     let receipt = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "query-key",
         usage_request(&fixture, "query-transaction", 14),
     )
@@ -216,8 +216,8 @@ async fn item_meter_statement_eligibility_and_reconciliation_are_correlated() {
     let eligibility = get_json(
         &fixture.router,
         &format!(
-            "/v1/workspaces/{}/products/{}/eligibility",
-            fixture.workspace_id, fixture.product_id
+            "/v1/accounts/{}/products/{}/eligibility",
+            fixture.account_id, fixture.product_id
         ),
     )
     .await;
@@ -227,8 +227,8 @@ async fn item_meter_statement_eligibility_and_reconciliation_are_correlated() {
     let meter = get_json(
         &fixture.router,
         &format!(
-            "/v1/workspaces/{}/items/{}/item-wallet",
-            fixture.workspace_id, fixture.item_id
+            "/v1/accounts/{}/items/{}/item-wallet",
+            fixture.account_id, fixture.item_id
         ),
     )
     .await;
@@ -238,8 +238,8 @@ async fn item_meter_statement_eligibility_and_reconciliation_are_correlated() {
     let statement = get_json(
         &fixture.router,
         &format!(
-            "/v1/workspaces/{}/items/{}/item-wallet/statement?limit=1",
-            fixture.workspace_id, fixture.item_id
+            "/v1/accounts/{}/items/{}/item-wallet/statement?limit=1",
+            fixture.account_id, fixture.item_id
         ),
     )
     .await;
@@ -254,8 +254,8 @@ async fn item_meter_statement_eligibility_and_reconciliation_are_correlated() {
     let entry = get_json(
         &fixture.router,
         &format!(
-            "/v1/workspaces/{}/items/{}/item-wallet/statement/{}",
-            fixture.workspace_id, fixture.item_id, receipt.item_wallet_entry_id
+            "/v1/accounts/{}/items/{}/item-wallet/statement/{}",
+            fixture.account_id, fixture.item_id, receipt.item_wallet_entry_id
         ),
     )
     .await;
@@ -264,8 +264,8 @@ async fn item_meter_statement_eligibility_and_reconciliation_are_correlated() {
     let reconciliation = post_json(
         &fixture.router,
         &format!(
-            "/v1/admin/workspaces/{}/items/{}/usage/reconcile",
-            fixture.workspace_id, fixture.item_id
+            "/v1/admin/accounts/{}/items/{}/usage/reconcile",
+            fixture.account_id, fixture.item_id
         ),
     )
     .await;
@@ -286,7 +286,7 @@ async fn tier_boundary_assigns_unique_blocks_without_repricing() {
     let fixture = setup_tiered_usage(standard_tiers(), None, 100).await;
     let first = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "tier-key-1",
         usage_request(&fixture, "tier-transaction-1", 24),
     )
@@ -300,7 +300,7 @@ async fn tier_boundary_assigns_unique_blocks_without_repricing() {
         "SELECT tier_position,count(*),sum(debited_credit_units)::bigint FROM billing_blocks \
          WHERE customer_id=$1 AND item_id=$2 GROUP BY tier_position ORDER BY tier_position",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_all(&fixture.pool)
     .await
@@ -309,7 +309,7 @@ async fn tier_boundary_assigns_unique_blocks_without_repricing() {
 
     let second = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "tier-key-2",
         usage_request(&fixture, "tier-transaction-2", 1),
     )
@@ -321,7 +321,7 @@ async fn tier_boundary_assigns_unique_blocks_without_repricing() {
     let cycle_keys: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT cycle_key FROM pricing_accumulators WHERE customer_id=$1 AND item_id=$2",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_all(&fixture.pool)
     .await
@@ -351,7 +351,7 @@ async fn cycle_boundary_uses_distinct_accumulators() {
          cycle_key,accumulated_converted_item_units,converted_blocks) VALUES ($1,$2,$3,$4,$5,10,10)",
     )
     .bind(previous_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .bind(fixture.price_id)
     .bind(previous_start.to_rfc3339())
@@ -360,7 +360,7 @@ async fn cycle_boundary_uses_distinct_accumulators() {
     .expect("previous accumulator");
     let receipt = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "cycle-key",
         usage_request(&fixture, "cycle-transaction", 1),
     )
@@ -371,7 +371,7 @@ async fn cycle_boundary_uses_distinct_accumulators() {
         "SELECT pricing_accumulator_id,accumulated_converted_item_units FROM pricing_accumulators \
          WHERE customer_id=$1 AND item_id=$2 ORDER BY accumulated_converted_item_units DESC",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_all(&fixture.pool)
     .await
@@ -388,7 +388,7 @@ async fn pending_block_keeps_old_price_then_remainder_uses_active_version() {
     let fixture = setup_versioned_usage(100).await;
     let first = usage::record_usage(
         &fixture.usage.repository,
-        fixture.usage.workspace_id,
+        fixture.usage.account_id,
         "version-key-1",
         usage_request(&fixture.usage, "version-transaction-1", 6),
     )
@@ -401,7 +401,7 @@ async fn pending_block_keeps_old_price_then_remainder_uses_active_version() {
     request.expected_price_version_id = Some(fixture.new_price_id);
     let second = usage::record_usage(
         &fixture.usage.repository,
-        fixture.usage.workspace_id,
+        fixture.usage.account_id,
         "version-key-2",
         request,
     )
@@ -417,7 +417,7 @@ async fn pending_block_keeps_old_price_then_remainder_uses_active_version() {
         "SELECT price_version_id,unit_offset_start,unit_offset_end FROM billing_blocks \
          WHERE customer_id=$1 AND item_id=$2 ORDER BY global_block_sequence",
     )
-    .bind(fixture.usage.workspace_id)
+    .bind(fixture.usage.account_id)
     .bind(fixture.usage.item_id)
     .fetch_all(&fixture.usage.pool)
     .await
@@ -478,11 +478,11 @@ async fn post_json(router: &axum::Router, uri: &str) -> serde_json::Value {
 
 async fn assert_usage_state(
     pool: &sqlx::PgPool,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     item_id: uuid::Uuid,
     expected: ExpectedUsageState,
 ) {
-    let actual: (i64,i64,i64,i64,i64) = sqlx::query_as("SELECT iw.total_received_item_units,iw.total_converted_item_units,iw.pending_item_units,(SELECT count(*) FROM billing_blocks b WHERE b.customer_id=$1 AND b.item_id=$2),(SELECT count(*) FROM usage_events u WHERE u.customer_id=$1 AND u.item_id=$2) FROM item_wallets iw JOIN wallets w ON w.wallet_id=iw.wallet_id WHERE w.customer_id=$1 AND w.item_id=$2").bind(workspace_id).bind(item_id).fetch_one(pool).await.expect("usage state");
+    let actual: (i64,i64,i64,i64,i64) = sqlx::query_as("SELECT iw.total_received_item_units,iw.total_converted_item_units,iw.pending_item_units,(SELECT count(*) FROM billing_blocks b WHERE b.customer_id=$1 AND b.item_id=$2),(SELECT count(*) FROM usage_events u WHERE u.customer_id=$1 AND u.item_id=$2) FROM item_wallets iw JOIN wallets w ON w.wallet_id=iw.wallet_id WHERE w.customer_id=$1 AND w.item_id=$2").bind(account_id).bind(item_id).fetch_one(pool).await.expect("usage state");
     assert_eq!(actual, expected.values);
 }
 

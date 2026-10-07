@@ -86,14 +86,14 @@ export async function updatePromotion(
 }
 
 export async function redeemVoucher(
-  workspaceId: string,
+  accountId: string,
   idempotencyKey: string,
   body: components["schemas"]["RedeemVoucherRequest"],
 ) {
   return unwrapResponse(
-    await api.POST("/v1/workspaces/{workspace_id}/voucher-redemptions", {
+    await api.POST("/v1/accounts/{account_id}/voucher-redemptions", {
       params: {
-        path: { workspace_id: workspaceId },
+        path: { account_id: accountId },
         header: { "Idempotency-Key": idempotencyKey },
       },
       body,

@@ -52,17 +52,17 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function InboxPage() {
-  const [workspace, setWorkspace] = useState("");
+  const [account, setAccount] = useState("");
   const [status, setStatus] = useState("all");
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
-  const valid = !workspace.trim() || uuidPattern.test(workspace.trim());
+  const valid = !account.trim() || uuidPattern.test(account.trim());
   const page = useQuery({
-    queryKey: ["inbox", cursor, workspace, status],
+    queryKey: ["inbox", cursor, account, status],
     queryFn: () =>
       listIntegrationInbox(
         cursor,
-        workspace.trim() || undefined,
+        account.trim() || undefined,
         status === "all" ? undefined : status,
       ),
     enabled: valid,
@@ -84,18 +84,18 @@ export function InboxPage() {
         <CardHeader>
           <CardTitle>Filtros</CardTitle>
           <CardDescription>
-            Localize eventos por workspace e estado.
+            Localize eventos por account e estado.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup className="grid gap-4 md:grid-cols-2">
             <Field data-invalid={!valid}>
-              <FieldLabel htmlFor="inbox-workspace">Workspace ID</FieldLabel>
+              <FieldLabel htmlFor="inbox-account">Account ID</FieldLabel>
               <Input
-                id="inbox-workspace"
-                value={workspace}
+                id="inbox-account"
+                value={account}
                 onChange={(event) => {
-                  setWorkspace(event.target.value);
+                  setAccount(event.target.value);
                   resetPage();
                 }}
                 aria-invalid={!valid}
@@ -144,7 +144,7 @@ export function InboxPage() {
         <CardContent className="flex flex-col gap-4">
           {!valid && (
             <p role="alert" className="text-sm text-destructive">
-              Workspace deve ser um UUID válido.
+              Account deve ser um UUID válido.
             </p>
           )}
           {page.isLoading && <QueryLoading />}
@@ -161,7 +161,7 @@ export function InboxPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Evento</TableHead>
-                    <TableHead>Workspace</TableHead>
+                    <TableHead>Account</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Sequência</TableHead>
                     <TableHead>Estado</TableHead>
@@ -215,9 +215,9 @@ function InboxRow({
       <TableCell>
         <Link
           className="font-mono text-xs text-primary hover:underline"
-          to={`/workspaces/${event.workspace_id}`}
+          to={`/accounts/${event.account_id}`}
         >
-          {shortId(event.workspace_id)}
+          {shortId(event.account_id)}
         </Link>
       </TableCell>
       <TableCell>{event.event_type}</TableCell>

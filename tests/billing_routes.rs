@@ -14,7 +14,7 @@ use uuid::Uuid;
 async fn regularization_route_requires_idempotency_and_is_in_openapi() {
     let router = test_router();
     let path = format!(
-        "/v1/workspaces/{}/customer-plans/{}/renewal-regularizations",
+        "/v1/accounts/{}/customer-plans/{}/renewal-regularizations",
         Uuid::new_v4(),
         Uuid::new_v4()
     );
@@ -46,7 +46,7 @@ async fn regularization_route_requires_idempotency_and_is_in_openapi() {
         .unwrap();
     let document = response_json(openapi).await;
     assert!(document["paths"]
-        .get("/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/renewal-regularizations")
+        .get("/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/renewal-regularizations")
         .is_some());
 }
 
@@ -76,15 +76,16 @@ async fn customer_payment_method_contract_hides_integration_identifiers() {
         .unwrap();
     let document = response_json(response).await;
     assert!(document["paths"]
-        .get("/v1/workspaces/{workspace_id}/payment-method-setup-sessions")
+        .get("/v1/accounts/{account_id}/payment-method-setup-sessions")
         .is_some());
     assert!(document["paths"]
-        .get("/v1/workspaces/{workspace_id}/payment-methods/from-card")
+        .get("/v1/accounts/{account_id}/payment-methods/from-card")
         .is_some());
-    assert!(document["paths"]
-        ["/v1/workspaces/{workspace_id}/payment-method-bindings/{binding_id}"]
-        .get("delete")
-        .is_some());
+    assert!(
+        document["paths"]["/v1/accounts/{account_id}/payment-method-bindings/{binding_id}"]
+            .get("delete")
+            .is_some()
+    );
     let card_request = &document["components"]["schemas"]["CreatePaymentMethodFromCardRequest"];
     assert!(card_request["properties"].get("card_name").is_some());
     let binding = &document["components"]["schemas"]["CreatePaymentMethodBindingRequest"];
@@ -105,11 +106,11 @@ async fn customer_payment_method_contract_hides_integration_identifiers() {
 #[tokio::test]
 async fn transparent_checkout_is_documented_and_disabled_without_sandbox_config() {
     let router = test_router();
-    let workspace_id = Uuid::new_v4();
+    let account_id = Uuid::new_v4();
     let response = router
         .clone()
         .oneshot(
-            Request::post(format!("/v1/workspaces/{workspace_id}/checkouts"))
+            Request::post(format!("/v1/accounts/{account_id}/checkouts"))
                 .header("content-type", "application/json")
                 .header("idempotency-key", "checkout-route-test")
                 .body(Body::from(
@@ -117,6 +118,8 @@ async fn transparent_checkout_is_documented_and_disabled_without_sandbox_config(
                         "customer_plan_id": Uuid::new_v4(),
                         "checkout_kind": "INITIAL",
                         "on_demand_plan_id": null,
+                        "success_url": "https://tasklab.example/success",
+                        "cancel_url": "https://tasklab.example/cancel",
                         "transaction_id": "checkout-route-test"
                     })
                     .to_string(),
@@ -137,10 +140,10 @@ async fn transparent_checkout_is_documented_and_disabled_without_sandbox_config(
         .unwrap();
     let document = response_json(openapi).await;
     assert!(document["paths"]
-        .get("/v1/workspaces/{workspace_id}/checkouts")
+        .get("/v1/accounts/{account_id}/checkouts")
         .is_some());
     assert!(document["paths"]
-        .get("/v1/workspaces/{workspace_id}/checkouts/{checkout_id}")
+        .get("/v1/accounts/{account_id}/checkouts/{checkout_id}")
         .is_some());
     assert!(document["paths"]
         .get("/v1/billing/webhooks/stripe")

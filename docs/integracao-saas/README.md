@@ -1,6 +1,6 @@
 # Integração SaaS com o Subscription
 
-Guia de implementação para qualquer aplicação que precise vender assinaturas e consumir créditos. O sistema cliente usa `workspace_id`, IDs de oferta e contratos HTTP; não deve guardar chaves Stripe, criar cobranças no Stripe nem conceder créditos após o retorno do navegador.
+Guia de implementação para qualquer aplicação que precise vender assinaturas e consumir créditos. O sistema cliente usa `account_id`, IDs de oferta e contratos HTTP; não deve guardar chaves Stripe, criar cobranças no Stripe nem conceder créditos após o retorno do navegador.
 
 > As rotas abaixo são as rotas implementadas pelo serviço neste repositório. Confirme o OpenAPI publicado pela instância alvo antes de implantar. O sandbox de checkout descrito em “Configuração” deve estar habilitado para criar compras de teste.
 
@@ -26,9 +26,9 @@ POST {SUBSCRIPTION_BASE_URL}/v1/billing/webhooks/stripe
 
 Use o segredo `whsec_…` entregue pelo Stripe (`STRIPE_WEBHOOK_SECRET` no sandbox). Para uma conexão Stripe independente, a rota é `POST /v1/billing/webhooks/{BILLING_CONNECTION_ID}`; use `webhook_url` devolvida pela configuração da conexão. O Subscription valida `Stripe-Signature` e registra os resultados de pagamento. Selecione `checkout.session.completed` para pagamentos hospedados e eventos de PaymentIntent usados por cobranças off-session, incluindo `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled` e `payment_intent.requires_action`. Faça primeiro a configuração no modo de teste e depois crie outro endpoint, com credenciais próprias, em produção.
 
-A integração de workspace também requer eventos assinados de criação e ativação de conta para `POST /v1/internal/accounts/workspace-events`. O segredo compartilhado deve existir somente no Subscription e no serviço confiável que assina os eventos.
+A integração de account também requer eventos assinados de criação e ativação de conta para `POST /v1/internal/accounts/account-events`. O segredo compartilhado deve existir somente no Subscription e no serviço confiável que assina os eventos.
 
-Assine os bytes exatos do JSON usando HMAC-SHA256 sobre `<unix_seconds>.<raw_body>`, codifique o digest em Base64 e envie `X-Runvibe-Timestamp` e `X-Runvibe-Signature: v1=<base64>`. O timestamp deve estar dentro da tolerância do serviço (300 segundos). Envie `workspace.created` com sequência `1`, depois `workspace.activated` com sequência `2` e `causation_id` igual ao ID do primeiro evento. Preserve os IDs e bytes da requisição ao repetir.
+Assine os bytes exatos do JSON usando HMAC-SHA256 sobre `<unix_seconds>.<raw_body>`, codifique o digest em Base64 e envie `X-Runvibe-Timestamp` e `X-Runvibe-Signature: v1=<base64>`. O timestamp deve estar dentro da tolerância do serviço (300 segundos). Envie `account.created` com sequência `1`, depois `account.activated` com sequência `2` e `causation_id` igual ao ID do primeiro evento. Preserve os IDs e bytes da requisição ao repetir.
 
 ### 1.3 Catálogo comercial
 
@@ -79,16 +79,16 @@ Repita o plano pago para 200 créditos/R$ 40 (`price_amount_minor: 4000`) e 400 
 
 ### 2.1 Identidade e ciclo de vida
 
-- Associe exatamente um `workspace_id` do Subscription à conta interna. Persista a relação antes de habilitar consumo.
-- Ao criar a conta, envie `workspace.created` e `workspace.activated`, assinados conforme o formato do serviço, com IDs de evento estáveis, sequência crescente e `correlation_id` estável.
-- Crie o customer plan grátis com `Idempotency-Key` estável por workspace e transação estável. O Subscription concede a franquia inicial; não replique essa concessão localmente.
-- Guarde `customer_plan_id` e IDs de produto/ofertas retornados. Nunca use username/email como `workspace_id`.
+- Associe exatamente um `account_id` do Subscription à conta interna. Persista a relação antes de habilitar consumo.
+- Ao criar a conta, envie `account.created` e `account.activated`, assinados conforme o formato do serviço, com IDs de evento estáveis, sequência crescente e `correlation_id` estável.
+- Crie o customer plan grátis com `Idempotency-Key` estável por account e transação estável. O Subscription concede a franquia inicial; não replique essa concessão localmente.
+- Guarde `customer_plan_id` e IDs de produto/ofertas retornados. Nunca use username/email como `account_id`.
 
 ### 2.2 Consultar e consumir créditos
 
-- Leia o customer plan: `GET /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}`.
-- Leia elegibilidade: `GET /v1/workspaces/{workspace_id}/products/{product_id}/eligibility`.
-- Leia saldo e extrato: `GET /v1/workspaces/{workspace_id}/customer-wallet/statement`.
+- Leia o customer plan: `GET /v1/accounts/{account_id}/customer-plans/{customer_plan_id}`.
+- Leia elegibilidade: `GET /v1/accounts/{account_id}/products/{product_id}/eligibility`.
+- Leia saldo e extrato: `GET /v1/accounts/{account_id}/customer-wallet/statement`.
 - Antes de iniciar uma operação, consulte a elegibilidade para UX. A resposta é uma fotografia, não uma reserva.
 - Para cobrar uma unidade, envie um comando de uso com `Idempotency-Key` estável por operação e `transaction_id` imutável. O Subscription revalida entitlement e saldo dentro da transação; só considere a operação cobrada quando a resposta confirmar o débito.
 - Reenvie a mesma requisição com a mesma chave após timeout. Não gere uma chave nova até consultar o resultado por transação; isso pode representar uma segunda operação legítima.
@@ -97,11 +97,11 @@ Repita o plano pago para 200 créditos/R$ 40 (`price_amount_minor: 4000`) e 400 
 
 - Leia as ofertas e valores do catálogo do Subscription, não mantenha preços comerciais duplicados na aplicação cliente.
 - Recargas são compras de quantidade inteira. Passe `quantity` e a oferta unitária; não calcule saldo no cliente.
-- O checkout inicial requer plano do cliente, tipo da compra e transação. Guarde o `checkout_id`; acompanhe com `GET /v1/workspaces/{workspace_id}/checkouts/{checkout_id}`.
+- O checkout inicial requer plano do cliente, tipo da compra e transação. Guarde o `checkout_id`; acompanhe com `GET /v1/accounts/{account_id}/checkouts/{checkout_id}`.
 - Conceda créditos somente quando o estado do Subscription confirmar a cobrança. Uma URL de retorno do navegador não confirma pagamento.
-- Um upgrade pago hospedado usa `POST /v1/workspaces/{workspace_id}/checkouts` com `checkout_kind=PLAN_UPGRADE`, `target_plan_version_id` e `Idempotency-Key`. O checkout devolve uma URL hospedada; o plano e a franquia só mudam após confirmação. A rota de transição direta continua disponível para integrações que já possuem uma forma de pagamento verificada.
+- Um upgrade pago hospedado usa `POST /v1/accounts/{account_id}/checkouts` com `checkout_kind=PLAN_UPGRADE`, `target_plan_version_id` e `Idempotency-Key`. O checkout devolve uma URL hospedada; o plano e a franquia só mudam após confirmação. A rota de transição direta continua disponível para integrações que já possuem uma forma de pagamento verificada.
 - Recusa/expiração não concede franquia. Após falha de renovação, mostre a situação pendente e permita regularização pelo endpoint de Billing. Não solicite dados de cartão diretamente na aplicação cliente.
-- Cancelamento usa `POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/cancel`. Mostre a data efetiva devolvida pelo Subscription; não apague nem invalide créditos avulsos já comprados.
+- Cancelamento usa `POST /v1/accounts/{account_id}/customer-plans/{customer_plan_id}/cancel`. Mostre a data efetiva devolvida pelo Subscription; não apague nem invalide créditos avulsos já comprados.
 
 ### 2.4 Estados e repetição
 
@@ -130,46 +130,46 @@ Não defina `STRIPE_SECRET_KEY` no processo cliente.
 ### 3.2 Inscrição gratuita
 
 ```http
-POST /v1/workspaces/{workspace_id}/customer-plans
+POST /v1/accounts/{account_id}/customer-plans
 Idempotency-Key: account:{account_id}:trial:v1
 Content-Type: application/json
 
 {"plan_version_id":"<SUBSCRIPTION_FREE_PLAN_VERSION_ID>","transaction_id":"account:<account_id>:trial:v1"}
 ```
 
-Antes da inscrição, cada evento de workspace usa o mesmo envelope e a assinatura exigida pelo endpoint:
+Antes da inscrição, cada evento de account usa o mesmo envelope e a assinatura exigida pelo endpoint:
 
 ```json
-{"event_id":"<uuid-created>","event_type":"workspace.created","schema_version":1,"aggregate_id":"<workspace_id>","sequence":1,"occurred_at":"<RFC3339_UTC>","workspace_id":"<workspace_id>","correlation_id":"<stable-uuid>","causation_id":null,"payload":{"workspace_id":"<workspace_id>"}}
+{"event_id":"<uuid-created>","event_type":"account.created","schema_version":1,"aggregate_id":"<account_id>","sequence":1,"occurred_at":"<RFC3339_UTC>","account_id":"<account_id>","correlation_id":"<stable-uuid>","causation_id":null,"payload":{"account_id":"<account_id>"}}
 ```
 
-Para a ativação use outro `event_id`, `event_type:"workspace.activated"`, `sequence:2` e `causation_id:"<uuid-created>"`. O HMAC cobre os bytes exatos do JSON enviado; não reserialize entre assinar e transmitir.
+Para a ativação use outro `event_id`, `event_type:"account.activated"`, `sequence:2` e `causation_id:"<uuid-created>"`. O HMAC cobre os bytes exatos do JSON enviado; não reserialize entre assinar e transmitir.
 
 Resposta `201 Created` (campos omitidos aqui são específicos do estado do ciclo):
 
 ```json
 {
   "customer_plan_id": "<uuid>",
-  "workspace_id": "<workspace_id>",
+  "account_id": "<account_id>",
   "plan_version_id": "<uuid-do-plano-gratis>",
   "commercial_status": "ACTIVE",
   "activation_status": "ACTIVATED"
 }
 ```
 
-Guarde `customer_plan_id`. Para uma requisição repetida após timeout, use o mesmo corpo, a mesma transação e a mesma chave. O Subscription trata o evento de workspace e a inscrição como operações idempotentes independentes.
+Guarde `customer_plan_id`. Para uma requisição repetida após timeout, use o mesmo corpo, a mesma transação e a mesma chave. O Subscription trata o evento de account e a inscrição como operações idempotentes independentes.
 
 ### 3.3 Elegibilidade, carteira e uso
 
 ```http
-GET /v1/workspaces/{workspace_id}/products/{product_id}/eligibility
-GET /v1/workspaces/{workspace_id}/customer-wallet/statement?limit=50
+GET /v1/accounts/{account_id}/products/{product_id}/eligibility
+GET /v1/accounts/{account_id}/customer-wallet/statement?limit=50
 ```
 
-Registre consumo em `POST /v1/workspaces/{workspace_id}/usage-events`:
+Registre consumo em `POST /v1/accounts/{account_id}/usage-events`:
 
 ```http
-POST /v1/workspaces/{workspace_id}/usage-events
+POST /v1/accounts/{account_id}/usage-events
 Idempotency-Key: task:<operation_id>:v1
 Content-Type: application/json
 
@@ -191,13 +191,13 @@ Content-Type: application/json
 Quando a conta começa diretamente num plano pago (sem customer plan grátis anterior), crie primeiro o customer plan pago pendente e então inicie `INITIAL`. Para a experiência que começa pelo plano grátis, mantenha esse customer plan e use `PLAN_UPGRADE` após escolha do usuário.
 
 ```http
-POST /v1/workspaces/{workspace_id}/customer-plans
+POST /v1/accounts/{account_id}/customer-plans
 Idempotency-Key: account:<account_id>:paid-plan:v1
 Content-Type: application/json
 
 {"plan_version_id":"<SUBSCRIPTION_PLAN_100_VERSION_ID>","transaction_id":"account:<account_id>:paid-plan:v1"}
 
-POST /v1/workspaces/{workspace_id}/checkouts
+POST /v1/accounts/{account_id}/checkouts
 Idempotency-Key: checkout:<operation_id>:initial:v1
 Content-Type: application/json
 
@@ -205,7 +205,7 @@ Content-Type: application/json
 ```
 
 ```http
-POST /v1/workspaces/{workspace_id}/checkouts
+POST /v1/accounts/{account_id}/checkouts
 Idempotency-Key: checkout:<operation_id>:v1
 Content-Type: application/json
 
@@ -224,7 +224,7 @@ Content-Type: application/json
 Valores válidos de `checkout_kind`: `INITIAL`, `ON_DEMAND`, `PLAN_UPGRADE`. `quantity` é opcional e assume `1`; para recarga, use inteiro de `1` a `10000`. Para checkout hospedado, omita `payment_method_binding_id` e informe URLs absolutas HTTPS (HTTP somente em loopback). Dinheiro usa `amount_minor` (`BRL 2000` significa `R$ 20,00`); créditos são inteiros. A resposta contém `checkout_id`, `collection_request_id`, `status`, `amount_minor`, `currency`, `granted_credit_units` e `redirect_url`. Redirecione o usuário para `redirect_url` e consulte o Subscription depois do retorno; o `session_id` fornecido pelo navegador não confirma pagamento.
 
 ```http
-GET /v1/workspaces/{workspace_id}/checkouts/<checkout_id>
+GET /v1/accounts/{account_id}/checkouts/<checkout_id>
 ```
 
 O checkout hospedado devolve `redirect_url`; a aplicação cliente redireciona o usuário e depois consulta o checkout. A sessão é modo pagamento e salva o método para renovações futuras na mesma compra. Se a resposta inicial se perder, repita a mesma requisição com o mesmo `Idempotency-Key`; não crie outra compra para o mesmo intento. O webhook confirmado, e não o retorno do navegador, autoriza créditos.
@@ -232,7 +232,7 @@ O checkout hospedado devolve `redirect_url`; a aplicação cliente redireciona o
 ### 3.5 Upgrade, regularização e cancelamento
 
 ```http
-POST /v1/workspaces/{workspace_id}/checkouts
+POST /v1/accounts/{account_id}/checkouts
 Idempotency-Key: upgrade:<operation_id>:v1
 Content-Type: application/json
 
@@ -249,7 +249,7 @@ Content-Type: application/json
 O Subscription calcula e cobra somente a diferença entre o preço atual e o destino. A concessão da diferença de créditos e a mudança de ciclo ocorrem após confirmação verificada. Para regularizar um plano em `PAST_DUE`, envie:
 
 ```http
-POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/renewal-regularizations
+POST /v1/accounts/{account_id}/customer-plans/{customer_plan_id}/renewal-regularizations
 Idempotency-Key: regularize:<operation_id>:v1
 Content-Type: application/json
 
@@ -259,16 +259,16 @@ Content-Type: application/json
 `payment_method_binding_id` é opcional; omitindo-o, o Subscription escolhe o método ativo do plano. A resposta inicial é `CollectionRequestResponse` e pode estar `SCHEDULED`. Consulte o estado final com:
 
 ```http
-GET /v1/workspaces/{workspace_id}/collection-requests/{collection_request_id}
+GET /v1/accounts/{account_id}/collection-requests/{collection_request_id}
 ```
 
-A resposta contém os snapshots da cobrança (`amount_minor`, `currency`, `granted_credit_units`, `quantity`), `status`, `scheduled_at` e `payment_expires_at`. Para cancelar, chame `POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/cancel` e mantenha o estado e a data efetiva devolvidos pelo Subscription.
+A resposta contém os snapshots da cobrança (`amount_minor`, `currency`, `granted_credit_units`, `quantity`), `status`, `scheduled_at` e `payment_expires_at`. Para cancelar, chame `POST /v1/accounts/{account_id}/customer-plans/{customer_plan_id}/cancel` e mantenha o estado e a data efetiva devolvidos pelo Subscription.
 
 ## 4. Critérios de aceite ponta a ponta
 
-Use workspace e contas novos em ambiente de teste. Inspecione respostas API, carteira e extrato após cada etapa.
+Use account e contas novos em ambiente de teste. Inspecione respostas API, carteira e extrato após cada etapa.
 
-1. **Cadastro:** ativar workspace, inscrever plano gratuito uma vez; confirmar 10 créditos de origem trial no extrato. Repetir o evento e a inscrição com a mesma chave; saldo não pode duplicar.
+1. **Cadastro:** ativar account, inscrever plano gratuito uma vez; confirmar 10 créditos de origem trial no extrato. Repetir o evento e a inscrição com a mesma chave; saldo não pode duplicar.
 2. **Uso e bloqueio:** executar 10 operações idempotentes de 1 crédito. Confirmar saldo zero; a operação 11 deve ser recusada sem criar débito. Repetir uma operação já concluída com a mesma chave; não deve haver novo débito.
 3. **Compra:** criar ou usar um customer plan pago pendente e iniciar checkout `INITIAL`; confirmar que antes do webhook não há franquia paga. Após confirmação verificada, conferir a concessão conforme a versão do plano e o snapshot de valor/currency.
 4. **Recarga:** comprar 25 unidades da oferta de R$ 1. Conferir cobrança de `2500 BRL` e acréscimo de 25 créditos depois da confirmação; uma quantidade inválida deve falhar sem ledger.
@@ -277,6 +277,6 @@ Use workspace e contas novos em ambiente de teste. Inspecione respostas API, car
 7. **Pagamento recusado:** use no checkout de teste o cartão de recusa genérica `4000 0000 0000 0002`, data futura e CVC de três dígitos. O Subscription não concede créditos antes da confirmação e mostra o checkout recusado. Para simular recusa de renovação, use as ferramentas de teste do Stripe numa cobrança off-session; não altere a carteira manualmente. Consulte a [lista de cartões de teste do Stripe](https://docs.stripe.com/testing?numbers-or-method-or-token=tokens).
 8. **Regularização:** quitar a pendência e conferir um único ciclo/franquia, sem duplicar a confirmação se o webhook for reenviado.
 9. **Cancelamento:** solicitar cancelamento e verificar o fim do ciclo efetivo. No limite, confirmar a transição de estado, sem uma nova renovação; conferir que saldo avulso continua registrado.
-10. **Isolamento e falhas:** repetir chaves em dois workspaces, concorrer com duas operações sobre o último crédito, reiniciar o serviço entre eventos e simular falha antes do commit. Nenhuma conta pode afetar a outra; débito/crédito deve ser aplicado uma vez ou não aplicado.
+10. **Isolamento e falhas:** repetir chaves em dois accounts, concorrer com duas operações sobre o último crédito, reiniciar o serviço entre eventos e simular falha antes do commit. Nenhuma conta pode afetar a outra; débito/crédito deve ser aplicado uma vez ou não aplicado.
 
-Guarde IDs de workspace, plano, checkout e transação (sem segredos) para que o roteiro seja reproduzível. Execute primeiro contra Stripe test mode; produção exige webhook ativo, credenciais isoladas e confirmação do fluxo hospedado na versão implantada.
+Guarde IDs de account, plano, checkout e transação (sem segredos) para que o roteiro seja reproduzível. Execute primeiro contra Stripe test mode; produção exige webhook ativo, credenciais isoladas e confirmação do fluxo hospedado na versão implantada.

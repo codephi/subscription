@@ -5,13 +5,13 @@ use subscription::{
 };
 
 pub(super) fn evidence(
-    workspace_id: Uuid,
+    account_id: Uuid,
     policy_version_id: Uuid,
     sequence: i64,
 ) -> AdmissionEvidenceRequest {
     AdmissionEvidenceRequest {
         event_id: Uuid::new_v4(),
-        workspace_id,
+        account_id,
         policy_version_id,
         sequence,
         verified_facts: vec![AdmissionFact::EmailVerified],
@@ -23,7 +23,7 @@ pub(super) fn evidence(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn admission_policy_versions_are_immutable_and_plan_reference_cannot_change() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, _, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, _, product_id) = setup_active_account().await;
     let mut request = CreateAdmissionPolicyRequest {
         policy_id: Uuid::new_v4(),
         version: 1,
@@ -107,7 +107,7 @@ async fn admission_policy_versions_are_immutable_and_plan_reference_cannot_chang
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn admission_evidence_controls_join_and_transition_with_immutable_decisions() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let policy = admission::create_policy(
         &repository,
         CreateAdmissionPolicyRequest {
@@ -134,31 +134,31 @@ async fn admission_evidence_controls_join_and_transition_with_immutable_decision
         .unwrap();
     let request = customer_plan_request(plan.plan_version_id, "transaction-proof");
     assert!(
-        plans::create_customer_plan(&repository, workspace_id, "key-proof", request.clone())
+        plans::create_customer_plan(&repository, account_id, "key-proof", request.clone())
             .await
             .is_err()
     );
-    let mut expired = evidence(workspace_id, policy.policy_version_id, 1);
+    let mut expired = evidence(account_id, policy.policy_version_id, 1);
     expired.valid_until = Utc::now() - Duration::seconds(1);
     admission::receive_evidence(&repository, expired)
         .await
         .unwrap();
     assert!(
-        plans::create_customer_plan(&repository, workspace_id, "key-proof", request.clone())
+        plans::create_customer_plan(&repository, account_id, "key-proof", request.clone())
             .await
             .is_err()
     );
-    assert_plan_state(&pool, workspace_id, 0, 0, 0, 0).await;
-    let approved = evidence(workspace_id, policy.policy_version_id, 2);
+    assert_plan_state(&pool, account_id, 0, 0, 0, 0).await;
+    let approved = evidence(account_id, policy.policy_version_id, 2);
     admission::receive_evidence(&repository, approved.clone())
         .await
         .unwrap();
-    let current = plans::create_customer_plan(&repository, workspace_id, "key-proof", request)
+    let current = plans::create_customer_plan(&repository, account_id, "key-proof", request)
         .await
         .unwrap();
     let other = Uuid::new_v4();
-    apply_workspace_event(&repository, other, "workspace.created", 1).await;
-    apply_workspace_event(&repository, other, "workspace.activated", 2).await;
+    apply_account_event(&repository, other, "account.created", 1).await;
+    apply_account_event(&repository, other, "account.activated", 2).await;
     assert!(plans::create_customer_plan(
         &repository,
         other,
@@ -171,7 +171,7 @@ async fn admission_evidence_controls_join_and_transition_with_immutable_decision
     let target = plans::create_plan(&repository, subscription.subscription_id, offer)
         .await
         .unwrap();
-    let mut withdrawn = evidence(workspace_id, policy.policy_version_id, 3);
+    let mut withdrawn = evidence(account_id, policy.policy_version_id, 3);
     withdrawn.verified_facts.clear();
     admission::receive_evidence(&repository, withdrawn)
         .await
@@ -185,23 +185,23 @@ async fn admission_evidence_controls_join_and_transition_with_immutable_decision
     };
     assert!(plans::transition_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         current.customer_plan_id,
         "proof-transition",
         transition.clone()
     )
     .await
     .is_err());
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 60).await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 60).await;
     admission::receive_evidence(
         &repository,
-        evidence(workspace_id, policy.policy_version_id, 4),
+        evidence(account_id, policy.policy_version_id, 4),
     )
     .await
     .unwrap();
     plans::transition_customer_plan(
         &repository,
-        workspace_id,
+        account_id,
         current.customer_plan_id,
         "proof-transition",
         transition,
@@ -233,7 +233,7 @@ async fn admission_evidence_controls_join_and_transition_with_immutable_decision
     .await
     .is_err());
     assert!(
-        subscription::services::credits::reconcile(&repository, workspace_id)
+        subscription::services::credits::reconcile(&repository, account_id)
             .await
             .unwrap()
             .consistent
@@ -247,8 +247,8 @@ async fn admission_evidence_requires_signature_and_preserves_event_identity_and_
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let (router, pool) = setup_router_with_options(false, Some("admission-secret".into())).await;
     let repository = DatabaseRepository::new(pool.clone());
-    let workspace_id = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace_id, "workspace.created", 1).await;
+    let account_id = Uuid::new_v4();
+    apply_account_event(&repository, account_id, "account.created", 1).await;
     let policy_body = serde_json::json!({"policy_id":Uuid::new_v4(),"version":1,"required_facts":["EMAIL_VERIFIED"]});
     let created = router
         .clone()
@@ -266,7 +266,7 @@ async fn admission_evidence_requires_signature_and_preserves_event_identity_and_
             .unwrap();
     let fetched = get_json(&router, &format!("/v1/admission-policies/{policy_id}")).await;
     assert_eq!(fetched["version"], 1);
-    let original = evidence(workspace_id, policy_id, 1);
+    let original = evidence(account_id, policy_id, 1);
     let now = subscription::services::signatures::current_timestamp().unwrap();
     assert_eq!(
         post_signed_evidence(&router, &original, "wrong-secret", now)
@@ -298,7 +298,7 @@ async fn admission_evidence_requires_signature_and_preserves_event_identity_and_
             .status(),
         409
     );
-    let skipped = evidence(workspace_id, policy_id, 3);
+    let skipped = evidence(account_id, policy_id, 3);
     assert_eq!(
         post_signed_evidence(&router, &skipped, "admission-secret", now)
             .await

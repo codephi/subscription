@@ -11,12 +11,12 @@ async fn concurrent_distinct_credits_reconcile_sequence_balance_lots_and_version
     let mut workers = Vec::new();
     for units in 1..=16 {
         let repository = fixture.repository.clone();
-        let workspace = fixture.workspace_id;
+        let account = fixture.account_id;
         workers.push(tokio::spawn(async move {
             let identifier = format!("concurrent-credit-{units}");
             credits::grant_direct_credit(
                 &repository,
-                workspace,
+                account,
                 &identifier,
                 credit_request(&identifier, units),
             )
@@ -33,18 +33,18 @@ async fn concurrent_distinct_credits_reconcile_sequence_balance_lots_and_version
 
 async fn assert_concurrent_ledger(fixture: &CreditFixture) {
     let values: (i64, i64, i64, i64) = sqlx::query_as("SELECT cw.balance_credit_units,cw.version,(SELECT count(*) FROM customer_wallet_entries WHERE customer_id=$1),(SELECT count(*) FROM credit_lots WHERE customer_id=$1) FROM customer_wallets cw JOIN wallets w USING(wallet_id) WHERE w.customer_id=$1")
-        .bind(fixture.workspace_id).fetch_one(&fixture.pool).await.unwrap();
+        .bind(fixture.account_id).fetch_one(&fixture.pool).await.unwrap();
     assert_eq!(values, (136, 17, 16, 16));
-    let reconciliation = credits::reconcile(&fixture.repository, fixture.workspace_id)
+    let reconciliation = credits::reconcile(&fixture.repository, fixture.account_id)
         .await
         .unwrap();
     assert!(reconciliation.consistent);
     assert_eq!(reconciliation.ledger_balance_credit_units.value(), 136);
     assert_eq!(reconciliation.available_lot_credit_units.value(), 136);
     let events: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_events WHERE workspace_id=$1 AND event_type='credit.granted'",
+        "SELECT count(*) FROM outbox_events WHERE account_id=$1 AND event_type='credit.granted'",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();
@@ -58,7 +58,7 @@ async fn assert_complete_statement(fixture: &CreditFixture) {
     loop {
         let page = credits::statement(
             &fixture.repository,
-            fixture.workspace_id,
+            fixture.account_id,
             StatementQuery {
                 cursor,
                 limit: Some(3),
@@ -103,7 +103,7 @@ async fn credit_reconciliation_detects_projection_lot_and_middle_entry_corruptio
         .await
         .unwrap();
     corrupt_middle_entry(&fixture).await;
-    let report = credits::reconcile(&fixture.repository, fixture.workspace_id)
+    let report = credits::reconcile(&fixture.repository, fixture.account_id)
         .await
         .unwrap();
     assert_eq!(report.ledger_balance_credit_units.value(), 31);
@@ -119,7 +119,7 @@ async fn corrupt_middle_entry(fixture: &CreditFixture) {
 async fn assert_readonly_inconsistent(fixture: &CreditFixture) {
     let before = fixture.snapshot().await;
     assert!(
-        !credits::reconcile(&fixture.repository, fixture.workspace_id)
+        !credits::reconcile(&fixture.repository, fixture.account_id)
             .await
             .unwrap()
             .consistent
@@ -134,7 +134,7 @@ async fn credit_reconciliation_checks_chain_even_when_totals_match() {
     fixture.grant("second", 20).await.unwrap();
     sqlx::raw_sql("ALTER TABLE customer_wallet_entries DISABLE TRIGGER trg_customer_wallet_entries_append_only; UPDATE customer_wallet_entries SET balance_before_credit_units=1,balance_after_credit_units=11 WHERE entry_sequence=1; ALTER TABLE customer_wallet_entries ENABLE TRIGGER trg_customer_wallet_entries_append_only;")
         .execute(&fixture.pool).await.unwrap();
-    let report = credits::reconcile(&fixture.repository, fixture.workspace_id)
+    let report = credits::reconcile(&fixture.repository, fixture.account_id)
         .await
         .unwrap();
     assert_eq!(report.ledger_balance_credit_units.value(), 30);
@@ -150,7 +150,7 @@ async fn expired_credit_lots_are_excluded_from_available_reconciliation() {
         .execute(&fixture.pool)
         .await
         .unwrap();
-    let report = credits::reconcile(&fixture.repository, fixture.workspace_id)
+    let report = credits::reconcile(&fixture.repository, fixture.account_id)
         .await
         .unwrap();
     assert_eq!(report.available_lot_credit_units.value(), 0);
@@ -159,12 +159,12 @@ async fn expired_credit_lots_are_excluded_from_available_reconciliation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn nonoperational_workspace_preserves_credit_state_and_reuses_rejected_keys() {
+async fn nonoperational_account_preserves_credit_state_and_reuses_rejected_keys() {
     let fixture = CreditFixture::new().await;
     fixture.grant("initial", 10).await.unwrap();
-    fixture.event("workspace.blocked", 3).await;
+    fixture.event("account.blocked", 3).await;
     assert_blocked_credit_is_atomic(&fixture).await;
-    fixture.event("workspace.activated", 4).await;
+    fixture.event("account.activated", 4).await;
     assert_eq!(
         fixture
             .grant("blocked", 5)
@@ -175,7 +175,7 @@ async fn nonoperational_workspace_preserves_credit_state_and_reuses_rejected_key
             .value(),
         15
     );
-    fixture.event("workspace.terminated", 5).await;
+    fixture.event("account.terminated", 5).await;
     assert_blocked_credit_is_atomic(&fixture).await;
 }
 
@@ -183,7 +183,7 @@ async fn assert_blocked_credit_is_atomic(fixture: &CreditFixture) {
     let before = fixture.snapshot().await;
     assert_eq!(
         fixture.grant("blocked", 5).await.unwrap_err().code(),
-        "workspace_not_operational"
+        "account_not_operational"
     );
     assert_eq!(fixture.snapshot().await, before);
 }

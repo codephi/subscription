@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const promotionId = "00000000-0000-4000-8000-000000000091";
 
-test("operator creates a voucher with its default workspace limit", async ({ page }) => {
+test("operator creates a voucher with its default account limit", async ({ page }) => {
   let submitted: Record<string, unknown> | undefined;
   await page.route("**/v1/admin/vouchers", async (route) => {
     if (route.request().method() === "POST") {
@@ -23,7 +23,7 @@ test("operator creates a voucher with its default workspace limit", async ({ pag
   await page.getByRole("textbox", { name: "Código" }).fill(" boas-vindas ");
   await page.getByRole("textbox", { name: "Nome" }).fill("Boas vindas");
   await page.getByRole("textbox", { name: "Créditos concedidos por resgate" }).fill("250");
-  await expect(page.getByLabel("Usos por workspace")).toHaveValue("1");
+  await expect(page.getByLabel("Usos por account")).toHaveValue("1");
   await page.getByRole("button", { name: "Cadastrar promoção" }).click();
 
   await expect(page).toHaveURL(`/promotions/vouchers/${promotionId}`);
@@ -31,7 +31,7 @@ test("operator creates a voucher with its default workspace limit", async ({ pag
   expect(submitted).toMatchObject({
     code: "boas-vindas",
     credit_units: "250",
-    max_uses_per_workspace: 1,
+    max_uses_per_account: 1,
     max_total_uses: null,
   });
 });
@@ -84,7 +84,7 @@ function promotionResponse(kind: "VOUCHER" | "COUPON") {
     valid_from: null,
     valid_until: null,
     max_total_uses: null,
-    max_uses_per_workspace: 1,
+    max_uses_per_account: 1,
     completed_uses: 0,
     reserved_uses: 0,
     availability: "AVAILABLE",

@@ -3,10 +3,10 @@ import { Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  createWorkspace,
-  getWorkspace,
-  listWorkspaces,
-  terminateWorkspace,
+  createAccount,
+  getAccount,
+  listAccounts,
+  terminateAccount,
 } from "@/api/client";
 import { CursorPager } from "@/components/cursor-pager";
 import {
@@ -50,35 +50,35 @@ import { usePanelStore } from "@/store/panel-store";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function WorkspaceListPage() {
+export function AccountListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const search = usePanelStore((state) => state.workspaceSearch);
-  const setSearch = usePanelStore((state) => state.setWorkspaceSearch);
+  const search = usePanelStore((state) => state.accountSearch);
+  const setSearch = usePanelStore((state) => state.setAccountSearch);
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const [lookupId, setLookupId] = useState<string>();
   const [actorReference, setActorReference] = useState("");
   const termination = useMutation({
-    mutationFn: (workspaceId: string) => terminateWorkspace(workspaceId),
+    mutationFn: (accountId: string) => terminateAccount(accountId),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
   });
   const creation = useMutation({
-    mutationFn: () => createWorkspace(actorReference.trim()),
-    onSuccess: async (workspace) => {
-      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-      navigate(`/workspaces/${workspace.workspace_id}`);
+    mutationFn: () => createAccount(actorReference.trim()),
+    onSuccess: async (account) => {
+      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      navigate(`/accounts/${account.account_id}`);
     },
   });
   const page = useQuery({
-    queryKey: ["workspaces", cursor],
-    queryFn: () => listWorkspaces(cursor),
+    queryKey: ["accounts", cursor],
+    queryFn: () => listAccounts(cursor),
   });
   const lookup = useQuery({
-    queryKey: ["workspace-lookup", lookupId],
-    queryFn: () => getWorkspace(lookupId!),
+    queryKey: ["account-lookup", lookupId],
+    queryFn: () => getAccount(lookupId!),
     enabled: !!lookupId,
     retry: false,
   });
@@ -94,7 +94,7 @@ export function WorkspaceListPage() {
   }
 
   useEffect(() => {
-    if (lookup.data) navigate(`/workspaces/${lookup.data.workspace_id}`);
+    if (lookup.data) navigate(`/accounts/${lookup.data.account_id}`);
   }, [lookup.data, navigate]);
 
   return (
@@ -103,16 +103,16 @@ export function WorkspaceListPage() {
         <p className="text-sm font-medium text-muted-foreground">
           ADMINISTRAÇÃO
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight">Workspaces</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Accounts</h1>
         <p className="text-muted-foreground">
-          Workspaces recebidos do Accounts ou criados pela administração.
+          Accounts recebidos do Accounts ou criados pela administração.
         </p>
       </header>
       <Card>
         <CardHeader>
-          <CardTitle>Criar workspace</CardTitle>
+          <CardTitle>Criar account</CardTitle>
           <CardDescription>
-            Gera um novo ID e registra o workspace no estado inicial CREATED.
+            Gera um novo ID e registra o account no estado inicial CREATED.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -125,9 +125,9 @@ export function WorkspaceListPage() {
           >
             <FieldGroup className="flex-1">
               <Field>
-                <FieldLabel htmlFor="workspace-actor">Criado por</FieldLabel>
+                <FieldLabel htmlFor="account-actor">Criado por</FieldLabel>
                 <Input
-                  id="workspace-actor"
+                  id="account-actor"
                   value={actorReference}
                   onChange={(event) => setActorReference(event.target.value)}
                   placeholder="operador ou e-mail"
@@ -140,7 +140,7 @@ export function WorkspaceListPage() {
               disabled={!actorReference.trim() || creation.isPending}
             >
               <Plus data-icon="inline-start" />
-              {creation.isPending ? "Criando…" : "Criar workspace"}
+              {creation.isPending ? "Criando…" : "Criar account"}
             </Button>
           </form>
           {creation.error && <QueryError error={creation.error} />}
@@ -150,7 +150,7 @@ export function WorkspaceListPage() {
         <CardHeader>
           <CardTitle>Abrir por ID</CardTitle>
           <CardDescription>
-            Informe o UUID completo de um workspace.
+            Informe o UUID completo de um account.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -164,9 +164,9 @@ export function WorkspaceListPage() {
                   search.length > 0 && !uuidPattern.test(search.trim())
                 }
               >
-                <FieldLabel htmlFor="workspace-id">Workspace ID</FieldLabel>
+                <FieldLabel htmlFor="account-id">Account ID</FieldLabel>
                 <Input
-                  id="workspace-id"
+                  id="account-id"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -193,7 +193,7 @@ export function WorkspaceListPage() {
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Workspaces registrados</CardTitle>
+          <CardTitle>Accounts registrados</CardTitle>
           <CardDescription>
             IDs e estados conhecidos por este serviço.
           </CardDescription>
@@ -203,7 +203,7 @@ export function WorkspaceListPage() {
           {page.error && <QueryError error={page.error} />}
           {page.data?.items.length === 0 && (
             <QueryEmpty
-              title="Nenhum workspace"
+              title="Nenhum account"
               description="Ainda não há projeções disponíveis nesta página."
             />
           )}
@@ -212,7 +212,7 @@ export function WorkspaceListPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Workspace ID</TableHead>
+                    <TableHead>Account ID</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Sequência</TableHead>
                     <TableHead>Atualizado</TableHead>
@@ -220,29 +220,29 @@ export function WorkspaceListPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {page.data.items.map((workspace) => (
-                    <TableRow key={workspace.workspace_id}>
+                  {page.data.items.map((account) => (
+                    <TableRow key={account.account_id}>
                       <TableCell>
                         <Link
-                          to={`/workspaces/${workspace.workspace_id}`}
+                          to={`/accounts/${account.account_id}`}
                           className="font-mono text-xs text-primary hover:underline"
                         >
-                          {workspace.workspace_id}
+                          {account.account_id}
                         </Link>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">
-                          {workspace.operational_status}
+                          {account.operational_status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{workspace.external_sequence}</TableCell>
-                      <TableCell>{formatDate(workspace.updated_at)}</TableCell>
+                      <TableCell>{account.external_sequence}</TableCell>
+                      <TableCell>{formatDate(account.updated_at)}</TableCell>
                       <TableCell>
                         <AlertDialog>
                           <AlertDialogTrigger
                             render={<Button variant="outline" size="sm" />}
                             disabled={
-                              workspace.operational_status === "TERMINATED" ||
+                              account.operational_status === "TERMINATED" ||
                               termination.isPending
                             }
                           >
@@ -252,10 +252,10 @@ export function WorkspaceListPage() {
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                Apagar este workspace?
+                                Apagar este account?
                               </AlertDialogTitle>
                               <AlertDialogDescription>
-                                O workspace será encerrado e deixará de aceitar
+                                O account será encerrado e deixará de aceitar
                                 operações. Planos, cobranças, carteiras e
                                 auditoria serão preservados. Esta ação não pode
                                 ser desfeita.
@@ -265,10 +265,10 @@ export function WorkspaceListPage() {
                               <AlertDialogCancel>Voltar</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() =>
-                                  termination.mutate(workspace.workspace_id)
+                                  termination.mutate(account.account_id)
                                 }
                               >
-                                Encerrar workspace
+                                Encerrar account
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

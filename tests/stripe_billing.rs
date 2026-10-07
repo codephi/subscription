@@ -9,9 +9,9 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use subscription::{
     dto::{
-        admin_queries::CreateWorkspaceRequest,
+        admin_queries::CreateAccountRequest,
         billing::{CreateBillingConnectionRequest, CreateInitialCollectionRequest},
-        events::{WorkspaceEventEnvelope, WorkspaceEventPayload, WorkspaceEventType},
+        events::{AccountEventEnvelope, AccountEventPayload, AccountEventType},
         plans::{
             AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest,
             CreateSubscriptionPlanRequest, CreateSubscriptionRequest, PlanRecurrence,
@@ -27,8 +27,8 @@ use subscription::{
         stripe::StripeConnector,
     },
     services::{
-        admin_queries, billing, billing_integrations, plans, stripe_webhooks,
-        workspace_events::process_workspace_event,
+        account_events::process_account_event, admin_queries, billing, billing_integrations, plans,
+        stripe_webhooks,
     },
 };
 use tokio::{
@@ -78,7 +78,7 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
             .expect("configure credential vault");
     let integration = repository
         .create_stripe_integration(
-            fixture.workspace_id,
+            fixture.account_id,
             "acct_managed_test",
             "TEST",
             None,
@@ -100,7 +100,7 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
             .credential_vault()
             .unwrap()
             .open(
-                fixture.workspace_id,
+                fixture.account_id,
                 integration.billing_connection_id,
                 "stripe_api",
                 &stored,
@@ -111,7 +111,7 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
 
     let configured = repository
         .update_stripe_integration(
-            fixture.workspace_id,
+            fixture.account_id,
             integration.billing_connection_id,
             integration.configuration_version,
             None,
@@ -122,16 +122,16 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
     assert_eq!(configured.status, "ACTIVE");
     assert!(configured.webhook_secret_configured);
     let summaries = repository
-        .list_integrations(fixture.workspace_id)
+        .list_integrations(fixture.account_id)
         .await
         .unwrap();
     let public_summary = serde_json::to_string(&summaries).unwrap();
     assert!(!public_summary.contains("whsec_managed_test"));
     assert!(!public_summary.contains("sk_test_managed_secret"));
 
-    let delayed_workspace = admin_queries::create_workspace(
+    let delayed_account = admin_queries::create_account(
         &repository,
-        CreateWorkspaceRequest {
+        CreateAccountRequest {
             actor_reference: "stripe-billing-test".into(),
         },
     )
@@ -168,25 +168,25 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
     );
     let recovered_connection = billing_integrations::active_or_provision_default_stripe(
         &repository,
-        delayed_workspace.workspace_id,
+        delayed_account.account_id,
     )
     .await
     .unwrap();
     let recovered = repository
-        .get_integration(delayed_workspace.workspace_id, recovered_connection)
+        .get_integration(delayed_account.account_id, recovered_connection)
         .await
         .unwrap();
     assert_eq!(recovered.status, "ACTIVE");
     repository
-        .provision_workspace_default_stripe(fixture.workspace_id, &loaded)
+        .provision_account_default_stripe(fixture.account_id, &loaded)
         .await
         .unwrap();
     repository
-        .provision_workspace_default_stripe(fixture.workspace_id, &loaded)
+        .provision_account_default_stripe(fixture.account_id, &loaded)
         .await
         .unwrap();
     let provisioned = repository
-        .find_test_stripe_integration(fixture.workspace_id, "acct_default_test")
+        .find_test_stripe_integration(fixture.account_id, "acct_default_test")
         .await
         .unwrap()
         .unwrap();
@@ -195,32 +195,32 @@ async fn managed_stripe_credentials_are_encrypted_and_webhook_setup_activates_co
     assert!(!defaults_public.contains("sk_test_default_secret"));
     assert!(!defaults_public.contains("whsec_default_secret"));
 
-    let new_workspace = Uuid::new_v4();
-    process_workspace_event(
+    let new_account = Uuid::new_v4();
+    process_account_event(
         &repository,
-        WorkspaceEventEnvelope {
+        AccountEventEnvelope {
             event_id: Uuid::new_v4(),
-            event_type: WorkspaceEventType::Created,
+            event_type: AccountEventType::Created,
             schema_version: 1,
-            aggregate_id: new_workspace,
+            aggregate_id: new_account,
             sequence: 1,
             occurred_at: Utc::now(),
-            workspace_id: new_workspace,
+            account_id: new_account,
             correlation_id: Uuid::new_v4(),
             causation_id: None,
-            payload: WorkspaceEventPayload {
-                workspace_id: new_workspace,
+            payload: AccountEventPayload {
+                account_id: new_account,
             },
         },
     )
     .await
     .unwrap();
-    let new_workspace_integration = repository
-        .find_test_stripe_integration(new_workspace, "acct_default_test")
+    let new_account_integration = repository
+        .find_test_stripe_integration(new_account, "acct_default_test")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(new_workspace_integration.status, "ACTIVE");
+    assert_eq!(new_account_integration.status, "ACTIVE");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -229,7 +229,7 @@ async fn payment_setup_reference_resolves_inside_subscription_without_client_int
     let repository = &fixture.repository;
     let connection = repository
         .create_billing_connection(
-            fixture.workspace_id,
+            fixture.account_id,
             &CreateBillingConnectionRequest {
                 provider: "STRIPE".into(),
                 external_account_reference: "acct_setup_reference_test".into(),
@@ -241,7 +241,7 @@ async fn payment_setup_reference_resolves_inside_subscription_without_client_int
         .unwrap();
     assert_eq!(
         repository
-            .active_stripe_billing_connection(fixture.workspace_id)
+            .active_stripe_billing_connection(fixture.account_id)
             .await
             .unwrap(),
         connection.billing_connection_id
@@ -251,7 +251,7 @@ async fn payment_setup_reference_resolves_inside_subscription_without_client_int
     repository
         .record_payment_method_setup_session(
             setup_reference,
-            fixture.workspace_id,
+            fixture.account_id,
             connection.billing_connection_id,
             fixture.customer_plan_id,
             "cs_test_provider_session",
@@ -260,7 +260,7 @@ async fn payment_setup_reference_resolves_inside_subscription_without_client_int
         .unwrap();
     let setup = repository
         .find_payment_method_setup_session(
-            fixture.workspace_id,
+            fixture.account_id,
             fixture.customer_plan_id,
             setup_reference,
         )
@@ -272,7 +272,7 @@ async fn payment_setup_reference_resolves_inside_subscription_without_client_int
     );
     assert_eq!(setup.provider_setup_id, "cs_test_provider_session");
     assert!(repository
-        .find_payment_method_setup_session(fixture.workspace_id, Uuid::new_v4(), setup_reference,)
+        .find_payment_method_setup_session(fixture.account_id, Uuid::new_v4(), setup_reference,)
         .await
         .is_err());
 }
@@ -284,7 +284,7 @@ async fn payment_setup_requires_subscription_to_resolve_one_active_integration()
         fixture
             .repository
             .create_billing_connection(
-                fixture.workspace_id,
+                fixture.account_id,
                 &CreateBillingConnectionRequest {
                     provider: "STRIPE".into(),
                     external_account_reference: account.into(),
@@ -297,7 +297,7 @@ async fn payment_setup_requires_subscription_to_resolve_one_active_integration()
     }
     let error = fixture
         .repository
-        .active_stripe_billing_connection(fixture.workspace_id)
+        .active_stripe_billing_connection(fixture.account_id)
         .await
         .expect_err("ambiguous integration must stay inside Subscription policy");
     assert_eq!(error.code(), "billing_connection_ambiguous");
@@ -379,7 +379,7 @@ async fn stripe_webhooks_converge_without_duplicate_effects() {
     .unwrap();
     let customer_plan = plans::create_customer_plan(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "stripe-plan-key",
         CreateCustomerPlanRequest {
             plan_version_id: plan.plan_version_id,
@@ -388,11 +388,11 @@ async fn stripe_webhooks_converge_without_duplicate_effects() {
     )
     .await
     .unwrap();
-    let secret_variable = format!("STRIPE_WEBHOOK_SECRET_{}", fixture.workspace_id.simple());
+    let secret_variable = format!("STRIPE_WEBHOOK_SECRET_{}", fixture.account_id.simple());
     std::env::set_var(&secret_variable, "whsec_integration");
     let connection = billing::create_billing_connection(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         &CreateBillingConnectionRequest {
             provider: "STRIPE".into(),
             external_account_reference: "cus_webhook".into(),
@@ -405,7 +405,7 @@ async fn stripe_webhooks_converge_without_duplicate_effects() {
     let binding = fixture
         .repository
         .create_verified_payment_method_binding(
-            fixture.workspace_id,
+            fixture.account_id,
             connection.billing_connection_id,
             Some(customer_plan.customer_plan_id),
             "pm_webhook",
@@ -414,7 +414,7 @@ async fn stripe_webhooks_converge_without_duplicate_effects() {
         .unwrap();
     let collection = billing::create_initial_collection(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         customer_plan.customer_plan_id,
         "stripe-collection-key",
         &CreateInitialCollectionRequest {
@@ -519,7 +519,7 @@ async fn stripe_webhooks_converge_without_duplicate_effects() {
          WHERE w.customer_id=$2 AND w.wallet_type='CUSTOMER'",
     )
     .bind(customer_plan.customer_plan_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();
@@ -544,7 +544,7 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
     let fixture = setup_usage(1, 1, 0).await;
     let rejected = billing::create_billing_connection(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         &CreateBillingConnectionRequest {
             provider: "STRIPE".into(),
             external_account_reference: "cus_test".into(),
@@ -557,7 +557,7 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
     assert_eq!(rejected.code(), "invalid_secret_reference");
     let connection = billing::create_billing_connection(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         &CreateBillingConnectionRequest {
             provider: "STRIPE".into(),
             external_account_reference: "cus_test".into(),
@@ -572,7 +572,7 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
     let binding = fixture
         .repository
         .create_verified_payment_method_binding_with_name(
-            fixture.workspace_id,
+            fixture.account_id,
             connection.billing_connection_id,
             None,
             "pm_tokenized_test",
@@ -580,7 +580,7 @@ async fn stripe_connection_and_tokenized_binding_never_expose_secret_or_card_dat
         )
         .await
         .unwrap();
-    let bindings = billing::list_payment_method_bindings(&fixture.repository, fixture.workspace_id)
+    let bindings = billing::list_payment_method_bindings(&fixture.repository, fixture.account_id)
         .await
         .unwrap();
     assert_eq!(bindings, vec![binding]);
@@ -605,7 +605,7 @@ async fn payment_method_binding_removal_keeps_history_and_is_idempotent() {
     let connection = fixture
         .repository
         .create_billing_connection(
-            fixture.workspace_id,
+            fixture.account_id,
             &CreateBillingConnectionRequest {
                 provider: "STRIPE".into(),
                 external_account_reference: "cus_remove_test".into(),
@@ -618,7 +618,7 @@ async fn payment_method_binding_removal_keeps_history_and_is_idempotent() {
     let binding = fixture
         .repository
         .create_verified_payment_method_binding(
-            fixture.workspace_id,
+            fixture.account_id,
             connection.billing_connection_id,
             None,
             "pm_remove_test",
@@ -629,7 +629,7 @@ async fn payment_method_binding_removal_keeps_history_and_is_idempotent() {
     let existing = fixture
         .repository
         .find_payment_method_binding_for_removal(
-            fixture.workspace_id,
+            fixture.account_id,
             binding.payment_method_binding_id,
         )
         .await
@@ -637,24 +637,18 @@ async fn payment_method_binding_removal_keeps_history_and_is_idempotent() {
     assert_eq!(existing.binding.status, "ACTIVE");
     fixture
         .repository
-        .mark_payment_method_binding_detached(
-            fixture.workspace_id,
-            binding.payment_method_binding_id,
-        )
+        .mark_payment_method_binding_detached(fixture.account_id, binding.payment_method_binding_id)
         .await
         .unwrap();
     fixture
         .repository
-        .mark_payment_method_binding_detached(
-            fixture.workspace_id,
-            binding.payment_method_binding_id,
-        )
+        .mark_payment_method_binding_detached(fixture.account_id, binding.payment_method_binding_id)
         .await
         .unwrap();
 
     let listed = fixture
         .repository
-        .list_payment_method_bindings(fixture.workspace_id)
+        .list_payment_method_bindings(fixture.account_id)
         .await
         .unwrap();
     assert_eq!(listed.len(), 1);
@@ -932,7 +926,7 @@ async fn external_refund_is_observed_once_without_automatic_credit_effect() {
     let fixture = setup_usage(1, 1, 25).await;
     let connection = billing::create_billing_connection(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         &CreateBillingConnectionRequest {
             provider: "STRIPE".into(),
             external_account_reference: "cus_refund".into(),
@@ -972,7 +966,7 @@ async fn external_refund_is_observed_once_without_automatic_credit_effect() {
         "SELECT cw.balance_credit_units FROM customer_wallets cw \
          JOIN wallets w USING(wallet_id) WHERE w.customer_id=$1 AND w.wallet_type='CUSTOMER'",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();

@@ -22,34 +22,34 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_checkout))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/checkout-quotes", tag = "Checkouts",
-    params(("workspace_id" = Uuid, Path)), request_body = CheckoutQuoteRequest,
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/checkout-quotes", tag = "Checkouts",
+    params(("account_id" = Uuid, Path)), request_body = CheckoutQuoteRequest,
     responses((status = 200, body = CheckoutQuoteResponse), (status = 409, body = ErrorResponse)))]
 async fn quote_checkout(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     Json(request): Json<CheckoutQuoteRequest>,
 ) -> ApiResult<Json<CheckoutQuoteResponse>> {
     Ok(Json(
-        billing_checkout::quote(&state.database(), workspace_id, request).await?,
+        billing_checkout::quote(&state.database(), account_id, request).await?,
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/checkouts", tag = "Checkouts",
-    params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/checkouts", tag = "Checkouts",
+    params(("account_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateCheckoutRequest,
     responses((status = 201, body = CheckoutResponse), (status = 202, body = CheckoutResponse),
         (status = 409, body = ErrorResponse), (status = 503, body = ErrorResponse)))]
 async fn create_checkout(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     headers: HeaderMap,
     Json(request): Json<CreateCheckoutRequest>,
 ) -> ApiResult<(StatusCode, Json<CheckoutResponse>)> {
     let response = billing_checkout::create(
         &state.database(),
         state.billing_checkout_config().as_ref(),
-        workspace_id,
+        account_id,
         idempotency_key(&headers)?,
         request,
     )
@@ -62,15 +62,15 @@ async fn create_checkout(
     Ok((status, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/checkouts/{checkout_id}", tag = "Checkouts",
-    params(("workspace_id" = Uuid, Path), ("checkout_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/checkouts/{checkout_id}", tag = "Checkouts",
+    params(("account_id" = Uuid, Path), ("checkout_id" = Uuid, Path)),
     responses((status = 200, body = CheckoutResponse), (status = 404, body = ErrorResponse)))]
 async fn get_checkout(
     State(state): State<AppState>,
-    Path((workspace_id, checkout_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, checkout_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<CheckoutResponse>> {
     Ok(Json(
-        billing_checkout::get(&state.database(), workspace_id, checkout_id).await?,
+        billing_checkout::get(&state.database(), account_id, checkout_id).await?,
     ))
 }
 

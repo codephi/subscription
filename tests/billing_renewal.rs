@@ -28,7 +28,7 @@ use usage_fixture::setup_usage;
 
 struct PaidRenewalFixture {
     repository: DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     plan_version_id: Uuid,
     binding_id: Uuid,
@@ -123,7 +123,7 @@ async fn paid_period_end_cancellation_is_durable_and_closes_the_cycle() {
         .bind(fixture.customer_plan_id).bind(boundary).execute(&fixture.repository.pool()).await.unwrap();
     plans::cancel_customer_plan(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         fixture.customer_plan_id,
     )
     .await
@@ -189,7 +189,7 @@ async fn manual_regularization_is_idempotent_and_restarts_cycle_only_after_confi
     changed_request.payment_method_binding_id = Some(Uuid::new_v4());
     let changed = billing::create_renewal_regularization(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         fixture.customer_plan_id,
         "same-regularization-key",
         &changed_request,
@@ -244,13 +244,13 @@ fn spawn_regularization(
     subscription::error::ApiResult<subscription::dto::billing::CollectionRequestResponse>,
 > {
     let repository = fixture.repository.clone();
-    let workspace_id = fixture.workspace_id;
+    let account_id = fixture.account_id;
     let customer_plan_id = fixture.customer_plan_id;
     let idempotency_key = idempotency_key.to_string();
     tokio::spawn(async move {
         billing::create_renewal_regularization(
             &repository,
-            workspace_id,
+            account_id,
             customer_plan_id,
             &idempotency_key,
             &request,
@@ -302,7 +302,7 @@ async fn setup_paid_plan() -> PaidRenewalFixture {
     .unwrap();
     let customer_plan = plans::create_customer_plan(
         &usage.repository,
-        usage.workspace_id,
+        usage.account_id,
         &format!("renewal-key-{}", Uuid::new_v4()),
         CreateCustomerPlanRequest {
             plan_version_id: plan.plan_version_id,
@@ -313,13 +313,13 @@ async fn setup_paid_plan() -> PaidRenewalFixture {
     .unwrap();
     let binding_id = insert_binding(
         &usage.repository,
-        usage.workspace_id,
+        usage.account_id,
         customer_plan.customer_plan_id,
     )
     .await;
     PaidRenewalFixture {
         repository: usage.repository,
-        workspace_id: usage.workspace_id,
+        account_id: usage.account_id,
         customer_plan_id: customer_plan.customer_plan_id,
         plan_version_id: plan.plan_version_id,
         binding_id,
@@ -328,31 +328,31 @@ async fn setup_paid_plan() -> PaidRenewalFixture {
 
 async fn insert_binding(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
 ) -> Uuid {
     let connection_id = Uuid::new_v4();
     let binding_id = Uuid::new_v4();
     let pool = repository.pool();
     sqlx::query(
-        "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+        "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
          external_account_reference,secret_reference,capabilities,status) \
          VALUES ($1,$2,'FAKE',$3,'secret://fake',ARRAY['CARD'],'ACTIVE')",
     )
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(format!("account-{connection_id}"))
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-         workspace_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,status) \
+         account_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,status) \
          VALUES ($1,$2,$3,$3,$4,'CARD',$5,'ACTIVE')",
     )
     .bind(binding_id)
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_plan_id)
     .bind(format!("pm-{binding_id}"))
     .execute(&pool)
@@ -370,13 +370,13 @@ async fn insert_pending_collection(
     let attempt_id = Uuid::new_v4();
     let pool = fixture.repository.pool();
     sqlx::query(
-        "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id,customer_plan_id, \
+        "INSERT INTO collection_requests (collection_request_id,account_id,customer_id,customer_plan_id, \
          plan_version_id,payment_method_binding_id,request_kind,amount_minor,currency,granted_credit_units, \
          status,attempts_started,transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
          VALUES ($1,$2,$2,$3,$4,$5,$6,1500,'BRL',100,'PENDING_PAYMENT',1,$7,$8,$9,$10,$11)",
     )
     .bind(request_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.customer_plan_id)
     .bind(fixture.plan_version_id)
     .bind(fixture.binding_id)
@@ -446,7 +446,7 @@ async fn assert_renewal_effects(
          JOIN customer_wallets cw USING(wallet_id) WHERE cp.customer_plan_id=$1",
     )
     .bind(fixture.customer_plan_id)
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(request_id)
     .fetch_one(&pool)
     .await

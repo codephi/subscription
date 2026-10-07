@@ -8,21 +8,21 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn audit_page_filters_workspace_and_action() {
+async fn audit_page_filters_account_and_action() {
     let (router, pool) = support::setup_router_with_options(false, None).await;
-    let workspace_id = Uuid::new_v4();
+    let account_id = Uuid::new_v4();
     let other_id = Uuid::new_v4();
-    for (id, workspace, action) in [
-        (Uuid::from_u128(1), workspace_id, "CREDIT"),
+    for (id, account, action) in [
+        (Uuid::from_u128(1), account_id, "CREDIT"),
         (Uuid::from_u128(2), other_id, "CREDIT"),
-        (Uuid::from_u128(3), workspace_id, "PLAN"),
+        (Uuid::from_u128(3), account_id, "PLAN"),
     ] {
-        sqlx::query("INSERT INTO audit_events (audit_event_id,workspace_id,action,resource_kind,correlation_id) VALUES ($1,$2,$3,'test',$4)")
-            .bind(id).bind(workspace).bind(action).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO audit_events (audit_event_id,account_id,action,resource_kind,correlation_id) VALUES ($1,$2,$3,'test',$4)")
+            .bind(id).bind(account).bind(action).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
     }
     let response = get(
         &router,
-        &format!("/v1/admin/audit-events?workspace_id={workspace_id}&action=CREDIT"),
+        &format!("/v1/admin/audit-events?account_id={account_id}&action=CREDIT"),
     )
     .await;
     assert_eq!(response["items"].as_array().unwrap().len(), 1);

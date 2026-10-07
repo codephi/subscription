@@ -6,7 +6,7 @@
 
 **Revisão:** `customer_wallet` em créditos, `item_wallet` em item units, Price `unit`/`tiered`, uso pendente e ciclos declarativos
 
-**Objetivo:** definir o domínio, os contratos HTTP, as garantias transacionais e a sequência de entrega de uma API de créditos, assinaturas e consumo pós-pago por workspace.
+**Objetivo:** definir o domínio, os contratos HTTP, as garantias transacionais e a sequência de entrega de uma API de créditos, assinaturas e consumo pós-pago por account.
 
 ## 1. Resumo executivo
 
@@ -20,7 +20,7 @@ O catálogo de `SubscriptionPlanVersion` de cada `Subscription` comercial declar
 
 ## 2. Decisões normativas da v1
 
-1. Há exatamente uma `customer_wallet` por conta/customer e exatamente uma `item_wallet` por `(customer_id, item_id)` faturável de Product `CREDIT_METERED`. Items de Product `ENTITLEMENT_ONLY` não geram `item_wallet`. Na v1, a conta/customer de cobrança é o workspace já presente no contrato; não se introduz uma nova hierarquia de clientes.
+1. Há exatamente uma `customer_wallet` por conta/customer e exatamente uma `item_wallet` por `(customer_id, item_id)` faturável de Product `CREDIT_METERED`. Items de Product `ENTITLEMENT_ONLY` não geram `item_wallet`. Na v1, a conta/customer de cobrança é o account já presente no contrato; não se introduz uma nova hierarquia de clientes.
 2. A `customer_wallet` possui `balance_credit_units` inteiro com sinal. Wallet credit é unidade interna e fictícia, não moeda, token negociável ou saldo bancário.
    A `item_wallet` possui item units e contadores de consumo, não `balance_credit_units`. Item units de itens diferentes não são fungíveis nem transferíveis.
 3. Créditos e quantidades de 64 bits são strings inteiras decimais no JSON para não perder precisão em clientes JavaScript. Exemplo: `"credit_units": "1250"`. Não se usa ponto flutuante.
@@ -33,7 +33,7 @@ O catálogo de `SubscriptionPlanVersion` de cada `Subscription` comercial declar
 10. Um Price tem `pricing_model = unit` ou `tiered`. Em `unit`, todo bloco converte para a quantidade fixa de wallet credits. Em `tiered`, faixas progressivas graduadas são aplicadas às item units convertidas acumuladas por customer + item + versão de Price + ciclo. `accumulation_cycle` ausente significa que o acumulado nunca reinicia; presente, contém uma regra recorrente declarativa escolhida pelo cliente. Cada bloco posterior usa a faixa correspondente sem reprecificar débitos já lançados.
 11. A consulta de elegibilidade sempre exige entitlement efetivo. Para `CREDIT_METERED`, também exige `balance_credit_units >= 0`; para `ENTITLEMENT_ONLY`, não consulta saldo. Ela não reserva créditos e nunca autoriza sozinha consumo ou débito. A `item_wallet` não participa do saldo elegível.
 12. Toda alteração externa de créditos e toda chamada de consumo recebem `transaction_id`. Para recorrência, a chave natural adicional é assinatura + período. Para cupom no modo por usuário, `unique_user_id` é uma chave de limite distinta do `transaction_id`.
-13. Um `transaction_id` é único dentro do workspace/customer, em todos os tipos de operação. Qualquer reutilização retorna `409 transaction_already_exists`, independentemente do payload, e nunca cria novo efeito. Toda criação externa transacional também exige `Idempotency-Key`; qualquer reutilização dessa chave retorna `409 idempotency_key_already_used`, sem replay da resposta original.
+13. Um `transaction_id` é único dentro do account/customer, em todos os tipos de operação. Qualquer reutilização retorna `409 transaction_already_exists`, independentemente do payload, e nunca cria novo efeito. Toda criação externa transacional também exige `Idempotency-Key`; qualquer reutilização dessa chave retorna `409 idempotency_key_already_used`, sem replay da resposta original.
 14. Datas e períodos são armazenados em UTC. Agendamentos mensais usam calendário, e não uma duração fixa de dias.
 15. Wallets são materializadas no provisionamento. Criar customer materializa sua `customer_wallet` e uma `item_wallet` somente para cada Item faturável aplicável de Product `CREDIT_METERED`; consumo não cria wallets de forma preguiçosa.
 16. Product possui `usage_model` imutável após publicação: `CREDIT_METERED` ou `ENTITLEMENT_ONLY`. O primeiro usa Price, item wallet e saldo; o segundo concede apenas acesso por assinatura e proíbe Price, item wallet e lançamento de consumo.
@@ -51,7 +51,7 @@ O catálogo de `SubscriptionPlanVersion` de cada `Subscription` comercial declar
 
 Incluído na v1:
 
-- `customer_wallet` e razão de wallet credits por conta/workspace;
+- `customer_wallet` e razão de wallet credits por conta/account;
 - `item_wallet`, extrato e medidor de item units por customer + item faturável;
 - catálogo de produtos, itens e versões de preço;
 - Products medidos por crédito; Products somente por entitlement permanecem modelados para evolução, mas não são publicados na V1;
@@ -78,20 +78,20 @@ Fora da v1:
 - preço no produto;
 - calendários baseados em fuso local; todas as fronteiras do ciclo são instantes UTC;
 - cadastro ou interpretação de usuários finais do cliente;
-- transferência de saldo entre workspaces;
+- transferência de saldo entre accounts;
 - transferência de item units entre `item_wallets` ou conversão entre unidades de itens diferentes;
 - saldo de wallet credits dentro da `item_wallet`;
 - expiração geral/indeterminada de dívida ou saldo; a única expiração de crédito fechada na V1 é a baixa auditável do lote de franquia-base de assinatura no fim de seu ciclo.
 
 ## 4. Modelo de domínio
 
-### 4.1 WorkspaceBillingConfig
+### 4.1 AccountBillingConfig
 
-Configuração 1:1 com o workspace.
+Configuração 1:1 com o account.
 
 Campos principais:
 
-- `workspace_id`;
+- `account_id`;
 - `direct_credit_enabled`;
 - `recurring_credit_enabled`;
 - `created_at`, `updated_at`;
@@ -102,14 +102,14 @@ Invariantes:
 - os dois modos podem estar habilitados simultaneamente;
 - desabilitar recorrência impede criar/reativar assinaturas, mas não apaga assinaturas nem o histórico;
 - Compensations administrativas e resgates promocionais não dependem dessas duas flags;
-- qualquer chamada que informe um workspace existente pode alterar a configuração.
+- qualquer chamada que informe um account existente pode alterar a configuração.
 
 ### 4.2 Wallet comum e especializações
 
 A tabela/modelo base `Wallet` materializa a hierarquia e a identidade comum:
 
 - `wallet_id`;
-- `customer_id`, igual ao principal de cobrança do workspace na v1;
+- `customer_id`, igual ao principal de cobrança do account na v1;
 - `wallet_type`, enum `CUSTOMER` ou `ITEM`;
 - `parent_customer_wallet_id`, nulo em `CUSTOMER` e obrigatório em `ITEM`;
 - `item_id`, nulo em `CUSTOMER` e obrigatório em `ITEM`;
@@ -401,7 +401,7 @@ O item deve pertencer ao produto informado e ambos devem estar ativos no primeir
 
 Campos principais:
 
-- chave única `(customer_id, idempotency_key)`, com `customer_id` resolvido do `workspace_id` informado e chave recebida no cabeçalho `Idempotency-Key`;
+- chave única `(customer_id, idempotency_key)`, com `customer_id` resolvido do `account_id` informado e chave recebida no cabeçalho `Idempotency-Key`;
 - chave única independente `(customer_id, transaction_id)` nos recursos/transações de domínio;
 - `operation_kind`;
 - hash SHA-256 da representação canônica dos campos semanticamente relevantes;
@@ -423,7 +423,7 @@ Registros concluídos precisam ser retidos por todo o prazo em que o cliente pud
 
 ### 4.9 DirectCredit
 
-Concessão de créditos sob demanda solicitada pelo workspace:
+Concessão de créditos sob demanda solicitada pelo account:
 
 - `direct_credit_id`, `customer_id`, `transaction_id`;
 - `credit_units`, inteiro estritamente positivo;
@@ -701,11 +701,11 @@ Quando a única tentativa comercial de renovação termina em falha definitiva r
 
 #### 4.11.2 Eventos de Billing e fronteira com Notifications
 
-Billing mantém uma outbox transacional e publica eventos versionados depois de persistir a mudança de estado. O conjunto mínimo inclui `collection.created`, `collection.attempt_scheduled`, `collection.attempt_started`, `collection.awaiting_customer`, `collection.attempt_failed`, `collection.retry_scheduled`, `collection.exhausted`, `collection.expired`, `payment.confirmed`, `payment.unmatched` e `external_refund.observed`. Cada evento contém IDs correlatos, workspace/customer, assinatura e período quando aplicáveis, estado, motivo tipado e instante.
+Billing mantém uma outbox transacional e publica eventos versionados depois de persistir a mudança de estado. O conjunto mínimo inclui `collection.created`, `collection.attempt_scheduled`, `collection.attempt_started`, `collection.awaiting_customer`, `collection.attempt_failed`, `collection.retry_scheduled`, `collection.exhausted`, `collection.expired`, `payment.confirmed`, `payment.unmatched` e `external_refund.observed`. Cada evento contém IDs correlatos, account/customer, assinatura e período quando aplicáveis, estado, motivo tipado e instante.
 
 Regra normativa de cobertura: toda ação financeira ou integração externa observável do Billing produz pelo menos um evento de intenção antes do efeito externo e exatamente um resultado terminal correspondente depois, sem exigir eventos para cada passo puramente interno. Pares mínimos incluem cobrança `attempt.requested` → `attempt.succeeded|failed|pending`, processamento de webhook `webhook.received` → `webhook.applied|unmatched|rejected`, concessão `credit_grant.requested` → `credit_grant.applied|failed`, e estorno externo já realizado `external_refund.observed` → `external_refund.reconciled|inconclusive`. Estados intermediários podem gerar eventos adicionais, mas nunca substituem o resultado terminal.
 
-Todos os eventos usam um envelope comum com `billing_event_id`, `event_type`, `schema_version`, `occurred_at`, `workspace_id`, `correlation_id`, `causation_id`, identificadores da entidade/agregado, `attempt_number` quando aplicável e payload tipado. `correlation_id` acompanha toda a jornada da cobrança; `causation_id` aponta para o evento/comando que provocou o próximo passo. A unicidade de `billing_event_id` e a outbox transacional tornam a publicação ao menos uma vez, portanto consumidores devem deduplicar. A ordem é garantida somente dentro do mesmo agregado; consumidores não devem presumir ordem global.
+Todos os eventos usam um envelope comum com `billing_event_id`, `event_type`, `schema_version`, `occurred_at`, `account_id`, `correlation_id`, `causation_id`, identificadores da entidade/agregado, `attempt_number` quando aplicável e payload tipado. `correlation_id` acompanha toda a jornada da cobrança; `causation_id` aponta para o evento/comando que provocou o próximo passo. A unicidade de `billing_event_id` e a outbox transacional tornam a publicação ao menos uma vez, portanto consumidores devem deduplicar. A ordem é garantida somente dentro do mesmo agregado; consumidores não devem presumir ordem global.
 
 O catálogo completo, os destinos e o transporte dos eventos — broker, webhook de saída, API de polling ou combinação — serão detalhados em contrato próprio. Esta pendência não altera a obrigação atual de registrar eventos duráveis, versionados e correlacionáveis em cada fronteira de ação do Billing.
 
@@ -724,7 +724,7 @@ Vale é um ativo promocional independente:
 - `credit_units`, inteiro estritamente positivo e persistido no próprio vale;
 - estado `AVAILABLE`, `USED` ou `VOID`;
 - `coupon_id` opcional;
-- ao usar: workspace beneficiado, instante, forma de resgate e entrada do razão.
+- ao usar: account beneficiado, instante, forma de resgate e entrada do razão.
 
 Invariantes:
 
@@ -752,13 +752,13 @@ O código aceita apenas ASCII em caixa alta, dígitos, hífen e sublinhado. A AP
 
 No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A string é opaca: comparação exata de bytes UTF-8, sem trim, mudança de caixa ou normalização Unicode. A restrição única representa `(coupon_id, unique_user_id)`. A plataforma não cria perfil, não valida documento e não atribui significado ao valor.
 
-`CouponUserRedemption` referencia cupom, digest do identificador, vale consumido, workspace e entrada do razão. Sua inserção, seleção do vale e crédito são atômicos.
+`CouponUserRedemption` referencia cupom, digest do identificador, vale consumido, account e entrada do razão. Sua inserção, seleção do vale e crédito são atômicos.
 
 ### 4.14 Compensation
 
 `Compensation` é um recurso administrativo rastreável que registra uma intenção de correção antes de qualquer movimentação. Ele não representa consumo e sua criação não altera a Wallet.
 
-`CompensationType` é o catálogo versionado de motivos permitidos no workspace:
+`CompensationType` é o catálogo versionado de motivos permitidos no account:
 
 - `compensation_type_id`, código estável, nome e descrição;
 - sinais permitidos: crédito, débito ou ambos; zero é proibido;
@@ -766,7 +766,7 @@ No modo `ONCE_PER_EXTERNAL_USER`, a requisição exige `unique_user_id`. A strin
 - `approval_required` opcional como regra de workflow;
 - estado administrativo e versão; o tipo não fixa obrigatoriamente o valor da ocorrência.
 
-- `compensation_id`, `workspace_id`, `customer_id` e `customer_wallet_id`;
+- `compensation_id`, `account_id`, `customer_id` e `customer_wallet_id`;
 - `compensation_type_id` e versão aplicada;
 - `signed_credit_units`, inteiro diferente de zero, positivo ou negativo;
 - descrição/justificativa obrigatória e imutável depois da submissão;
@@ -783,11 +783,11 @@ Compensação pode creditar ou debitar, mas nunca aceita delta zero, nunca edita
 
 ## 5. Contratos HTTP principais
 
-Prefixo sugerido: `/v1`. O `workspace_id` vem no caminho ou no contrato da operação, e a aplicação valida sua existência e a consistência do escopo.
+Prefixo sugerido: `/v1`. O `account_id` vem no caminho ou no contrato da operação, e a aplicação valida sua existência e a consistência do escopo.
 
 Conflitos de chave ou transação incluem `error.existing_operation` quando há
-reserva concluída: `workspace_id`, `operation_kind`, `resource_id` e
-`transaction_id` originais. A consulta é restrita ao workspace informado; nenhum
+reserva concluída: `account_id`, `operation_kind`, `resource_id` e
+`transaction_id` originais. A consulta é restrita ao account informado; nenhum
 payload/metadata original é copiado para o erro. Para créditos, o cliente usa o
 `transaction_id` dessa referência na consulta de transação da wallet, inclusive
 quando perdeu a resposta após o commit. Erros sem reserva concluída omitem o campo.
@@ -803,20 +803,20 @@ Toda operação externa que possa gerar `CustomerWalletEntry` exige `transaction
 
 ### 5.1 Consulta e configuração
 
-- `GET /v1/workspaces/{workspace_id}/wallets` — hierarquia materializada, customer wallet, item wallets, estados e versão do escopo.
-- `GET /v1/workspaces/{workspace_id}/wallet-provisioning` — conjunto esperado/materializado e prontidão.
-- `POST /v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile` — reprocessamento idempotente e restrito da materialização; não cria wallets dentro de uma chamada de consumo.
-- `GET /v1/workspaces/{workspace_id}/customer-wallet` — `balance_credit_units`, versão, timestamp e ID da última `CustomerWalletEntry`; não retorna moeda.
-- `GET /v1/workspaces/{workspace_id}/customer-wallet/statement?cursor=...` — extrato paginado, com filtros por data, tipo, origem, `transaction_id`, `reference_kind` e `reference_id`; retorna descrição, metadata e referências tipadas.
-- `GET /v1/workspaces/{workspace_id}/customer-wallet/statement/{customer_wallet_entry_id}` — detalhe do lançamento de créditos e correlações.
-- `GET /v1/workspaces/{workspace_id}/customer-wallet/transactions/{transaction_id}` — localiza a operação no workspace informado e retorna lançamento, descrição, metadata canônica e referências tipadas; para consumo ainda pendente, retorna o `UsageEvent`/`ItemWalletEntry` mesmo sem lançamento global.
-- `GET /v1/workspaces/{workspace_id}/billing-config` — flags de crédito.
-- `PUT /v1/workspaces/{workspace_id}/billing-config` — alteração administrativa com versão esperada.
-- `GET /v1/workspaces/{workspace_id}/products/{product_id}/eligibility` — consulta não vinculante que retorna `usage_model`, estado comercial, `renewal_status`, entitlement efetivo e, somente para `CREDIT_METERED`, suficiência de créditos; `RENEWAL_INACTIVE` não bloqueia por si só o uso de saldo existente.
-- `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet` — medidor atual de item units, vínculo à customer wallet e próximo bloco.
-- `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement?cursor=...` — extrato completo de consumo do item, incluindo chamadas que não emitiram débito.
-- `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement/{item_wallet_entry_id}` — detalhe e correlação opcional com o débito na customer wallet.
-- `GET /v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/pricing-accumulators?price_version_id=...&cursor=...` — acumuladores vitalícios ou por ciclo.
+- `GET /v1/accounts/{account_id}/wallets` — hierarquia materializada, customer wallet, item wallets, estados e versão do escopo.
+- `GET /v1/accounts/{account_id}/wallet-provisioning` — conjunto esperado/materializado e prontidão.
+- `POST /v1/admin/accounts/{account_id}/wallet-provisioning/reconcile` — reprocessamento idempotente e restrito da materialização; não cria wallets dentro de uma chamada de consumo.
+- `GET /v1/accounts/{account_id}/customer-wallet` — `balance_credit_units`, versão, timestamp e ID da última `CustomerWalletEntry`; não retorna moeda.
+- `GET /v1/accounts/{account_id}/customer-wallet/statement?cursor=...` — extrato paginado, com filtros por data, tipo, origem, `transaction_id`, `reference_kind` e `reference_id`; retorna descrição, metadata e referências tipadas.
+- `GET /v1/accounts/{account_id}/customer-wallet/statement/{customer_wallet_entry_id}` — detalhe do lançamento de créditos e correlações.
+- `GET /v1/accounts/{account_id}/customer-wallet/transactions/{transaction_id}` — localiza a operação no account informado e retorna lançamento, descrição, metadata canônica e referências tipadas; para consumo ainda pendente, retorna o `UsageEvent`/`ItemWalletEntry` mesmo sem lançamento global.
+- `GET /v1/accounts/{account_id}/billing-config` — flags de crédito.
+- `PUT /v1/accounts/{account_id}/billing-config` — alteração administrativa com versão esperada.
+- `GET /v1/accounts/{account_id}/products/{product_id}/eligibility` — consulta não vinculante que retorna `usage_model`, estado comercial, `renewal_status`, entitlement efetivo e, somente para `CREDIT_METERED`, suficiência de créditos; `RENEWAL_INACTIVE` não bloqueia por si só o uso de saldo existente.
+- `GET /v1/accounts/{account_id}/items/{item_id}/item-wallet` — medidor atual de item units, vínculo à customer wallet e próximo bloco.
+- `GET /v1/accounts/{account_id}/items/{item_id}/item-wallet/statement?cursor=...` — extrato completo de consumo do item, incluindo chamadas que não emitiram débito.
+- `GET /v1/accounts/{account_id}/items/{item_id}/item-wallet/statement/{item_wallet_entry_id}` — detalhe e correlação opcional com o débito na customer wallet.
+- `GET /v1/accounts/{account_id}/items/{item_id}/item-wallet/pricing-accumulators?price_version_id=...&cursor=...` — acumuladores vitalícios ou por ciclo.
 
 #### Decisão de elegibilidade de uso
 
@@ -967,9 +967,9 @@ Na publicação, `pricing_model` determina campos permitidos, cada faixa deve de
 
 ### 5.3 Registro de consumo e eventual débito
 
-`POST /v1/workspaces/{workspace_id}/usage-events`
+`POST /v1/accounts/{account_id}/usage-events`
 
-`GET /v1/workspaces/{workspace_id}/usage-events/{usage_event_id}` devolve o recibo histórico persistido, sem recalcular o estado atual.
+`GET /v1/accounts/{account_id}/usage-events/{usage_event_id}` devolve o recibo histórico persistido, sem recalcular o estado atual.
 
 Requisição:
 
@@ -1029,37 +1029,37 @@ Reutilizar a mesma `Idempotency-Key` retorna `409 idempotency_key_already_used`;
 
 ### 5.4 Créditos
 
-- `POST /v1/workspaces/{workspace_id}/credits/direct` — exige modo direto habilitado, `transaction_id`, `credit_units` positivo e `external_reference` opcional.
-- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/on-demand-purchases` — compra adicional dentro de um CustomerPlan já comercialmente `ACTIVE` e com `activation_status = ACTIVATED`, não uma adesão. Exige versão não revogada e `OnDemandPlan` publicado/não revogado da mesma Subscription comercial; ativação pendente retorna `409 customer_plan_activation_pending` sem criar cobrança. A operação cria cobrança idempotente vinculada ao CustomerPlan e só credita a Wallet se todas essas condições ainda valerem na confirmação, sem criar CustomerPlan, ciclo, renovação, entitlement ou alterar recorrência/plano principal. `PAST_DUE`/`RENEWAL_INACTIVE`, estados terminais, versão revogada ou Subscription comercial diferente são rejeitados mesmo com saldo.
-- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/renewal-regularizations` — disponível para `PAST_DUE`/`RENEWAL_INACTIVE`; cria/retorna nova `CollectionRequest` idempotente de regularização, nunca reutiliza a tentativa terminal anterior e só reativa após webhook confirmado.
-- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/plan-transitions` — solicita `UPGRADE` ou `DOWNGRADE` para nova `SubscriptionPlanVersion` da mesma Subscription comercial; upgrade cria/retorna a única `CollectionRequest` pendente, downgrade aplica a transição imediata auditável e ambos reiniciam a âncora somente quando efetivados.
+- `POST /v1/accounts/{account_id}/credits/direct` — exige modo direto habilitado, `transaction_id`, `credit_units` positivo e `external_reference` opcional.
+- `POST /v1/accounts/{account_id}/customer-plans/{id}/on-demand-purchases` — compra adicional dentro de um CustomerPlan já comercialmente `ACTIVE` e com `activation_status = ACTIVATED`, não uma adesão. Exige versão não revogada e `OnDemandPlan` publicado/não revogado da mesma Subscription comercial; ativação pendente retorna `409 customer_plan_activation_pending` sem criar cobrança. A operação cria cobrança idempotente vinculada ao CustomerPlan e só credita a Wallet se todas essas condições ainda valerem na confirmação, sem criar CustomerPlan, ciclo, renovação, entitlement ou alterar recorrência/plano principal. `PAST_DUE`/`RENEWAL_INACTIVE`, estados terminais, versão revogada ou Subscription comercial diferente são rejeitados mesmo com saldo.
+- `POST /v1/accounts/{account_id}/customer-plans/{id}/renewal-regularizations` — disponível para `PAST_DUE`/`RENEWAL_INACTIVE`; cria/retorna nova `CollectionRequest` idempotente de regularização, nunca reutiliza a tentativa terminal anterior e só reativa após webhook confirmado.
+- `POST /v1/accounts/{account_id}/customer-plans/{id}/plan-transitions` — solicita `UPGRADE` ou `DOWNGRADE` para nova `SubscriptionPlanVersion` da mesma Subscription comercial; upgrade cria/retorna a única `CollectionRequest` pendente, downgrade aplica a transição imediata auditável e ambos reiniciam a âncora somente quando efetivados.
 - `POST /v1/subscriptions` e `POST /v1/subscriptions/{id}/plans` — catálogo administrativo de Subscription comercial, suas versões de plano de assinatura e seus OnDemandPlans. Criar a Subscription raiz a torna disponível imediatamente, sem endpoint ou estado posterior de publicação/ativação/pausa/arquivamento/revogação; versões publicadas de plano continuam não editáveis. Caso exista caminho histórico `/subscription-offerings`, ele é apenas alias de catálogo e não muda o domínio canônico.
 - `POST /v1/subscription-plans/{id}/revoke` — revoga administrativamente a versão, com razão auditável; bloqueia adesões, transições e renovações futuras, terminaliza solicitações pendentes sem efetivação e não revoga imediatamente os CustomerPlans já confirmados.
 - `GET /v1/subscriptions/{id}` e `GET /v1/subscription-plans/{id}` — catálogo comercial: a Subscription expõe seus `SubscriptionPlanVersion` e `OnDemandPlan` publicados; o plano de assinatura expõe a composição `FREE|PAID`, preço quando `PAID`, recorrência enumerada, política de admissão, meios aceitos e `granted_credit_units`, sem Voucher, Cupom ou duração/expiração temporal.
-- `POST /v1/workspaces/{workspace_id}/customer-plans` — única rota canônica de adesão: recebe `SubscriptionPlanVersion`, avalia a política de admissão e cria um CustomerPlan principal `CREDIT_STRICT`, depois de reservar `ActiveCustomerPlanSlot` para `(customer_id, subscription_id)` comercial derivado. `OnDemandPlan` não é aceito nessa rota nem pode criar CustomerPlan. `FREE` livre entra diretamente em `ACTIVATED`; `FREE` que exige `CARD` fica em `PENDING_CARD_VALIDATION` até webhook de setup válido, sem cobrança; e `PAID` fica em `PENDING_INITIAL_PAYMENT` até confirmação definitiva do pagamento inicial, inclusive após autenticação adicional. Os dois estados pendentes não efetivam entitlement, ciclo, franquia-base ou OnDemand. Se já existir CustomerPlan ativo na mesma Subscription comercial, ou se uma criação concorrente vencer a reserva, retorna `409 active_customer_plan_already_exists` sem nova cobrança, ciclo, entitlement ou crédito; Subscriptions comerciais distintas não conflitam.
-- `GET /v1/workspaces/{workspace_id}/customer-plans/{id}`. Caso uma API externa mantenha temporariamente o caminho histórico `/subscriptions`, ele é apenas alias de recurso de CustomerPlan e não muda a terminologia nem o modelo canônico;
-- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/cancel` — para recorrente confirmada, agenda `cancel_at_period_end`; em `PENDING_PAYMENT`, encerra somente a solicitação pendente. Não encerra o período confirmado nem dispara estorno/Compensation;
-- `POST /v1/admin/workspaces/{workspace_id}/customer-plans/{id}/revoke` — ação administrativa prioritária, com motivo, ator, instante e referências auditáveis. Serializa a transição para `REVOKED` e terminaliza em `CANCELED/CUSTOMER_PLAN_REVOKED` toda `CollectionRequest` pendente do vínculo; não dispara estorno/Compensation e não permite reativação;
-- `POST /v1/workspaces/{workspace_id}/billing-connections` e `GET /v1/workspaces/{workspace_id}/billing-connections/{id}` — configura adaptador e expõe endpoint de webhook;
-- `GET /v1/workspaces/{workspace_id}/billing-connections/{id}/capabilities` — na V1 expõe somente capacidades de cartão;
-- `POST /v1/workspaces/{workspace_id}/billing-connections/{id}/payment-method-setup-sessions` — inicia tokenização, hosted fields ou checkout do provedor e devolve somente artefatos públicos necessários ao cliente;
-- `POST /v1/workspaces/{workspace_id}/payment-method-bindings` e `GET /v1/workspaces/{workspace_id}/payment-method-bindings` — conclui/lista vínculos entre customer, conexão e, opcionalmente, CustomerPlan;
-- `POST /v1/workspaces/{workspace_id}/customer-plans/{id}/collection-requests` — cria/retorna solicitação idempotente; normalmente responde `202`;
-- `GET /v1/workspaces/{workspace_id}/collection-requests/{id}` — estado normalizado da única tentativa comercial, ação adicional de cartão quando aplicável e resultado do processamento de eventos/webhooks;
+- `POST /v1/accounts/{account_id}/customer-plans` — única rota canônica de adesão: recebe `SubscriptionPlanVersion`, avalia a política de admissão e cria um CustomerPlan principal `CREDIT_STRICT`, depois de reservar `ActiveCustomerPlanSlot` para `(customer_id, subscription_id)` comercial derivado. `OnDemandPlan` não é aceito nessa rota nem pode criar CustomerPlan. `FREE` livre entra diretamente em `ACTIVATED`; `FREE` que exige `CARD` fica em `PENDING_CARD_VALIDATION` até webhook de setup válido, sem cobrança; e `PAID` fica em `PENDING_INITIAL_PAYMENT` até confirmação definitiva do pagamento inicial, inclusive após autenticação adicional. Os dois estados pendentes não efetivam entitlement, ciclo, franquia-base ou OnDemand. Se já existir CustomerPlan ativo na mesma Subscription comercial, ou se uma criação concorrente vencer a reserva, retorna `409 active_customer_plan_already_exists` sem nova cobrança, ciclo, entitlement ou crédito; Subscriptions comerciais distintas não conflitam.
+- `GET /v1/accounts/{account_id}/customer-plans/{id}`. Caso uma API externa mantenha temporariamente o caminho histórico `/subscriptions`, ele é apenas alias de recurso de CustomerPlan e não muda a terminologia nem o modelo canônico;
+- `POST /v1/accounts/{account_id}/customer-plans/{id}/cancel` — para recorrente confirmada, agenda `cancel_at_period_end`; em `PENDING_PAYMENT`, encerra somente a solicitação pendente. Não encerra o período confirmado nem dispara estorno/Compensation;
+- `POST /v1/admin/accounts/{account_id}/customer-plans/{id}/revoke` — ação administrativa prioritária, com motivo, ator, instante e referências auditáveis. Serializa a transição para `REVOKED` e terminaliza em `CANCELED/CUSTOMER_PLAN_REVOKED` toda `CollectionRequest` pendente do vínculo; não dispara estorno/Compensation e não permite reativação;
+- `POST /v1/accounts/{account_id}/billing-connections` e `GET /v1/accounts/{account_id}/billing-connections/{id}` — configura adaptador e expõe endpoint de webhook;
+- `GET /v1/accounts/{account_id}/billing-connections/{id}/capabilities` — na V1 expõe somente capacidades de cartão;
+- `POST /v1/accounts/{account_id}/billing-connections/{id}/payment-method-setup-sessions` — inicia tokenização, hosted fields ou checkout do provedor e devolve somente artefatos públicos necessários ao cliente;
+- `POST /v1/accounts/{account_id}/payment-method-bindings` e `GET /v1/accounts/{account_id}/payment-method-bindings` — conclui/lista vínculos entre customer, conexão e, opcionalmente, CustomerPlan;
+- `POST /v1/accounts/{account_id}/customer-plans/{id}/collection-requests` — cria/retorna solicitação idempotente; normalmente responde `202`;
+- `GET /v1/accounts/{account_id}/collection-requests/{id}` — estado normalizado da única tentativa comercial, ação adicional de cartão quando aplicável e resultado do processamento de eventos/webhooks;
 - `POST /v1/billing/webhooks/{connection_id}` — entrada de eventos por conexão;
-- `GET /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments?cursor=...` — fila operacional com motivo, evidências e assinatura candidata;
-- `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/reconcile` — vincula a uma `CollectionRequest` válida após revalidação completa;
-- `POST /v1/admin/workspaces/{workspace_id}/billing/unmatched-payments/{id}/close` — encerra sem devolução com justificativa auditável;
-- `POST /v1/vouchers/{voucher_id}/redeem` — fluxo promocional interno, com workspace beneficiado e `transaction_id`;
-- `POST /v1/coupons/redemptions` — aceita `coupon_id` ou `code`, workspace beneficiado, `transaction_id` e, no modo restrito, `unique_user_id`;
-- `POST /v1/admin/workspaces/{workspace_id}/compensations` — cria a intenção sem movimentar saldo;
-- `POST /v1/admin/workspaces/{workspace_id}/compensation-types` e `GET /v1/admin/workspaces/{workspace_id}/compensation-types` — administra/consulta o catálogo versionado de tipos e suas políticas;
-- `PATCH /v1/admin/workspaces/{workspace_id}/compensations/{id}` — altera somente uma Compensation em `DRAFT`;
-- `POST /v1/admin/workspaces/{workspace_id}/compensations/{id}/submit` — valida tipo, sinal, limites e descrição; transita para `READY` ou `PENDING_APPROVAL` conforme a política;
-- `POST /v1/admin/workspaces/{workspace_id}/compensations/{id}/approve` e `/reject` — disponíveis somente quando a ocorrência exige aprovação;
-- `POST /v1/admin/workspaces/{workspace_id}/compensations/{id}/execute` — exige `transaction_id` e executa atomicamente o único lançamento;
-- `GET /v1/admin/workspaces/{workspace_id}/compensations/{id}` e `GET /v1/admin/workspaces/{workspace_id}/compensations?cursor=...` — detalhe e fila operacional.
-- `POST /v1/admin/workspaces/{workspace_id}/compensation-batches` e `GET /v1/admin/workspaces/{workspace_id}/compensation-batches/{id}` — cria/consulta agrupador em massa e suas ocorrências individuais; execução continua sendo idempotente por Compensation.
+- `GET /v1/admin/accounts/{account_id}/billing/unmatched-payments?cursor=...` — fila operacional com motivo, evidências e assinatura candidata;
+- `POST /v1/admin/accounts/{account_id}/billing/unmatched-payments/{id}/reconcile` — vincula a uma `CollectionRequest` válida após revalidação completa;
+- `POST /v1/admin/accounts/{account_id}/billing/unmatched-payments/{id}/close` — encerra sem devolução com justificativa auditável;
+- `POST /v1/vouchers/{voucher_id}/redeem` — fluxo promocional interno, com account beneficiado e `transaction_id`;
+- `POST /v1/coupons/redemptions` — aceita `coupon_id` ou `code`, account beneficiado, `transaction_id` e, no modo restrito, `unique_user_id`;
+- `POST /v1/admin/accounts/{account_id}/compensations` — cria a intenção sem movimentar saldo;
+- `POST /v1/admin/accounts/{account_id}/compensation-types` e `GET /v1/admin/accounts/{account_id}/compensation-types` — administra/consulta o catálogo versionado de tipos e suas políticas;
+- `PATCH /v1/admin/accounts/{account_id}/compensations/{id}` — altera somente uma Compensation em `DRAFT`;
+- `POST /v1/admin/accounts/{account_id}/compensations/{id}/submit` — valida tipo, sinal, limites e descrição; transita para `READY` ou `PENDING_APPROVAL` conforme a política;
+- `POST /v1/admin/accounts/{account_id}/compensations/{id}/approve` e `/reject` — disponíveis somente quando a ocorrência exige aprovação;
+- `POST /v1/admin/accounts/{account_id}/compensations/{id}/execute` — exige `transaction_id` e executa atomicamente o único lançamento;
+- `GET /v1/admin/accounts/{account_id}/compensations/{id}` e `GET /v1/admin/accounts/{account_id}/compensations?cursor=...` — detalhe e fila operacional.
+- `POST /v1/admin/accounts/{account_id}/compensation-batches` e `GET /v1/admin/accounts/{account_id}/compensation-batches/{id}` — cria/consulta agrupador em massa e suas ocorrências individuais; execução continua sendo idempotente por Compensation.
 
 Contratos de quantidade:
 
@@ -1082,7 +1082,7 @@ Mapeamento mínimo:
 
 - `400`: JSON ou sintaxe inválida;
 - `403 product_not_entitled`: o plano/entitlement não habilita o Product;
-- `404`: recurso inexistente no workspace informado;
+- `404`: recurso inexistente no account informado;
 - `409 idempotency_key_already_used`: `Idempotency-Key` já utilizada, com payload igual ou diferente;
 - `409 transaction_already_exists`: `transaction_id` já existente, com payload igual ou diferente;
 - `409 price_version_changed`: versão esperada divergente;
@@ -1102,7 +1102,7 @@ Mapeamento mínimo:
 
 ### 6.1 Registro de consumo e débito por bloco
 
-1. Validar a forma do `workspace_id` e a existência do workspace.
+1. Validar a forma do `account_id` e a existência do account.
 2. Validar forma básica sem consultar saldo.
 3. Abrir transação de banco e tentar inserir `IdempotencyRecord(customer_id, idempotency_key)` e reservar `(customer_id, transaction_id)`. Restrições únicas fazem uma chamada concorrente aguardar o commit ou rollback da dona das chaves.
 4. Se qualquer chave já existir após a espera, devolver o `409` específico sem executar o domínio nem reproduzir a resposta original.
@@ -1348,7 +1348,7 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 - adicionar um novo provedor exige somente um `BillingConnector` compatível; não altera contratos, estados ou invariantes de Subscription e Wallet;
 - o núcleo rejeita uma operação antes da chamada externa quando o conector não declara a capacidade ou o meio solicitado;
 - na V1, toda `CollectionRequest` usa exclusivamente cartão tokenizado no provedor;
-- `PaymentMethodBinding` pertence ao mesmo workspace, customer e `BillingConnection` da cobrança; vínculo opcional com assinatura não permite uso cruzado;
+- `PaymentMethodBinding` pertence ao mesmo account, customer e `BillingConnection` da cobrança; vínculo opcional com assinatura não permite uso cruzado;
 - webhook assinado, incluindo entrega tardia válida, converge idempotentemente para o mesmo estado sem duplicar cobrança, renovação ou lançamento; ausência de webhook preserva o estado conhecido;
 - webhook inválido não altera cobrança; webhook antigo não regride estado terminal; evento válido pode ser reprocessado pela `WebhookInbox`;
 - na V1, não há retentativa automática, polling, watchdog, cron de consulta ao provedor, fila automática de divergências ou cancelamento por ausência/atraso de webhook;
@@ -1387,7 +1387,7 @@ Eventos para integrações futuras devem sair por outbox gravada na mesma transa
 - concorrência ou repetição na execução gera exatamente uma entrada `COMPENSATION`; a chamada perdedora recebe `409` e delta zero é rejeitado;
 - Compensation executada é terminal e preserva vínculo com tipo/versionamento, descrição, solicitante, aprovador quando houver, executor, Batch e lançamento original quando aplicável;
 - uma operação em massa materializa uma Compensation por customer; o Batch não produz lançamento agregado nem compartilha uma execução entre customers;
-- consultas e mutações permanecem logicamente filtradas pelo `workspace_id` informado;
+- consultas e mutações permanecem logicamente filtradas pelo `account_id` informado;
 - toda Compensation contém solicitante, descrição e tipo; quando houver aprovação, o ator e o instante são preservados;
 - toda transação aceita preserva `description`, metadata canônica e zero ou mais `WalletTransactionReference` oficiais no mesmo commit;
 - consultar por `transaction_id` devolve a metadata originalmente persistida sem depender de logs; metadata nunca é usada para calcular ou substituir a referência oficial da origem;
@@ -1420,7 +1420,7 @@ Este documento não autoriza nem executa código. Quando a implementação for a
 4. **Customer wallet e idempotência:** `CustomerWalletEntry`, saldo global, transação comum e testes concorrentes; esta é a fundação das concessões e débitos.
 5. **Catálogo e Price versionado:** Product `CREDIT_METERED`/`ENTITLEMENT_ONLY`, Items/subitens, conversões `unit`/`tiered`, regra declarativa de ciclo, validação de faixas e publicação imutável.
 6. **Item wallet e consumo:** `ItemWalletEntry`, `PricingAccumulator`, `BillingBlock`, extratos correlatos, bloqueio atômico por saldo insuficiente (`409` sem efeito), pendentes e testes concorrentes.
-7. **Crédito direto e configuração:** flags por workspace e fronteira com confirmação externa.
+7. **Crédito direto e configuração:** flags por account e fronteira com confirmação externa.
 8. **Subscription e Billing:** ofertas, Plans com preço/recorrência, política de admissão, entitlement, cobrança local, conexões/adaptadores, tokenização referenciada, `CollectionRequest`, `BillingPayment` e `WebhookInbox` idempotente.
 9. **Vales:** ciclo de vida, resgate direto e auditoria promocional.
 10. **Cupons:** lote, seleção concorrente, modo livre e limite por identificador externo.

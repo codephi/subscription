@@ -33,13 +33,13 @@ async fn same_item_usage_is_serialized_and_keys_have_one_effect() {
     let (first, second) = tokio::join!(
         usage::record_usage(
             &first_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "same-item-key-1",
             usage_request(&fixture, "same-item-transaction-1", 600),
         ),
         usage::record_usage(
             &second_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "same-item-key-2",
             usage_request(&fixture, "same-item-transaction-2", 600),
         )
@@ -57,7 +57,7 @@ async fn same_item_usage_is_serialized_and_keys_have_one_effect() {
 
     let duplicate = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "same-item-key-3",
         usage_request(&fixture, "same-item-transaction-1", 10),
     )
@@ -66,14 +66,14 @@ async fn same_item_usage_is_serialized_and_keys_have_one_effect() {
     assert_eq!(duplicate.code(), "transaction_already_exists");
     let reused_key = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "same-item-key-1",
         usage_request(&fixture, "different-transaction", 10),
     )
     .await
     .expect_err("duplicate key");
     assert_eq!(reused_key.code(), "idempotency_key_already_used");
-    assert_usage_counts(&fixture.pool, fixture.workspace_id, 2, 1_200).await;
+    assert_usage_counts(&fixture.pool, fixture.account_id, 2, 1_200).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -88,13 +88,13 @@ async fn concurrent_usage_deduplication_persists_exactly_one_effect() {
     let (first, second) = tokio::join!(
         usage::record_usage(
             &first_repository,
-            transaction_fixture.workspace_id,
+            transaction_fixture.account_id,
             "transaction-race-key-1",
             usage_request(&transaction_fixture, "shared-usage-transaction", 1),
         ),
         usage::record_usage(
             &second_repository,
-            transaction_fixture.workspace_id,
+            transaction_fixture.account_id,
             "transaction-race-key-2",
             usage_request(&transaction_fixture, "shared-usage-transaction", 1),
         )
@@ -110,7 +110,7 @@ async fn concurrent_usage_deduplication_persists_exactly_one_effect() {
     );
     assert_usage_counts(
         &transaction_fixture.pool,
-        transaction_fixture.workspace_id,
+        transaction_fixture.account_id,
         1,
         1,
     )
@@ -122,13 +122,13 @@ async fn concurrent_usage_deduplication_persists_exactly_one_effect() {
     let (first, second) = tokio::join!(
         usage::record_usage(
             &first_repository,
-            key_fixture.workspace_id,
+            key_fixture.account_id,
             "shared-usage-key",
             usage_request(&key_fixture, "key-race-transaction-1", 1),
         ),
         usage::record_usage(
             &second_repository,
-            key_fixture.workspace_id,
+            key_fixture.account_id,
             "shared-usage-key",
             usage_request(&key_fixture, "key-race-transaction-2", 2),
         )
@@ -144,7 +144,7 @@ async fn concurrent_usage_deduplication_persists_exactly_one_effect() {
     );
     let received: i64 =
         sqlx::query_scalar("SELECT sum(item_units)::bigint FROM usage_events WHERE customer_id=$1")
-            .bind(key_fixture.workspace_id)
+            .bind(key_fixture.account_id)
             .fetch_one(&key_fixture.pool)
             .await
             .expect("received units");
@@ -152,7 +152,7 @@ async fn concurrent_usage_deduplication_persists_exactly_one_effect() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
+async fn account_plan_entitlement_and_missing_wallet_reject_atomically() {
     let _guard = TEST_LOCK
         .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
@@ -160,26 +160,26 @@ async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
     let blocked = setup_usage(1, 1, 10).await;
     apply_event(
         &blocked.repository,
-        blocked.workspace_id,
-        "workspace.blocked",
+        blocked.account_id,
+        "account.blocked",
         3,
     )
     .await;
     let error = usage::record_usage(
         &blocked.repository,
-        blocked.workspace_id,
+        blocked.account_id,
         "blocked-key",
         usage_request(&blocked, "blocked-transaction", 1),
     )
     .await
-    .expect_err("blocked workspace");
-    assert_eq!(error.code(), "workspace_not_operational");
-    assert_usage_counts(&blocked.pool, blocked.workspace_id, 0, 0).await;
+    .expect_err("blocked account");
+    assert_eq!(error.code(), "account_not_operational");
+    assert_usage_counts(&blocked.pool, blocked.account_id, 0, 0).await;
 
     let revoked = setup_usage(1, 1, 10).await;
     plans::revoke_customer_plan(
         &revoked.repository,
-        revoked.workspace_id,
+        revoked.account_id,
         revoked.customer_plan_id,
         RevokeCustomerPlanRequest {
             reason: "policy".to_string(),
@@ -190,14 +190,14 @@ async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
     .expect("revoke plan");
     let error = usage::record_usage(
         &revoked.repository,
-        revoked.workspace_id,
+        revoked.account_id,
         "revoked-key",
         usage_request(&revoked, "revoked-transaction", 1),
     )
     .await
     .expect_err("inactive plan");
     assert_eq!(error.code(), "customer_plan_not_active");
-    assert_usage_counts(&revoked.pool, revoked.workspace_id, 0, 0).await;
+    assert_usage_counts(&revoked.pool, revoked.account_id, 0, 0).await;
 
     let unentitled = setup_usage(1, 1, 10).await;
     sqlx::query(
@@ -211,14 +211,14 @@ async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     let error = usage::record_usage(
         &unentitled.repository,
-        unentitled.workspace_id,
+        unentitled.account_id,
         "unentitled-key",
         usage_request(&unentitled, "unentitled-transaction", 1),
     )
     .await
     .expect_err("missing entitlement");
     assert_eq!(error.code(), "product_not_entitled");
-    assert_usage_counts(&unentitled.pool, unentitled.workspace_id, 0, 0).await;
+    assert_usage_counts(&unentitled.pool, unentitled.account_id, 0, 0).await;
 
     let absent = setup_usage(1, 1, 10).await;
     let new_item = create_active_item_without_wallet(&absent).await;
@@ -227,7 +227,7 @@ async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
     request.expected_price_version_id = Some(new_item.1);
     let error = usage::record_usage(
         &absent.repository,
-        absent.workspace_id,
+        absent.account_id,
         "missing-wallet-key",
         request,
     )
@@ -236,7 +236,7 @@ async fn workspace_plan_entitlement_and_missing_wallet_reject_atomically() {
     assert_eq!(error.code(), "wallet_not_provisioned");
     let count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM wallets WHERE customer_id=$1 AND item_id=$2")
-            .bind(absent.workspace_id)
+            .bind(absent.account_id)
             .bind(new_item.0)
             .fetch_one(&absent.pool)
             .await
@@ -253,7 +253,7 @@ async fn credit_lot_allocation_prefers_subscription_then_persistent_credit() {
     let fixture = setup_usage(1, 60, 50).await;
     credits::grant_direct_credit(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "allocation-credit-key",
         DirectCreditRequest {
             transaction_id: "allocation-credit-transaction".to_string(),
@@ -267,7 +267,7 @@ async fn credit_lot_allocation_prefers_subscription_then_persistent_credit() {
     .expect("direct credit");
     let receipt = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "allocation-usage-key",
         usage_request(&fixture, "allocation-usage-transaction", 1),
     )
@@ -318,13 +318,13 @@ async fn different_items_share_customer_balance_safely() {
     let (first, second) = tokio::join!(
         usage::record_usage(
             &first_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "different-item-key-0",
             request(0),
         ),
         usage::record_usage(
             &second_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "different-item-key-1",
             request(1),
         )
@@ -343,7 +343,7 @@ async fn different_items_share_customer_balance_safely() {
          (SELECT cw.balance_credit_units FROM customer_wallets cw JOIN wallets w \
           ON w.wallet_id=cw.wallet_id WHERE w.customer_id=$1)",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .expect("shared balance");
@@ -363,23 +363,23 @@ async fn wallet_deactivation_serializes_with_usage() {
          JOIN wallet_effective_states es ON es.wallet_id=iw.wallet_id \
          WHERE w.customer_id=$1 AND w.item_id=$2 FOR UPDATE OF iw,es",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_one(&mut *transaction)
     .await
     .expect("lock wallet");
     let repository = fixture.repository.clone();
-    let workspace_id = fixture.workspace_id;
+    let account_id = fixture.account_id;
     let request = usage_request(&fixture, "deactivation-transaction", 1);
     let operation = tokio::spawn(async move {
-        usage::record_usage(&repository, workspace_id, "deactivation-key", request).await
+        usage::record_usage(&repository, account_id, "deactivation-key", request).await
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     sqlx::query(
         "UPDATE wallet_effective_states SET status='DISABLED' WHERE wallet_id=(SELECT wallet_id \
          FROM wallets WHERE customer_id=$1 AND item_id=$2)",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .execute(&mut *transaction)
     .await
@@ -390,7 +390,7 @@ async fn wallet_deactivation_serializes_with_usage() {
         .expect("usage task")
         .expect_err("disabled wallet");
     assert_eq!(error.code(), "item_wallet_not_active");
-    assert_usage_counts(&fixture.pool, fixture.workspace_id, 0, 0).await;
+    assert_usage_counts(&fixture.pool, fixture.account_id, 0, 0).await;
 }
 
 async fn create_active_item_without_wallet(
@@ -445,14 +445,14 @@ async fn create_active_item_without_wallet(
 
 async fn assert_usage_counts(
     pool: &sqlx::PgPool,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     events: i64,
     received: i64,
 ) {
     let actual: (i64, i64) = sqlx::query_as(
         "SELECT count(*),COALESCE(sum(item_units),0)::bigint FROM usage_events WHERE customer_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(pool)
     .await
     .expect("usage counts");

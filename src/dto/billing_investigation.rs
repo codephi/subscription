@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub struct BillingRecordQuery {
     pub cursor: Option<Uuid>,
     pub limit: Option<u16>,
-    pub workspace_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
     pub collection_request_id: Option<Uuid>,
     pub correlation_id: Option<Uuid>,
     pub status: Option<String>,
@@ -18,7 +18,7 @@ pub struct BillingRecordQuery {
 pub struct BillingRecordResponse {
     pub id: Uuid,
     pub kind: String,
-    pub workspace_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
     pub status: String,
     pub occurred_at: DateTime<Utc>,
     pub collection_request_id: Option<Uuid>,

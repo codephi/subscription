@@ -3,8 +3,8 @@
 ## Painel administrativo
 
 O painel interno fica em [`admin-ui/`](admin-ui/). Ele mostra indicadores e
-evidências de Billing, catálogo, auditoria e detalhes de workspaces, planos,
-carteira, créditos e consumo. Ele permite criar workspaces em estado `CREATED`,
+evidências de Billing, catálogo, auditoria e detalhes de accounts, planos,
+carteira, créditos e consumo. Ele permite criar accounts em estado `CREATED`,
 com autoria registrada na auditoria, além de formulários para ofertas e ações operacionais.
 Foi criado para acesso por rede local/VPN e ainda não tem login; mantenha também
 a API restrita a essa rede.
@@ -29,7 +29,7 @@ simuladas; na primeira execução, rode `npx playwright install chromium`.
 
 As consultas novas incluem `/v1/admin/billing/records/{kind}` e detalhe,
 `/v1/admin/catalog/{kind}` e `/v1/admin/audit-events`, paginadas por UUID.
-Filtros de Billing aceitam workspace, estado, cobrança e correlação. Operações
+Filtros de Billing aceitam account, estado, cobrança e correlação. Operações
 de crédito e transição preservam a chave de idempotência no navegador até a
 resolução da tentativa. O painel usa apenas referências de ator digitadas pelo
 operador; isso não representa autenticação.
@@ -60,6 +60,16 @@ ações, contratos, arquitetura, configuração e testes, consulte a
 O [modelo de dados da API](docs/modelo-de-dados.md) documenta as tabelas do
 PostgreSQL e seus relacionamentos, organizados por domínio.
 
+## Mudança incompatível: Account
+
+O Subscription usa `account_id` e rotas `/v1/accounts/{account_id}`. A entrada
+assinada de ciclo de vida é `/v1/internal/accounts/account-events`, com eventos
+`account.created`, `account.activated`, `account.blocked` e
+`account.terminated`. Consumidores devem atualizar payloads e URLs junto com a
+Subscription. As migrations foram reescritas para bancos vazios; faça backup e
+configure um banco PostgreSQL novo antes de iniciar esta versão. Nenhum banco é
+apagado automaticamente.
+
 Para integrar um SaaS de infraestrutura, consulte os guias de
 [créditos por execução](docs/integracao-saas/credito.md),
 [assinatura recorrente](docs/integracao-saas/assinatura.md) e o
@@ -75,41 +85,41 @@ Subscription API built with Axum, PostgreSQL, and OpenTelemetry. It exposes:
 - `/health` as a liveness endpoint that returns `200 OK` with a JSON status payload.
 - `/echo` to reflect the incoming request across all HTTP verbs with tracing spans per method when OTEL is enabled.
 - `/mcp` as an optional MCP Streamable HTTP endpoint for `health_check` and `echo_request` tools when the `mcp` Cargo feature is enabled.
-- `/v1/internal/accounts/workspace-events` for signed, ordered workspace lifecycle events.
+- `/v1/internal/accounts/account-events` for signed, ordered account lifecycle events.
 - `/v1/products`, `/v1/items/{id}`, and `/v1/price-versions/{id}` for the
   versioned billing catalog.
 - `/v1/catalog-scope/current` for the immutable item/price snapshot used by
   wallet provisioning.
-- `/v1/workspaces/{workspace_id}/wallets` and `/wallet-provisioning` for the
+- `/v1/accounts/{account_id}/wallets` and `/wallet-provisioning` for the
   materialized wallet hierarchy and readiness state.
-- `/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile` for
+- `/v1/admin/accounts/{account_id}/wallet-provisioning/reconcile` for
   idempotent recovery after catalog scope changes.
-- `/v1/workspaces/{workspace_id}/credits/direct` for strictly idempotent direct
+- `/v1/accounts/{account_id}/credits/direct` for strictly idempotent direct
   credit grants backed by an append-only ledger and credit lot.
-- `/v1/workspaces/{workspace_id}/customer-wallet/statement` and
+- `/v1/accounts/{account_id}/customer-wallet/statement` and
   `/customer-wallet/transactions/{transaction_id}` for cursor-based history.
-- `/v1/workspaces/{workspace_id}/billing-config` for source-specific credit
+- `/v1/accounts/{account_id}/billing-config` for source-specific credit
   controls.
 - `/v1/subscriptions`, `/v1/subscription-plans/{plan_id}`, and nested plan
   catalog routes for immutable commercial offers and on-demand credit offers.
-- `/v1/workspaces/{workspace_id}/customer-plans` for idempotent plan admission,
+- `/v1/accounts/{account_id}/customer-plans` for idempotent plan admission,
   lookup, end-of-period cancellation, and audited free-plan downgrades.
-- `/v1/admin/workspaces/{workspace_id}/customer-plans/{id}/revoke` for
+- `/v1/admin/accounts/{account_id}/customer-plans/{id}/revoke` for
   immediate, audited administrative revocation without deleting wallet history.
 - `/v1/admin/subscription-cycles/run` for deterministic, concurrency-safe free
   plan cycle advancement.
-- `/v1/workspaces/{workspace_id}/usage-events` for atomic metered usage,
+- `/v1/accounts/{account_id}/usage-events` for atomic metered usage,
   versioned unit/tier pricing, pending blocks, and strict credit debits.
-- `/v1/workspaces/{workspace_id}/products/{product_id}/eligibility` and nested
+- `/v1/accounts/{account_id}/products/{product_id}/eligibility` and nested
   item-wallet meter, statement, and pricing-accumulator routes for usage reads.
-- `/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile` for
+- `/v1/admin/accounts/{account_id}/items/{item_id}/usage/reconcile` for
   non-destructive item ledger reconciliation.
-- `/v1/workspaces/{workspace_id}/billing-connections` and nested capabilities
+- `/v1/accounts/{account_id}/billing-connections` and nested capabilities
   and setup-session routes for legacy environment-referenced connections.
 - `/v1/admin/integrations/providers` and
-  `/v1/admin/workspaces/{workspace_id}/integrations` for provider discovery,
+  `/v1/admin/accounts/{account_id}/integrations` for provider discovery,
   encrypted Stripe credential setup, rotation and connection tests.
-- `/v1/workspaces/{workspace_id}/payment-method-bindings` for tokenized cards.
+- `/v1/accounts/{account_id}/payment-method-bindings` for tokenized cards.
 - customer-plan collection, OnDemand, regularization and paid-upgrade flows.
 - `/v1/billing/webhooks/{connection_id}` for exact-body Stripe signature
   validation and idempotent payment convergence.
@@ -128,7 +138,7 @@ Expired credit lots never fund usage; insufficient eligible credits return
 
 Accounts event IDs are immutable identities: redelivery of the original envelope
 is deduplicated; a changed envelope with the same ID returns
-`409 workspace_event_identity_conflict` without changing the inbox or projection.
+`409 account_event_identity_conflict` without changing the inbox or projection.
 Foundation tests inject a deferred PostgreSQL failure at commit and verify both
 complete rollback and a single persisted effect after retry.
 
@@ -306,7 +316,7 @@ retries do not duplicate lifecycle events.
 
 Administrative reconciliation rolls back incomplete materialization to a savepoint
 before recording `ERROR`, the sanitized error detail, and the transactional
-`workspace_provisioning.started` / `.failed` pair. Concurrent retries reuse that
+`account_provisioning.started` / `.failed` pair. Concurrent retries reuse that
 outcome; a new scope records its own failure. Recovery emits `.started` / `.completed`.
 If the failure record or its outbox cannot be persisted, the entire transaction
 rolls back. Accounts ingestion retains its all-or-nothing transaction and delivery
@@ -314,7 +324,7 @@ retry behavior. No migration or dependency was added for this change.
 
 The reconciliation route returns HTTP 200 with the persisted operational result,
 including `status: ERROR`; failure to persist that result returns an error response.
-Eligibility now shares the operational wallet guard: inactive workspaces or event
+Eligibility now shares the operational wallet guard: inactive accounts or event
 gaps return 409, and absent/current-scope-incomplete provisioning returns 503.
 These contracts are documented in Swagger and covered by automated tests.
 
@@ -334,9 +344,9 @@ remain open within a trusted network. Later phase gates preserve this decision.
 
 Phase 4 closes the credit ledger gate with explicit commit-failure, backend-loss,
 and lost-response tests. Duplicate keys/transactions return HTTP 409 with an
-optional `error.existing_operation` containing the original workspace, operation
+optional `error.existing_operation` containing the original account, operation
 kind, resource ID and transaction ID. Clients can query that transaction after a
-lost response; the conflict never returns original metadata or another workspace's
+lost response; the conflict never returns original metadata or another account's
 reference. A reservation without a completed resource omits this field.
 
 Credit reconciliation now checks the sum of every signed entry, continuous
@@ -380,7 +390,7 @@ cycle creation and completion update the queue in the same database transaction.
 Workers claim jobs with `SKIP LOCKED` and a 60-second lease. A restarted process
 reclaims expired leases, while cycle locking prevents duplicate allowance or
 expiry entries. Failed jobs persist an error code and retry after 30 seconds,
-allowing other workspaces to proceed. Idle workers check again after one second.
+allowing other accounts to proceed. Idle workers check again after one second.
 Only internal calendar work is executed; paid collection and provider calls remain
 in the Billing flow. The administrative cycle runner continues to close queue jobs
 atomically when used for explicit catch-up.
@@ -388,9 +398,9 @@ atomically when used for explicit catch-up.
 Admission requirements can be published as immutable policy versions and linked
 to `APPROVAL_REQUIRED` plans. Accounts submits signed, sequenced attestations for
 verified email or identity with an opaque reference and expiry. Admission and
-downgrade lock the workspace, evaluate the latest evidence, and persist the exact
+downgrade lock the account, evaluate the latest evidence, and persist the exact
 evidence used by the decision in the same transaction. Expired, withdrawn,
-out-of-sequence, cross-workspace, unsigned, or altered events cannot authorize a
+out-of-sequence, cross-account, unsigned, or altered events cannot authorize a
 contract. CARD evidence remains owned by the Billing setup flow.
 
 Migration `202609110004_active_plan_slot_lifecycle` keeps the exclusive plan slot
@@ -418,11 +428,11 @@ Late confirmations of terminal requests are recorded as rejected without cycle,
 entitlement or credit effects. A definitive renewal failure also moves the plan
 to `PAST_DUE` / `RENEWAL_INACTIVE` atomically while preserving available credit.
 Composite database references also enforce that each connection, tokenized card,
-CustomerPlan and collection belongs to the same workspace/customer. V1 attempts
+CustomerPlan and collection belongs to the same account/customer. V1 attempts
 accept only provider-tokenized cards, and uncertain outcomes remain pending
 without automatic retry or provider polling. Confirmed paid renewals preserve the
 calendar anchor, replace the active cycle and grant one allowance under concurrent
-delivery. `POST /v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/renewal-regularizations`
+delivery. `POST /v1/accounts/{account_id}/customer-plans/{customer_plan_id}/renewal-regularizations`
 creates an idempotent manual regularization for a past-due plan using the
 Subscription payment window; confirmation resets the anchor and restores one
 current cycle without retroactive credit. Confirmed provider payments without a matching local
@@ -430,14 +440,14 @@ collection are persisted as idempotent operational cases without financial or
 subscription effects.
 
 Phase 8 adds the first production adapter: Stripe SetupIntent and PaymentIntent,
-environment-referenced legacy secrets, encrypted workspace credentials, signed webhooks, tokenized payment bindings and
+environment-referenced legacy secrets, encrypted account credentials, signed webhooks, tokenized payment bindings and
 operational views for unmatched payments and externally observed refunds. See
 `docs/runbooks/billing-mvp.md` for uncertain payments, replay and credential
 rotation procedures.
 
 The admin's **Credenciais padrão** page stores encrypted Stripe credentials for
-new workspaces. Each workspace receives its own integration record and Stripe
-customer; workspace-level integrations can still be configured independently.
+new accounts. Each account receives its own integration record and Stripe
+customer; account-level integrations can still be configured independently.
 Default credentials are never returned by the API, and require
 `BILLING_CREDENTIAL_ENCRYPTION_KEY` to be configured.
 
@@ -479,7 +489,7 @@ Guidelines:
   API, transaction, and billing decisions for the subscriptions service.
 - [Implementation phases](docs/fases-implementacao.md): incremental delivery
   order, including the operational integration with the external Accounts and
-  workspaces system.
+  accounts system.
 - [Test matrix](docs/test-matrix.md): mandatory traceability and quality gate for
   every implementation phase.
 

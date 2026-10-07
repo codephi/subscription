@@ -30,7 +30,7 @@ async fn dispatch_once(repository: &DatabaseRepository) -> crate::error::ApiResu
     let managed = due.secret_reference.starts_with("v1:");
     let secret = billing::resolve_connection_secret(
         repository,
-        due.workspace_id,
+        due.account_id,
         due.billing_connection_id,
         "stripe_api",
         &due.secret_reference,

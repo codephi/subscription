@@ -1,3 +1,4 @@
+pub mod account_events;
 pub mod admin_queries;
 pub mod admission;
 pub mod audit_admin;
@@ -23,4 +24,3 @@ pub mod stripe_webhooks;
 pub mod subscription_calendar;
 pub mod usage;
 pub mod wallets;
-pub mod workspace_events;

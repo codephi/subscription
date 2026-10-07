@@ -38,7 +38,7 @@ async fn register(
     AppError,
 > {
     let user = auth::register(&state.pool, &request.username, &request.password).await?;
-    let user = services::provision_workspace(&state, &user).await?;
+    let user = services::provision_account(&state, &user).await?;
     let cookie = auth::create_session(&state.pool, &user).await?;
     Ok((
         StatusCode::CREATED,
@@ -58,7 +58,7 @@ async fn login(
     AppError,
 > {
     let user = auth::authenticate(&state.pool, &request.username, &request.password).await?;
-    let user = services::provision_workspace(&state, &user).await?;
+    let user = services::provision_account(&state, &user).await?;
     let cookie = auth::create_session(&state.pool, &user).await?;
     Ok((
         [(header::SET_COOKIE, cookie)],
@@ -178,18 +178,18 @@ async fn dashboard(
 ) -> Result<Json<Value>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
     let catalog = services::dashboard_catalog(&state).await?;
-    let workspace = &user.workspace_id;
+    let account = &user.account_id;
     let (product_id, item_id) = dashboard_catalog_ids(&catalog)?;
     let wallet = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{workspace}/customer-wallet/statement?limit=50"
+            "/v1/accounts/{account}/customer-wallet/statement?limit=50"
         ))
         .await?;
     let eligibility = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{workspace}/products/{}/eligibility",
+            "/v1/accounts/{account}/products/{}/eligibility",
             product_id
         ))
         .await
@@ -197,7 +197,7 @@ async fn dashboard(
     let meter = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{workspace}/items/{}/item-wallet",
+            "/v1/accounts/{account}/items/{}/item-wallet",
             item_id
         ))
         .await
@@ -205,7 +205,7 @@ async fn dashboard(
     let item_statement = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{workspace}/items/{}/item-wallet/statement?limit=50",
+            "/v1/accounts/{account}/items/{}/item-wallet/statement?limit=50",
             item_id
         ))
         .await
@@ -214,7 +214,7 @@ async fn dashboard(
         Some(plan_id) => state
             .subscription
             .get(&format!(
-                "/v1/workspaces/{workspace}/customer-plans/{plan_id}"
+                "/v1/accounts/{account}/customer-plans/{plan_id}"
             ))
             .await
             .ok(),

@@ -1,6 +1,6 @@
 CREATE TABLE unmatched_payment_cases (
   unmatched_payment_case_id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   billing_connection_id uuid NOT NULL,
   provider text NOT NULL CHECK (length(provider) BETWEEN 1 AND 50),
   provider_event_id text NOT NULL CHECK (length(provider_event_id) BETWEEN 1 AND 255),
@@ -12,9 +12,9 @@ CREATE TABLE unmatched_payment_cases (
   evidence jsonb NOT NULL,
   status text NOT NULL CHECK (status IN ('OPEN','RECONCILED','CLOSED_WITH_JUSTIFICATION')),
   created_at timestamptz NOT NULL DEFAULT now(),
-  FOREIGN KEY (billing_connection_id,workspace_id)
-    REFERENCES billing_connections(billing_connection_id,workspace_id) ON DELETE RESTRICT,
-  FOREIGN KEY (candidate_customer_plan_id,workspace_id)
+  FOREIGN KEY (billing_connection_id,account_id)
+    REFERENCES billing_connections(billing_connection_id,account_id) ON DELETE RESTRICT,
+  FOREIGN KEY (candidate_customer_plan_id,account_id)
     REFERENCES customer_plans(customer_plan_id,customer_id) ON DELETE RESTRICT,
   UNIQUE (provider,provider_event_id),
   UNIQUE (provider,provider_payment_id)

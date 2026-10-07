@@ -6,11 +6,11 @@ use sqlx::PgPool;
 use subscription::{
     dto::{
         credits::{DirectCreditRequest, DirectCreditResponse},
-        events::WorkspaceEventEnvelope,
+        events::AccountEventEnvelope,
     },
     error::ApiResult,
     repositories::database::DatabaseRepository,
-    services::{credits, workspace_events},
+    services::{account_events, credits},
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -19,7 +19,7 @@ pub struct CreditFixture {
     pub router: Router,
     pub pool: PgPool,
     pub repository: DatabaseRepository,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
 }
 
 impl CreditFixture {
@@ -30,22 +30,22 @@ impl CreditFixture {
             router,
             pool,
             repository,
-            workspace_id: Uuid::new_v4(),
+            account_id: Uuid::new_v4(),
         };
-        fixture.event("workspace.created", 1).await;
-        fixture.event("workspace.activated", 2).await;
+        fixture.event("account.created", 1).await;
+        fixture.event("account.activated", 2).await;
         fixture
     }
 
     pub async fn event(&self, kind: &str, sequence: i64) {
-        let envelope: WorkspaceEventEnvelope = serde_json::from_value(json!({
+        let envelope: AccountEventEnvelope = serde_json::from_value(json!({
             "event_id":Uuid::new_v4(),"event_type":kind,"schema_version":1,
-            "aggregate_id":self.workspace_id,"workspace_id":self.workspace_id,"sequence":sequence,
+            "aggregate_id":self.account_id,"account_id":self.account_id,"sequence":sequence,
             "occurred_at":chrono::Utc::now(),"correlation_id":Uuid::new_v4(),
-            "payload":{"workspace_id":self.workspace_id}
+            "payload":{"account_id":self.account_id}
         }))
         .unwrap();
-        workspace_events::process_workspace_event(&self.repository, envelope)
+        account_events::process_account_event(&self.repository, envelope)
             .await
             .unwrap();
     }
@@ -53,7 +53,7 @@ impl CreditFixture {
     pub async fn grant(&self, identifier: &str, units: i64) -> ApiResult<DirectCreditResponse> {
         credits::grant_direct_credit(
             &self.repository,
-            self.workspace_id,
+            self.account_id,
             identifier,
             credit_request(identifier, units),
         )
@@ -61,14 +61,11 @@ impl CreditFixture {
     }
 
     pub fn post_request(&self, key: &str, body: Value) -> Request<Body> {
-        Request::post(format!(
-            "/v1/workspaces/{}/credits/direct",
-            self.workspace_id
-        ))
-        .header("content-type", "application/json")
-        .header("idempotency-key", key)
-        .body(Body::from(body.to_string()))
-        .unwrap()
+        Request::post(format!("/v1/accounts/{}/credits/direct", self.account_id))
+            .header("content-type", "application/json")
+            .header("idempotency-key", key)
+            .body(Body::from(body.to_string()))
+            .unwrap()
     }
 
     pub async fn post(&self, key: &str, body: Value) -> Response {

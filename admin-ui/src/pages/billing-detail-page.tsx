@@ -109,11 +109,11 @@ export function BillingDetailPage() {
               <Table>
                 <TableBody>
                   <DetailRow
-                    label="Workspace"
-                    value={record.data.workspace_id}
+                    label="Account"
+                    value={record.data.account_id}
                     href={
-                      record.data.workspace_id
-                        ? `/workspaces/${record.data.workspace_id}`
+                      record.data.account_id
+                        ? `/accounts/${record.data.account_id}`
                         : undefined
                     }
                   />

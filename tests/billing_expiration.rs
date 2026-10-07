@@ -22,7 +22,7 @@ use usage_fixture::setup_usage;
 async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() {
     let usage = setup_usage(1, 1, 10).await;
     let pool = usage.repository.pool();
-    let binding_id = insert_billing_binding(&pool, usage.workspace_id).await;
+    let binding_id = insert_billing_binding(&pool, usage.account_id).await;
     let active_plan_id: Uuid =
         sqlx::query_scalar("SELECT plan_version_id FROM customer_plans WHERE customer_plan_id=$1")
             .bind(usage.customer_plan_id)
@@ -50,7 +50,7 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
     .unwrap();
     insert_due_request(
         &pool,
-        usage.workspace_id,
+        usage.account_id,
         usage.customer_plan_id,
         None,
         Some(on_demand.on_demand_plan_id),
@@ -59,10 +59,10 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
     )
     .await;
     let (initial_customer_plan, initial_plan) =
-        create_paid_customer_plan(&usage.repository, usage.workspace_id, usage.product_id).await;
+        create_paid_customer_plan(&usage.repository, usage.account_id, usage.product_id).await;
     insert_due_request(
         &pool,
-        usage.workspace_id,
+        usage.account_id,
         initial_customer_plan,
         Some(initial_plan),
         None,
@@ -71,7 +71,7 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
     )
     .await;
     let (renewal_customer_plan, renewal_plan) =
-        create_paid_customer_plan(&usage.repository, usage.workspace_id, usage.product_id).await;
+        create_paid_customer_plan(&usage.repository, usage.account_id, usage.product_id).await;
     sqlx::query(
         "UPDATE customer_plans SET commercial_status='ACTIVE_PAID',activation_status='ACTIVATED' \
          WHERE customer_plan_id=$1",
@@ -82,7 +82,7 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
     .unwrap();
     insert_due_request(
         &pool,
-        usage.workspace_id,
+        usage.account_id,
         renewal_customer_plan,
         Some(renewal_plan),
         None,
@@ -111,7 +111,7 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
          (SELECT balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) \
           WHERE w.customer_id=$1 AND w.wallet_type='CUSTOMER')",
     )
-    .bind(usage.workspace_id)
+    .bind(usage.account_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -129,9 +129,9 @@ async fn expiration_is_idempotent_and_applies_only_kind_specific_plan_effects() 
 async fn definitive_renewal_failure_preserves_credit_and_creates_no_follow_up_effects() {
     let usage = setup_usage(1, 1, 10).await;
     let pool = usage.repository.pool();
-    let binding_id = insert_billing_binding(&pool, usage.workspace_id).await;
+    let binding_id = insert_billing_binding(&pool, usage.account_id).await;
     let (customer_plan_id, plan_version_id) =
-        create_paid_customer_plan(&usage.repository, usage.workspace_id, usage.product_id).await;
+        create_paid_customer_plan(&usage.repository, usage.account_id, usage.product_id).await;
     sqlx::query(
         "UPDATE customer_plans SET commercial_status='ACTIVE_PAID',activation_status='ACTIVATED' \
          WHERE customer_plan_id=$1",
@@ -142,7 +142,7 @@ async fn definitive_renewal_failure_preserves_credit_and_creates_no_follow_up_ef
     .unwrap();
     let request_id = insert_due_request(
         &pool,
-        usage.workspace_id,
+        usage.account_id,
         customer_plan_id,
         Some(plan_version_id),
         None,
@@ -191,7 +191,7 @@ async fn definitive_renewal_failure_preserves_credit_and_creates_no_follow_up_ef
     )
     .bind(request_id)
     .bind(customer_plan_id)
-    .bind(usage.workspace_id)
+    .bind(usage.account_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -201,28 +201,28 @@ async fn definitive_renewal_failure_preserves_credit_and_creates_no_follow_up_ef
     );
 }
 
-async fn insert_billing_binding(pool: &sqlx::PgPool, workspace_id: Uuid) -> Uuid {
+async fn insert_billing_binding(pool: &sqlx::PgPool, account_id: Uuid) -> Uuid {
     let connection_id = Uuid::new_v4();
     let binding_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+        "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
          external_account_reference,secret_reference,capabilities,status) \
          VALUES ($1,$2,'FAKE',$3,'secret://fake',ARRAY['CARD'],'ACTIVE')",
     )
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(format!("account-{connection_id}"))
     .execute(pool)
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-         workspace_id,customer_id,payment_method,provider_payment_method_reference,status) \
+         account_id,customer_id,payment_method,provider_payment_method_reference,status) \
          VALUES ($1,$2,$3,$3,'CARD',$4,'ACTIVE')",
     )
     .bind(binding_id)
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(format!("pm-{binding_id}"))
     .execute(pool)
     .await
@@ -233,7 +233,7 @@ async fn insert_billing_binding(pool: &sqlx::PgPool, workspace_id: Uuid) -> Uuid
 #[allow(clippy::too_many_arguments)]
 async fn insert_due_request(
     pool: &sqlx::PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     plan_version_id: Option<Uuid>,
     on_demand_plan_id: Option<Uuid>,
@@ -242,14 +242,14 @@ async fn insert_due_request(
 ) -> Uuid {
     let request_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id, \
+        "INSERT INTO collection_requests (collection_request_id,account_id,customer_id, \
          customer_plan_id,plan_version_id,on_demand_plan_id,payment_method_binding_id,request_kind, \
          amount_minor,currency,granted_credit_units,status,transaction_id,idempotency_key,correlation_id, \
          scheduled_at,payment_expires_at) VALUES ($1,$2,$2,$3,$4,$5,$6,$7,500,'BRL',25, \
          'PENDING_PAYMENT',$8,$9,$10,$11,$12)",
     )
     .bind(request_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_plan_id)
     .bind(plan_version_id)
     .bind(on_demand_plan_id)
@@ -268,7 +268,7 @@ async fn insert_due_request(
 
 async fn create_paid_customer_plan(
     repository: &subscription::repositories::database::DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     product_id: Uuid,
 ) -> (Uuid, Uuid) {
     let subscription = plans::create_subscription(
@@ -300,7 +300,7 @@ async fn create_paid_customer_plan(
     .unwrap();
     let customer_plan = plans::create_customer_plan(
         repository,
-        workspace_id,
+        account_id,
         &format!("paid-key-{}", Uuid::new_v4()),
         CreateCustomerPlanRequest {
             plan_version_id: plan.plan_version_id,

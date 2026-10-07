@@ -6,4 +6,4 @@ DROP TABLE wallet_transaction_references;
 DROP TABLE credit_lots;
 DROP TABLE customer_wallet_entries;
 DROP TABLE direct_credits;
-DROP TABLE workspace_billing_configs;
+DROP TABLE account_billing_configs;

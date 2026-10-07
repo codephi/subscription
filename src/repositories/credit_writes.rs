@@ -10,7 +10,7 @@ use crate::{
 
 pub(super) async fn insert_direct_credit_row(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     direct_credit_id: Uuid,
     request: &DirectCreditRequest,
 ) -> Result<(), sqlx::Error> {
@@ -19,7 +19,7 @@ pub(super) async fn insert_direct_credit_row(
          external_reference) VALUES ($1,$2,$3,$4,$5)",
     )
     .bind(direct_credit_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(&request.transaction_id)
     .bind(request.credit_units.value())
     .bind(&request.external_reference)
@@ -31,7 +31,7 @@ pub(super) async fn insert_direct_credit_row(
 pub(super) async fn insert_entry(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
-    workspace_id: Uuid,
+    account_id: Uuid,
     entry_id: Uuid,
     balance_after: CreditUnits,
     request: &DirectCreditRequest,
@@ -45,7 +45,7 @@ pub(super) async fn insert_entry(
     )
     .bind(entry_id)
     .bind(wallet.wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(wallet.next_sequence)
     .bind(request.credit_units.value())
     .bind(wallet.balance.value())
@@ -75,7 +75,7 @@ pub(super) async fn update_wallet_balance(
 
 pub(super) async fn insert_credit_lot(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     lot_id: Uuid,
     entry_id: Uuid,
     units: CreditUnits,
@@ -85,7 +85,7 @@ pub(super) async fn insert_credit_lot(
          original_credit_units,remaining_credit_units) VALUES ($1,$2,$3,'DIRECT',$4,$4)",
     )
     .bind(lot_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(entry_id)
     .bind(units.value())
     .execute(&mut **transaction)
@@ -129,23 +129,23 @@ pub(super) async fn insert_references(
 
 pub(super) async fn complete_reservations(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     idempotency_key: &str,
     transaction_id: &str,
     resource_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE idempotency_records SET resource_id=$3 WHERE workspace_id=$1 AND idempotency_key=$2",
+        "UPDATE idempotency_records SET resource_id=$3 WHERE account_id=$1 AND idempotency_key=$2",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(idempotency_key)
     .bind(resource_id)
     .execute(&mut **transaction)
     .await?;
     sqlx::query(
-        "UPDATE transaction_reservations SET resource_id=$3 WHERE workspace_id=$1 AND transaction_id=$2",
+        "UPDATE transaction_reservations SET resource_id=$3 WHERE account_id=$1 AND transaction_id=$2",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(transaction_id)
     .bind(resource_id)
     .execute(&mut **transaction)
@@ -155,14 +155,14 @@ pub(super) async fn complete_reservations(
 
 pub(super) async fn insert_credit_outbox(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     wallet_id: Uuid,
     sequence: i64,
     entry_id: Uuid,
     units: CreditUnits,
 ) -> ApiResult<()> {
     let event = credit_event(
-        workspace_id,
+        account_id,
         wallet_id,
         sequence,
         "credit.granted",
@@ -176,14 +176,14 @@ pub(super) async fn insert_credit_outbox(
 
 pub(super) async fn insert_credit_expiry_outbox(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     wallet_id: Uuid,
     sequence: i64,
     entry_id: Uuid,
     units: i64,
 ) -> ApiResult<()> {
     let event = credit_event(
-        workspace_id,
+        account_id,
         wallet_id,
         sequence,
         "credit.expired",
@@ -193,7 +193,7 @@ pub(super) async fn insert_credit_expiry_outbox(
 }
 
 fn credit_event(
-    workspace_id: Uuid,
+    account_id: Uuid,
     wallet_id: Uuid,
     sequence: i64,
     event_type: &str,
@@ -207,7 +207,7 @@ fn credit_event(
         aggregate_id: wallet_id,
         sequence,
         occurred_at: chrono::Utc::now(),
-        workspace_id,
+        account_id,
         correlation_id: Uuid::new_v4(),
         causation_id: None,
         payload,
@@ -220,7 +220,7 @@ async fn persist_credit_event(
 ) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id, \
-         aggregate_sequence,workspace_id,correlation_id,causation_id,payload,occurred_at) \
+         aggregate_sequence,account_id,correlation_id,causation_id,payload,occurred_at) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(event.event_id)
@@ -228,7 +228,7 @@ async fn persist_credit_event(
     .bind(&event.aggregate_type)
     .bind(event.aggregate_id)
     .bind(event.sequence)
-    .bind(event.workspace_id)
+    .bind(event.account_id)
     .bind(event.correlation_id)
     .bind(event.causation_id)
     .bind(serde_json::to_value(&event).map_err(ApiError::serialization)?)
@@ -240,16 +240,16 @@ async fn persist_credit_event(
 
 pub(super) async fn insert_credit_audit(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     direct_credit_id: Uuid,
     entry_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO audit_events (audit_event_id,workspace_id,action,resource_kind,resource_id, \
+        "INSERT INTO audit_events (audit_event_id,account_id,action,resource_kind,resource_id, \
          correlation_id,details) VALUES ($1,$2,'direct_credit.created','direct_credit',$3,$4,$5)",
     )
     .bind(Uuid::new_v4())
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(direct_credit_id)
     .bind(Uuid::new_v4())
     .bind(json!({"customer_wallet_entry_id":entry_id}))

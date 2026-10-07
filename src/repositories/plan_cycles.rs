@@ -65,7 +65,7 @@ impl DatabaseRepository {
         as_of: DateTime<Utc>,
         next_end: DateTime<Utc>,
     ) -> ApiResult<CycleAdvanceOutcome> {
-        let workspace_id: Uuid =
+        let account_id: Uuid =
             sqlx::query_scalar("SELECT customer_id FROM customer_plans WHERE customer_plan_id=$1")
                 .bind(customer_plan_id)
                 .fetch_optional(&self.pool())
@@ -77,7 +77,7 @@ impl DatabaseRepository {
                     )
                 })?;
         let mut transaction = self.pool().begin().await?;
-        let wallet = lock_active_customer_wallet(&mut transaction, workspace_id).await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, account_id).await?;
         let Some(due) =
             lock_due_cycle(&mut transaction, customer_plan_id, expected_cycle_id, as_of).await?
         else {
@@ -89,7 +89,7 @@ impl DatabaseRepository {
         let wallet = expire_cycle_lot(
             &mut transaction,
             &wallet,
-            workspace_id,
+            account_id,
             customer_plan_id,
             due.cycle_id,
             due.plan_version_id,
@@ -111,7 +111,7 @@ impl DatabaseRepository {
             .await?;
             insert_plan_outbox(
                 &mut transaction,
-                workspace_id,
+                account_id,
                 customer_plan_id,
                 due.cycle_id,
                 if plan_revoked {
@@ -148,7 +148,7 @@ impl DatabaseRepository {
             grant_cycle_credit(
                 &mut transaction,
                 &wallet,
-                workspace_id,
+                account_id,
                 customer_plan_id,
                 next_cycle_id,
                 &plan,
@@ -163,7 +163,7 @@ impl DatabaseRepository {
             .await?;
         insert_plan_outbox(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             next_cycle_id,
             "customer_plan.cycle_started",
@@ -240,7 +240,7 @@ pub(super) async fn load_locked_plan(
 pub(super) async fn expire_cycle_lot(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     cycle_id: Uuid,
     plan_id: Uuid,
@@ -280,7 +280,7 @@ pub(super) async fn expire_cycle_lot(
     )
     .bind(entry_id)
     .bind(wallet.wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(wallet.next_sequence)
     .bind(-remaining)
     .bind(wallet.balance.value())
@@ -310,7 +310,7 @@ pub(super) async fn expire_cycle_lot(
     .await?;
     insert_credit_expiry_outbox(
         transaction,
-        workspace_id,
+        account_id,
         wallet.wallet_id,
         wallet.next_sequence,
         entry_id,

@@ -13,7 +13,7 @@ async fn one_usage_consolidates_debit_and_partitions_every_received_unit() {
     let fixture = setup_usage(10, 2, 100).await;
     let receipt = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "multi-block-key",
         usage_request(&fixture, "multi-block-transaction", 25),
     )
@@ -28,7 +28,7 @@ async fn one_usage_consolidates_debit_and_partitions_every_received_unit() {
          (SELECT count(*) FROM debits d JOIN usage_events u ON u.usage_event_id=d.usage_event_id WHERE u.customer_id=$1), \
          (SELECT count(*) FROM customer_wallet_entries WHERE customer_id=$1 AND source_channel='usage')",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();
@@ -37,28 +37,28 @@ async fn one_usage_consolidates_debit_and_partitions_every_received_unit() {
         "SELECT unit_offset_start,unit_offset_end FROM billing_blocks \
          WHERE customer_id=$1 AND item_id=$2 ORDER BY global_block_sequence",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_all(&fixture.pool)
     .await
     .unwrap();
     assert_eq!(intervals, vec![(0, 10), (10, 20)]);
     assert!(
-        usage::reconcile_item(&fixture.repository, fixture.workspace_id, fixture.item_id)
+        usage::reconcile_item(&fixture.repository, fixture.account_id, fixture.item_id)
             .await
             .unwrap()
             .consistent
     );
     let wallet = get_json(
         &fixture.router,
-        &format!("/v1/workspaces/{}/wallets", fixture.workspace_id),
+        &format!("/v1/accounts/{}/wallets", fixture.account_id),
     )
     .await;
     let latest_balance: i64 = sqlx::query_scalar(
         "SELECT balance_after_credit_units FROM customer_wallet_entries \
          WHERE customer_id=$1 ORDER BY entry_sequence DESC LIMIT 1",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();
@@ -78,7 +78,7 @@ async fn unit_prices_apply_declared_integer_ratios_through_the_maximum() {
         let fixture = setup_usage(block, cost, credits).await;
         let receipt = usage::record_usage(
             &fixture.repository,
-            fixture.workspace_id,
+            fixture.account_id,
             &format!("ratio-key-{block}-{cost}"),
             usage_request(
                 &fixture,
@@ -103,13 +103,13 @@ async fn concurrent_tier_crossing_keeps_unique_blocks_and_ordinals() {
     let (first, second) = tokio::join!(
         usage::record_usage(
             &first_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "tier-race-key-1",
             usage_request(&fixture, "tier-race-transaction-1", 12),
         ),
         usage::record_usage(
             &second_repository,
-            fixture.workspace_id,
+            fixture.account_id,
             "tier-race-key-2",
             usage_request(&fixture, "tier-race-transaction-2", 12),
         )
@@ -120,7 +120,7 @@ async fn concurrent_tier_crossing_keeps_unique_blocks_and_ordinals() {
          count(DISTINCT (price_version_id,cycle_key,price_block_ordinal)) \
          FROM billing_blocks WHERE customer_id=$1 AND item_id=$2",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_one(&fixture.pool)
     .await
@@ -137,15 +137,15 @@ async fn usage_validated_before_wallet_deactivation_completes_first() {
         "SELECT cw.wallet_id FROM customer_wallets cw JOIN wallets w USING(wallet_id) \
          WHERE w.customer_id=$1 FOR UPDATE OF cw",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&mut *balance_lock)
     .await
     .unwrap();
     let repository = fixture.repository.clone();
-    let workspace_id = fixture.workspace_id;
+    let account_id = fixture.account_id;
     let request = usage_request(&fixture, "validated-first-transaction", 1);
     let usage_task = tokio::spawn(async move {
-        usage::record_usage(&repository, workspace_id, "validated-first-key", request).await
+        usage::record_usage(&repository, account_id, "validated-first-key", request).await
     });
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let pool = fixture.pool.clone();
@@ -155,7 +155,7 @@ async fn usage_validated_before_wallet_deactivation_completes_first() {
             "UPDATE wallet_effective_states SET status='DISABLED' WHERE wallet_id=(SELECT wallet_id \
              FROM wallets WHERE customer_id=$1 AND item_id=$2)",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .execute(&pool)
         .await
@@ -171,7 +171,7 @@ async fn usage_validated_before_wallet_deactivation_completes_first() {
          AND w.item_id=u.item_id JOIN wallet_effective_states es ON es.wallet_id=w.wallet_id \
          WHERE u.customer_id=$1 GROUP BY es.status",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .unwrap();
@@ -206,7 +206,7 @@ async fn eligibility_separates_decision_facts_and_never_authorizes_a_later_debit
     assert_eligible_facts(&fixture, 5).await;
     usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "pending-facts-key",
         usage_request(&fixture, "pending-facts-transaction", 5),
     )
@@ -215,7 +215,7 @@ async fn eligibility_separates_decision_facts_and_never_authorizes_a_later_debit
     assert_eligible_facts(&fixture, 5).await;
     let rejected = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "stale-decision-key",
         usage_request(&fixture, "stale-decision-transaction", 5),
     )
@@ -227,7 +227,7 @@ async fn eligibility_separates_decision_facts_and_never_authorizes_a_later_debit
          (SELECT count(*) FROM usage_events WHERE customer_id=$1) FROM item_wallets iw \
          JOIN wallets w ON w.wallet_id=iw.wallet_id WHERE w.customer_id=$1 AND w.item_id=$2",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .fetch_one(&fixture.pool)
     .await
@@ -242,10 +242,10 @@ async fn product_outside_customer_plan_is_rejected_without_usage_effects() {
     let (product_id, item_id, price_id) = create_unentitled_catalog(&fixture.repository).await;
     fixture
         .repository
-        .reconcile_wallets(fixture.workspace_id, Some("test:phase-6-scope"))
+        .reconcile_wallets(fixture.account_id, Some("test:phase-6-scope"))
         .await
         .unwrap();
-    let eligibility = usage::eligibility(&fixture.repository, fixture.workspace_id, product_id)
+    let eligibility = usage::eligibility(&fixture.repository, fixture.account_id, product_id)
         .await
         .unwrap();
     assert!(!eligibility.access_allowed);
@@ -279,27 +279,21 @@ async fn send_usage(
         .router
         .clone()
         .oneshot(
-            Request::post(format!(
-                "/v1/workspaces/{}/usage-events",
-                fixture.workspace_id
-            ))
-            .header("content-type", "application/json")
-            .header("idempotency-key", key)
-            .body(Body::from(serde_json::to_vec(&request).unwrap()))
-            .unwrap(),
+            Request::post(format!("/v1/accounts/{}/usage-events", fixture.account_id))
+                .header("content-type", "application/json")
+                .header("idempotency-key", key)
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap(),
         )
         .await
         .unwrap()
 }
 
 async fn assert_eligible_facts(fixture: &usage_fixture::UsageFixture, balance: i64) {
-    let eligibility = usage::eligibility(
-        &fixture.repository,
-        fixture.workspace_id,
-        fixture.product_id,
-    )
-    .await
-    .unwrap();
+    let eligibility =
+        usage::eligibility(&fixture.repository, fixture.account_id, fixture.product_id)
+            .await
+            .unwrap();
     assert!(eligibility.access_allowed);
     assert!(eligibility.customer_plan_entitled);
     assert!(eligibility.credit_sufficient);

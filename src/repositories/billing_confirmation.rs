@@ -54,8 +54,8 @@ impl DatabaseRepository {
             transaction.commit().await?;
             return Ok(duplicate_outcome());
         }
-        let workspace_id = find_collection_workspace(&mut transaction, webhook).await?;
-        let wallet = lock_active_customer_wallet(&mut transaction, workspace_id).await?;
+        let account_id = find_collection_account(&mut transaction, webhook).await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, account_id).await?;
         let context = lock_confirmation_context(&mut transaction, webhook).await?;
         validate_payment_details(webhook, &context)?;
         if context.request_status == "PAID" {
@@ -84,7 +84,7 @@ impl DatabaseRepository {
             let cycle_id = crate::repositories::plan_transitions::apply_confirmed_upgrade(
                 &mut transaction,
                 &wallet,
-                workspace_id,
+                account_id,
                 context.customer_plan_id,
                 &plan,
                 webhook.occurred_at,
@@ -96,7 +96,7 @@ impl DatabaseRepository {
             (Some(cycle_id), None)
         } else if context.request_kind == "ON_DEMAND" {
             let grant = crate::repositories::billing_on_demand_confirmation::OnDemandCreditGrant {
-                workspace_id,
+                account_id,
                 on_demand_plan_id: context.on_demand_plan_id,
                 plan_version_id: context.plan_version_id,
                 granted_credit_units: context.granted_credit_units,
@@ -116,7 +116,7 @@ impl DatabaseRepository {
             let cycle = renew_paid_customer_plan(
                 &mut transaction,
                 &wallet,
-                workspace_id,
+                account_id,
                 context.customer_plan_id,
                 &plan,
                 webhook.occurred_at,
@@ -129,7 +129,7 @@ impl DatabaseRepository {
             let cycle = crate::repositories::billing_renewal::regularize_paid_customer_plan(
                 &mut transaction,
                 &wallet,
-                workspace_id,
+                account_id,
                 context.customer_plan_id,
                 &plan,
                 webhook.occurred_at,
@@ -142,7 +142,7 @@ impl DatabaseRepository {
             let cycle = activate_customer_plan(
                 &mut transaction,
                 &wallet,
-                workspace_id,
+                account_id,
                 context.customer_plan_id,
                 &plan,
                 webhook.occurred_at,
@@ -190,17 +190,15 @@ struct ConfirmationContext {
     on_demand_plan_id: Option<Uuid>,
 }
 
-async fn find_collection_workspace(
+async fn find_collection_account(
     transaction: &mut Transaction<'_, Postgres>,
     webhook: &ConfirmedBillingWebhook,
 ) -> ApiResult<Uuid> {
-    sqlx::query_scalar(
-        "SELECT workspace_id FROM collection_requests WHERE collection_request_id=$1",
-    )
-    .bind(webhook.collection_request_id)
-    .fetch_optional(&mut **transaction)
-    .await?
-    .ok_or_else(|| missing_collection(webhook.collection_request_id))
+    sqlx::query_scalar("SELECT account_id FROM collection_requests WHERE collection_request_id=$1")
+        .bind(webhook.collection_request_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or_else(|| missing_collection(webhook.collection_request_id))
 }
 
 async fn lock_confirmation_context(
@@ -434,8 +432,8 @@ async fn insert_confirmation_event(
     webhook: &ConfirmedBillingWebhook,
     customer_plan_id: Uuid,
 ) -> ApiResult<()> {
-    let (workspace_id, correlation_id): (Uuid, Uuid) = sqlx::query_as(
-        "SELECT workspace_id,correlation_id FROM collection_requests WHERE collection_request_id=$1",
+    let (account_id, correlation_id): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT account_id,correlation_id FROM collection_requests WHERE collection_request_id=$1",
     )
     .bind(webhook.collection_request_id)
     .fetch_one(&mut **transaction)
@@ -449,18 +447,18 @@ async fn insert_confirmation_event(
     .fetch_one(&mut **transaction)
     .await?;
     let payload = json!({"billing_event_id":event_id,"event_type":"payment.confirmed","schema_version":1,
-        "occurred_at":webhook.occurred_at,"workspace_id":workspace_id,"correlation_id":correlation_id,
+        "occurred_at":webhook.occurred_at,"account_id":account_id,"correlation_id":correlation_id,
         "collection_request_id":webhook.collection_request_id,"customer_plan_id":customer_plan_id,
         "provider_payment_id":webhook.provider_payment_id});
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence, \
-         workspace_id,correlation_id,payload) VALUES \
+         account_id,correlation_id,payload) VALUES \
          ($1,'payment.confirmed','collection_request',$2,$3,$4,$5,$6)",
     )
     .bind(event_id)
     .bind(webhook.collection_request_id)
     .bind(sequence)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(correlation_id)
     .bind(payload)
     .execute(&mut **transaction)

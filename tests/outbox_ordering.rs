@@ -75,7 +75,7 @@ async fn assert_no_claim(repository: &DatabaseRepository) {
 
 async fn insert_event(repository: &DatabaseRepository, aggregate: Uuid, sequence: i64) -> Uuid {
     let event = Uuid::new_v4();
-    sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence,workspace_id,correlation_id,payload) VALUES ($1,'test.event','test',$2,$3,$2,$1,'{}')")
+    sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence,account_id,correlation_id,payload) VALUES ($1,'test.event','test',$2,$3,$2,$1,'{}')")
         .bind(event).bind(aggregate).bind(sequence).execute(&repository.pool()).await.unwrap();
     event
 }

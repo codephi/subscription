@@ -10,7 +10,7 @@ use subscription::{
             CreateProductRequest, PriceTierInput, PricingModel, UpdateItemRequest,
             UpdateProductRequest, UsageModel,
         },
-        events::WorkspaceEventEnvelope,
+        events::AccountEventEnvelope,
         plans::{
             AdmissionPolicy, CommercialModel, CreateCustomerPlanRequest,
             CreateSubscriptionPlanRequest, CreateSubscriptionRequest, PlanRecurrence,
@@ -20,7 +20,7 @@ use subscription::{
         usage::CreateUsageEventRequest,
     },
     repositories::database::DatabaseRepository,
-    services::{catalog, plans, workspace_events::process_workspace_event},
+    services::{account_events::process_account_event, catalog, plans},
 };
 use uuid::Uuid;
 
@@ -30,7 +30,7 @@ pub struct UsageFixture {
     pub router: axum::Router,
     pub pool: PgPool,
     pub repository: DatabaseRepository,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub product_id: Uuid,
     pub item_id: Uuid,
     pub price_id: Uuid,
@@ -47,7 +47,7 @@ pub struct VersionedUsageFixture {
 pub struct MultiItemUsageFixture {
     pub pool: PgPool,
     pub repository: DatabaseRepository,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub product_id: Uuid,
     pub item_ids: [Uuid; 2],
     pub price_ids: [Uuid; 2],
@@ -127,17 +127,17 @@ pub async fn setup_versioned_usage(credits: i64) -> VersionedUsageFixture {
     let new_price_id =
         create_and_publish_price(&repository, item.item_id, unit_price(4, 1, boundary, None)).await;
     activate_catalog(&repository, product.product_id, item.item_id).await;
-    let workspace_id = Uuid::new_v4();
-    apply_event(&repository, workspace_id, "workspace.created", 1).await;
-    apply_event(&repository, workspace_id, "workspace.activated", 2).await;
+    let account_id = Uuid::new_v4();
+    apply_event(&repository, account_id, "account.created", 1).await;
+    apply_event(&repository, account_id, "account.activated", 2).await;
     let customer_plan_id =
-        activate_plan(&repository, workspace_id, product.product_id, credits).await;
+        activate_plan(&repository, account_id, product.product_id, credits).await;
     VersionedUsageFixture {
         usage: UsageFixture {
             router,
             pool,
             repository,
-            workspace_id,
+            account_id,
             product_id: product.product_id,
             item_id: item.item_id,
             price_id: old_price_id,
@@ -161,14 +161,14 @@ pub async fn setup_two_item_usage(cost: i64, credits: i64) -> MultiItemUsageFixt
     activate_item(&repository, first.item_id).await;
     activate_item(&repository, second.item_id).await;
     activate_product(&repository, product.product_id).await;
-    let workspace_id = Uuid::new_v4();
-    apply_event(&repository, workspace_id, "workspace.created", 1).await;
-    apply_event(&repository, workspace_id, "workspace.activated", 2).await;
-    activate_plan(&repository, workspace_id, product.product_id, credits).await;
+    let account_id = Uuid::new_v4();
+    apply_event(&repository, account_id, "account.created", 1).await;
+    apply_event(&repository, account_id, "account.activated", 2).await;
+    activate_plan(&repository, account_id, product.product_id, credits).await;
     MultiItemUsageFixture {
         pool,
         repository,
-        workspace_id,
+        account_id,
         product_id: product.product_id,
         item_ids: [first.item_id, second.item_id],
         price_ids: [first_price, second_price],
@@ -182,15 +182,15 @@ async fn setup_priced_usage(
     let (router, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let (product_id, item_id, price_id) = create_catalog(&repository, price_request).await;
-    let workspace_id = Uuid::new_v4();
-    apply_event(&repository, workspace_id, "workspace.created", 1).await;
-    apply_event(&repository, workspace_id, "workspace.activated", 2).await;
-    let customer_plan_id = activate_plan(&repository, workspace_id, product_id, credits).await;
+    let account_id = Uuid::new_v4();
+    apply_event(&repository, account_id, "account.created", 1).await;
+    apply_event(&repository, account_id, "account.activated", 2).await;
+    let customer_plan_id = activate_plan(&repository, account_id, product_id, credits).await;
     UsageFixture {
         router,
         pool,
         repository,
-        workspace_id,
+        account_id,
         product_id,
         item_id,
         price_id,
@@ -329,7 +329,7 @@ fn unit_price(
 
 async fn activate_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     product_id: Uuid,
     credits: i64,
 ) -> Uuid {
@@ -362,11 +362,11 @@ async fn activate_plan(
     .expect("plan");
     plans::create_customer_plan(
         repository,
-        workspace_id,
-        &format!("usage-plan-key-{workspace_id}"),
+        account_id,
+        &format!("usage-plan-key-{account_id}"),
         CreateCustomerPlanRequest {
             plan_version_id: plan.plan_version_id,
-            transaction_id: format!("usage-plan-transaction-{workspace_id}"),
+            transaction_id: format!("usage-plan-transaction-{account_id}"),
         },
     )
     .await
@@ -376,12 +376,12 @@ async fn activate_plan(
 
 pub async fn apply_event(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     kind: &str,
     sequence: i64,
 ) {
-    let event: WorkspaceEventEnvelope = serde_json::from_value(json!({"event_id":Uuid::new_v4(),"event_type":kind,"schema_version":1,"aggregate_id":workspace_id,"sequence":sequence,"occurred_at":"2026-09-04T00:00:00Z","workspace_id":workspace_id,"correlation_id":Uuid::new_v4(),"causation_id":null,"payload":{"workspace_id":workspace_id}})).expect("event");
-    process_workspace_event(repository, event)
+    let event: AccountEventEnvelope = serde_json::from_value(json!({"event_id":Uuid::new_v4(),"event_type":kind,"schema_version":1,"aggregate_id":account_id,"sequence":sequence,"occurred_at":"2026-09-04T00:00:00Z","account_id":account_id,"correlation_id":Uuid::new_v4(),"causation_id":null,"payload":{"account_id":account_id}})).expect("event");
+    process_account_event(repository, event)
         .await
         .expect("apply event");
 }

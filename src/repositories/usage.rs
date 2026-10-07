@@ -21,28 +21,28 @@ use crate::{
 impl DatabaseRepository {
     pub async fn insert_usage_event(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         idempotency_key: &str,
         request_hash: &str,
         request: &CreateUsageEventRequest,
     ) -> ApiResult<UsageEventResponse> {
         let mut transaction = self.pool().begin().await?;
         lock_catalog(&mut transaction, request.product_id, request.item_id).await?;
-        ensure_workspace_active(&mut transaction, workspace_id).await?;
-        let meter = lock_item_meter(&mut transaction, workspace_id, request.item_id).await?;
-        super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut *transaction, workspace_id)
+        ensure_account_active(&mut transaction, account_id).await?;
+        let meter = lock_item_meter(&mut transaction, account_id, request.item_id).await?;
+        super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut *transaction, account_id)
             .await?;
         let accepted_at = database_clock(&mut transaction).await?;
         ensure_entitlement(
             &mut transaction,
-            workspace_id,
+            account_id,
             request.product_id,
             accepted_at,
         )
         .await?;
         reserve_usage_keys(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             request_hash,
             &request.transaction_id,
@@ -53,7 +53,7 @@ impl DatabaseRepository {
         let item_entry_id = Uuid::new_v4();
         let debit = create_debit_if_needed(
             &mut transaction,
-            workspace_id,
+            account_id,
             usage_event_id,
             &meter,
             &conversion,
@@ -65,7 +65,7 @@ impl DatabaseRepository {
             &mut transaction,
             usage_event_id,
             item_entry_id,
-            workspace_id,
+            account_id,
             request,
             accepted_at,
             &meter,
@@ -75,7 +75,7 @@ impl DatabaseRepository {
         .await?;
         complete_reservations(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             &request.transaction_id,
             usage_event_id,
@@ -121,22 +121,22 @@ async fn lock_catalog(
     }
 }
 
-async fn ensure_workspace_active(
+async fn ensure_account_active(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<()> {
     let row = sqlx::query(
         "SELECT operational_status,EXISTS(SELECT 1 FROM integration_inbox_quarantine q \
-         JOIN integration_inbox i ON i.event_id=q.event_id WHERE i.workspace_id=$1 \
-         AND q.replayed_at IS NULL) has_gap FROM workspace_projections WHERE workspace_id=$1 FOR SHARE",
+         JOIN integration_inbox i ON i.event_id=q.event_id WHERE i.account_id=$1 \
+         AND q.replayed_at IS NULL) has_gap FROM account_projections WHERE account_id=$1 FOR SHARE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| {
         ApiError::not_found(
-            "workspace_not_found",
-            format!("workspace {workspace_id} does not exist"),
+            "account_not_found",
+            format!("account {account_id} does not exist"),
         )
     })?;
     let status: String = row.get("operational_status");
@@ -144,14 +144,14 @@ async fn ensure_workspace_active(
         return Ok(());
     }
     Err(ApiError::conflict(
-        "workspace_not_operational",
-        format!("workspace {workspace_id} must be ACTIVE without event gaps, found {status}"),
+        "account_not_operational",
+        format!("account {account_id} must be ACTIVE without event gaps, found {status}"),
     ))
 }
 
 async fn lock_item_meter(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
 ) -> ApiResult<LockedMeter> {
     let row = sqlx::query(
@@ -164,21 +164,21 @@ async fn lock_item_meter(
          WHERE w.customer_id=$1 AND w.item_id=$2 AND vp.status='ACTIVE' \
          AND vp.expected_item_wallets=vp.materialized_item_wallets FOR UPDATE OF iw,es",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(item_id)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| {
         ApiError::service_unavailable(
             "wallet_not_provisioned",
-            format!("workspace {workspace_id} requires a materialized item wallet for item {item_id}"),
+            format!("account {account_id} requires a materialized item wallet for item {item_id}"),
         )
     })?;
     let status: String = row.get("status");
     if status != "ACTIVE" {
         return Err(ApiError::conflict(
             "item_wallet_not_active",
-            format!("item wallet for workspace {workspace_id} and item {item_id} is {status}"),
+            format!("item wallet for account {account_id} and item {item_id} is {status}"),
         ));
     }
     Ok(meter_from_row(&row))
@@ -202,7 +202,7 @@ fn meter_from_row(row: &sqlx::postgres::PgRow) -> LockedMeter {
 
 async fn ensure_entitlement(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     product_id: Uuid,
     accepted_at: DateTime<Utc>,
 ) -> ApiResult<()> {
@@ -210,13 +210,13 @@ async fn ensure_entitlement(
         "SELECT EXISTS(SELECT 1 FROM customer_plans WHERE customer_id=$1 \
          AND commercial_status IN ('ACTIVE','ACTIVE_PAID','PAST_DUE') AND activation_status='ACTIVATED')",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&mut **transaction)
     .await?;
     if !usable_plan {
         return Err(ApiError::conflict(
             "customer_plan_not_active",
-            format!("workspace {workspace_id} has no usable activated customer plan"),
+            format!("account {account_id} has no usable activated customer plan"),
         ));
     }
     let entitled: bool = sqlx::query_scalar(
@@ -226,7 +226,7 @@ async fn ensure_entitlement(
          AND c.activation_status='ACTIVATED' AND e.product_id=$2 AND e.effective_from<=$3 \
          AND (e.effective_until IS NULL OR e.effective_until>$3))",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(product_id)
     .bind(accepted_at)
     .fetch_one(&mut **transaction)
@@ -236,7 +236,7 @@ async fn ensure_entitlement(
     }
     Err(ApiError::forbidden(
         "product_not_entitled",
-        format!("workspace {workspace_id} has no effective entitlement for product {product_id}"),
+        format!("account {account_id} has no effective entitlement for product {product_id}"),
     ))
 }
 
@@ -250,26 +250,26 @@ async fn database_clock(
 
 async fn reserve_usage_keys(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     idempotency_key: &str,
     request_hash: &str,
     transaction_id: &str,
 ) -> ApiResult<()> {
     reserve_idempotency(
         transaction,
-        workspace_id,
+        account_id,
         idempotency_key,
         request_hash,
         "USAGE",
     )
     .await?;
-    reserve_transaction(transaction, workspace_id, transaction_id, "USAGE").await
+    reserve_transaction(transaction, account_id, transaction_id, "USAGE").await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn create_debit_if_needed(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     usage_event_id: Uuid,
     meter: &LockedMeter,
     conversion: &Conversion,
@@ -281,7 +281,7 @@ async fn create_debit_if_needed(
     }
     apply_usage_debit(
         transaction,
-        workspace_id,
+        account_id,
         usage_event_id,
         meter,
         conversion,

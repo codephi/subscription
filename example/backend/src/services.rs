@@ -18,12 +18,12 @@ use crate::{
 mod catalog_setup;
 pub use catalog_setup::setup_catalog;
 
-pub async fn provision_workspace(
+pub async fn provision_account(
     state: &AppState,
     user: &AuthenticatedUser,
 ) -> Result<AuthenticatedUser, AppError> {
-    let workspace =
-        Uuid::parse_str(&user.workspace_id).map_err(|error| AppError::Internal(error.into()))?;
+    let account =
+        Uuid::parse_str(&user.account_id).map_err(|error| AppError::Internal(error.into()))?;
     let correlation =
         Uuid::parse_str(&user.correlation_id).map_err(|error| AppError::Internal(error.into()))?;
     let occurred = chrono::DateTime::parse_from_rfc3339(&user.event_occurred_at)
@@ -32,22 +32,22 @@ pub async fn provision_workspace(
     let events = [
         (
             user.created_event_id.as_str(),
-            "workspace.created",
+            "account.created",
             1_i64,
             None,
         ),
         (
             user.activated_event_id.as_str(),
-            "workspace.activated",
+            "account.activated",
             2_i64,
             Some(user.created_event_id.as_str()),
         ),
     ];
     for (event_id, event_type, sequence, causation) in events {
         let envelope = json!({"event_id":event_id,"event_type":event_type,"schema_version":1,
-            "aggregate_id":workspace,"sequence":sequence,"occurred_at":occurred,
-            "workspace_id":workspace,"correlation_id":correlation,"causation_id":causation,
-            "payload":{"workspace_id":workspace}});
+            "aggregate_id":account,"sequence":sequence,"occurred_at":occurred,
+            "account_id":account,"correlation_id":correlation,"causation_id":causation,
+            "payload":{"account_id":account}});
         let body =
             serde_json::to_vec(&envelope).map_err(|error| AppError::Internal(error.into()))?;
         let timestamp = Utc::now().timestamp().to_string();
@@ -55,7 +55,7 @@ pub async fn provision_workspace(
         state
             .subscription
             .post_signed(
-                "/v1/internal/accounts/workspace-events",
+                "/v1/internal/accounts/account-events",
                 &body,
                 &timestamp,
                 &signature,
@@ -66,7 +66,7 @@ pub async fn provision_workspace(
         let plan_id = setting(&state.pool, "free_plan_id")
             .await?
             .ok_or_else(catalog_missing)?;
-        let transaction = format!("tasklab-trial:{}", user.workspace_id);
+        let transaction = format!("tasklab-trial:{}", user.account_id);
         let customer_plan = create_customer_plan(state, user, &plan_id, &transaction).await?;
         sqlx::query("UPDATE users SET plan_model='PREPAID',customer_plan_id=? WHERE user_id=? AND customer_plan_id IS NULL")
             .bind(customer_plan.to_string())
@@ -89,7 +89,7 @@ pub async fn choose_plan(
     let (plan_key, transaction) = match model {
         PlanModel::Prepaid => (
             "free_plan_id",
-            format!("tasklab-free:{}", user.workspace_id),
+            format!("tasklab-free:{}", user.account_id),
         ),
         PlanModel::Subscription => {
             return Err(AppError::Invalid(
@@ -127,7 +127,7 @@ pub async fn create_checkout(
             "transaction_id deve ter entre 1 e 128 caracteres".into(),
         ));
     }
-    let workspace = &user.workspace_id;
+    let account = &user.account_id;
     let (plan_id, model) = match kind {
         CheckoutKind::OnDemand => (
             user.customer_plan_id
@@ -196,7 +196,7 @@ pub async fn create_checkout(
     let body = state
         .subscription
         .post(
-            &format!("/v1/workspaces/{workspace}/checkouts"),
+            &format!("/v1/accounts/{account}/checkouts"),
             Some(&key),
             &request,
         )
@@ -276,8 +276,8 @@ pub async fn refresh_checkout(
     let body = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{}/checkouts/{}",
-            user.workspace_id, row.0
+            "/v1/accounts/{}/checkouts/{}",
+            user.account_id, row.0
         ))
         .await?;
     let response = CheckoutResponse {
@@ -309,8 +309,8 @@ pub async fn cancel_plan(state: &AppState, user: &AuthenticatedUser) -> Result<V
         .subscription
         .post::<Value>(
             &format!(
-                "/v1/workspaces/{}/customer-plans/{customer_plan_id}/cancel",
-                user.workspace_id
+                "/v1/accounts/{}/customer-plans/{customer_plan_id}/cancel",
+                user.account_id
             ),
             None,
             &json!({}),
@@ -337,8 +337,8 @@ pub async fn regularize_plan(
         .subscription
         .post(
             &format!(
-                "/v1/workspaces/{}/customer-plans/{customer_plan_id}/renewal-regularizations",
-                user.workspace_id
+                "/v1/accounts/{}/customer-plans/{customer_plan_id}/renewal-regularizations",
+                user.account_id
             ),
             Some(&format!(
                 "tasklab-regularization:{}:{transaction_id}",
@@ -374,15 +374,15 @@ pub async fn execute_task(
     let eligibility = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{}/products/{}/eligibility",
-            user.workspace_id, catalog.product
+            "/v1/accounts/{}/products/{}/eligibility",
+            user.account_id, catalog.product
         ))
         .await?;
     let meter = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{}/items/{}/item-wallet",
-            user.workspace_id, catalog.item
+            "/v1/accounts/{}/items/{}/item-wallet",
+            user.account_id, catalog.item
         ))
         .await?;
     if eligibility["access_allowed"] != true
@@ -401,7 +401,7 @@ pub async fn execute_task(
     sqlx::query("INSERT INTO executions(execution_id,user_id,transaction_id,task_name,result_text,credits_debited,status) VALUES(?,?,?,?,NULL,'1','PENDING') ON CONFLICT(user_id,transaction_id) DO NOTHING")
         .bind(execution_id.to_string()).bind(&user.user_id).bind(transaction).bind(task).execute(&state.pool).await?;
     let usage_key = format!("tasklab-usage:{}:{transaction}", user.user_id);
-    let response = match state.subscription.post(&format!("/v1/workspaces/{}/usage-events",user.workspace_id),Some(&usage_key),&json!({
+    let response = match state.subscription.post(&format!("/v1/accounts/{}/usage-events",user.account_id),Some(&usage_key),&json!({
         "transaction_id":transaction,"product_id":catalog.product,"item_id":catalog.item,"item_units":"1",
         "expected_price_version_id":meter["next_price_version_id"],"occurred_at":null,"metadata":{"tasklab_execution_id":execution_id}
     })).await {
@@ -435,19 +435,19 @@ async fn create_customer_plan(
     let billing = state
         .subscription
         .get(&format!(
-            "/v1/workspaces/{}/billing-config",
-            user.workspace_id
+            "/v1/accounts/{}/billing-config",
+            user.account_id
         ))
         .await?;
     if billing["recurring_credit_enabled"] != true {
-        state.subscription.put(&format!("/v1/workspaces/{}/billing-config",user.workspace_id),&json!({
+        state.subscription.put(&format!("/v1/accounts/{}/billing-config",user.account_id),&json!({
             "direct_credit_enabled":billing["direct_credit_enabled"],"recurring_credit_enabled":true,"expected_version":billing["version"]
         })).await?;
     }
     let body = state
         .subscription
         .post(
-            &format!("/v1/workspaces/{}/customer-plans", user.workspace_id),
+            &format!("/v1/accounts/{}/customer-plans", user.account_id),
             Some(&format!("tasklab-plan:{}", transaction)),
             &json!({"plan_version_id":plan_id,"transaction_id":transaction}),
         )

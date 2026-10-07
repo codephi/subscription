@@ -9,14 +9,14 @@ use uuid::Uuid;
 pub struct AuditPageQuery {
     pub cursor: Option<Uuid>,
     pub limit: Option<u16>,
-    pub workspace_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
     pub action: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct AuditEventResponse {
     pub audit_event_id: Uuid,
-    pub workspace_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
     pub actor_reference: Option<String>,
     pub action: String,
     pub resource_kind: String,

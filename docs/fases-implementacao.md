@@ -23,38 +23,38 @@ autoriza exposição fora de uma rede confiável.
 ## Fronteiras de responsabilidade
 
 - O sistema de Accounts é a fonte de verdade para usuários, autenticação,
-  workspaces, membros e permissões. O Subscription não replica nem administra
+  accounts, membros e permissões. O Subscription não replica nem administra
   esses conceitos.
 - O Subscription é dono de catálogo, planos, `CustomerPlan`, wallets, créditos,
-  consumo e Billing. Na V1, `workspace_id` é também o `customer_id` de cobrança;
+  consumo e Billing. Na V1, `account_id` é também o `customer_id` de cobrança;
   não existe uma segunda hierarquia local de clientes.
-- A integração usa um identificador de workspace global, estável e imutável. O
+- A integração usa um identificador de account global, estável e imutável. O
   contrato deve definir formato, emissor e política para ambientes, mas não
-  permite reciclar o ID de um workspace encerrado.
+  permite reciclar o ID de um account encerrado.
 - Chamadas entre serviços usam autenticação serviço-a-serviço e autorização por
-  escopo. O contexto confiável do workspace e do ator vem de credencial ou
-  envelope assinado e deve coincidir com o `workspace_id` do recurso; headers
+  escopo. O contexto confiável do account e do ator vem de credencial ou
+  envelope assinado e deve coincidir com o `account_id` do recurso; headers
   livres informados pelo cliente não são fonte de autorização.
 - O núcleo de assinaturas, créditos e consumo não depende de um provedor de
   pagamentos. Stripe é o primeiro adaptador previsto.
 
 ## Princípios de execução
 
-- O Subscription mantém apenas uma projeção local mínima do workspace:
-  `workspace_id`, estado operacional, versão/sequência externa e timestamps de
+- O Subscription mantém apenas uma projeção local mínima do account:
+  `account_id`, estado operacional, versão/sequência externa e timestamps de
   processamento. Dados de usuário, membros e permissões permanecem em Accounts.
 - Integrações assíncronas têm inbox/outbox duráveis, envelope versionado,
   `event_id`, agregado, sequência, `occurred_at`, `correlation_id` e
   `causation_id`. A entrega é ao menos uma vez: duplicatas são ignoradas e a
-  ordem só é presumida dentro do mesmo workspace/agregado.
+  ordem só é presumida dentro do mesmo account/agregado.
 - Os eventos de saída cobrem, no mínimo, provisionamento, mudanças efetivas de
   `CustomerPlan`/entitlement, créditos, consumo e os eventos normativos de
   Billing. Publicar um fato não transfere ao consumidor a regra de negócio.
-- Evento atrasado não regride a projeção. Lacuna de sequência deixa o workspace
+- Evento atrasado não regride a projeção. Lacuna de sequência deixa o account
   sem avançar para operações dependentes e dispara retry/replay ou reconciliação;
   não se inventa estado local.
 - Provisionamento é idempotente e materializado. Consumo, crédito ou adesão só
-  operam após workspace ativo, `customer_wallet` ativa e todas as `item_wallets`
+  operam após account ativo, `customer_wallet` ativa e todas as `item_wallets`
   esperadas para a versão de escopo vigente.
 - Valores de crédito e quantidades usam inteiros de 64 bits representados como
   strings decimais nos contratos HTTP.
@@ -75,9 +75,9 @@ Entregas:
 - ADRs para unidades de crédito, razão imutável, idempotência, concorrência e
   limites entre Accounts, Subscription e provedores de pagamento;
 - contrato do identificador estável e modelo de autenticação serviço-a-serviço,
-  autorização por escopo e propagação do contexto de workspace/ator;
-- catálogo versionado de entrada para `workspace.created`,
-  `workspace.activated`, `workspace.blocked` e `workspace.terminated`, incluindo
+  autorização por escopo e propagação do contexto de account/ator;
+- catálogo versionado de entrada para `account.created`,
+  `account.activated`, `account.blocked` e `account.terminated`, incluindo
   significado, transições permitidas, sequência e política de replay;
 - contrato inicial dos eventos de saída do Subscription, seus consumidores e
   dados permitidos, sem fixar broker ou provedor: famílias de provisionamento,
@@ -89,7 +89,7 @@ Entregas:
   invariantes do plano técnico.
 
 **Critério de saída:** contratos de HTTP e eventos permitem provar quem autentica,
-quem autoriza, como um workspace é correlacionado e quais estados bloqueiam cada
+quem autoriza, como um account é correlacionado e quais estados bloqueiam cada
 operação, sem criar cadastro local de usuários ou clientes.
 
 ## Fase 1 — Fundação transacional e fronteira com Accounts
@@ -101,11 +101,11 @@ Entregas:
 
 - tipos para IDs de domínio, `credit_units`, `item_units`, períodos e erros;
 - middleware de autenticação serviço-a-serviço e validação da igualdade entre o
-  workspace autorizado, o caminho e o payload;
-- `WorkspaceProjection` mínima e inbox deduplicada por `event_id`, com
+  account autorizado, o caminho e o payload;
+- `AccountProjection` mínima e inbox deduplicada por `event_id`, com
   compare-and-set por versão/sequência e quarentena de lacunas ou conflitos;
 - outbox transacional, dispatcher com retry e contratos de replay/reconciliação;
-- registro de idempotência, unicidade de `transaction_id` por workspace,
+- registro de idempotência, unicidade de `transaction_id` por account,
   transações SQLx, locks explícitos e auditoria estruturada.
 
 **Critério de saída:** credencial inválida ou contexto divergente não altera
@@ -134,7 +134,7 @@ commits no escopo final.
 **Critério de saída:** uma versão publicada determina de modo imutável e
 reprodutível preços, itens faturáveis e wallets esperadas para provisionamento.
 
-## Fase 3 — Ciclo do workspace e provisionamento de wallets
+## Fase 3 — Ciclo do account e provisionamento de wallets
 
 **Objetivo:** converter o ciclo de vida vindo de Accounts em recursos locais
 prontos para operar, sem criação preguiçosa.
@@ -144,12 +144,12 @@ Entregas:
 - processamento idempotente de criação e ativação para materializar uma
   `customer_wallet` e as `item_wallets` aplicáveis, com saldo inicial zero;
 - `Wallet`, `CustomerWallet`, `ItemWallet`, `WalletLifecycleEvent` append-only e
-  `WalletProvisioning` por workspace e versão de escopo;
+  `WalletProvisioning` por account e versão de escopo;
 - bloqueio que impede novas mutações de negócio sem apagar saldo, plano ou
   histórico, e encerramento que desabilita recursos preservando auditoria;
 - retomada/reprocessamento seguro de provisionamento parcial e endpoint
   administrativo restrito de reconciliação;
-- eventos de saída `workspace_provisioning.started`, `.completed` e `.failed`,
+- eventos de saída `account_provisioning.started`, `.completed` e `.failed`,
   com nomes/schema definitivos estabelecidos no contrato da Fase 0.
 
 Ao retornar a um escopo anterior, contadores históricos não comprovam
@@ -159,7 +159,7 @@ incompleta exige reconciliação explícita, inclusive quando a operação usa o
 item que permaneceu ativo.
 
 **Critério de saída:** criação/ativação duplicada ou concorrente produz uma única
-hierarquia; o workspace só fica pronto com todas as wallets esperadas ativas;
+hierarquia; o account só fica pronto com todas as wallets esperadas ativas;
 bloqueio/encerramento atrasado é aplicado pela sequência externa e nenhuma
 operação nova atravessa o estado efetivo.
 
@@ -186,7 +186,7 @@ saldo residual, classificação efetiva e validade continuam como projeções do
 fluxos de consumo, reclassificação e expiração das fases seguintes.
 
 **Critério de saída:** toda mudança de saldo tem exatamente um lançamento;
-créditos concorrentes ou repetidos não duplicam efeitos; workspace não
+créditos concorrentes ou repetidos não duplicam efeitos; account não
 operacional rejeita integralmente a chamada.
 
 ## Fase 5 — Assinaturas, planos e franquia por ciclo
@@ -202,7 +202,7 @@ Entregas:
 - cancelamento no fim do período e scheduler durável apenas para eventos
   internos de calendário;
 - eventos de saída para mudanças efetivas de `CustomerPlan`, entitlement,
-  concessão e expiração, correlacionados ao workspace e à transação de origem.
+  concessão e expiração, correlacionados ao account e à transação de origem.
 
 **Critério de saída:** plano gratuito concede e expira franquia uma vez por
 ciclo; bloqueio externo não destrói créditos e impede novas mutações conforme o
@@ -222,14 +222,14 @@ nem sobrescrevem estados terminais.
 Scheduler de ciclos gratuitos: fila persistida por ciclo, criada e encerrada
 na transação do calendário, com backfill de ciclos existentes. Workers concorrentes
 usam lease de 60 segundos e retomam reservas expiradas; falhas reagendam o trabalho
-em 30 segundos sem bloquear outros workspaces. Testes cobrem reinício, concorrência,
+em 30 segundos sem bloquear outros accounts. Testes cobrem reinício, concorrência,
 rollback no commit, bloqueio operacional e execução automática. Não executa
 cobranças nem consultas a provedores.
 
 Política de admissão: versões imutáveis declaram fatos de e-mail e identidade;
 atestados assinados de Accounts são sequenciados, possuem validade e referência
 opaca. Adesão e downgrade serializam a avaliação com atualizações da evidência e
-registram a evidência exata da decisão. Retirada, expiração, outro workspace,
+registram a evidência exata da decisão. Retirada, expiração, outro account,
 duplicata alterada e falha de commit não autorizam nem deixam efeitos parciais.
 Validação antifraude de cartão continua no fluxo de Billing.
 
@@ -248,21 +248,21 @@ Entregas:
 - `UsageEvent`, `ItemWalletEntry`, `PricingAccumulator`, `BillingBlock`, `Debit`
   e `CreditLotAllocation`;
 - endpoints de consumo, elegibilidade, medidor e extrato por item;
-- validação conjunta de workspace, `CustomerPlan`, entitlement, wallet
+- validação conjunta de account, `CustomerPlan`, entitlement, wallet
   materializada e saldo dentro da decisão transacional;
 - reconciliação entre item units recebidas, blocos, pendências, alocações e o
   débito correlato na `customer_wallet`;
 - eventos versionados de consumo e débito após commit.
 
 **Critério de saída:** consumos concorrentes formam blocos sem perda ou
-duplicação; saldo insuficiente, falta de entitlement ou workspace não
+duplicação; saldo insuficiente, falta de entitlement ou account não
 operacional rejeita integralmente a chamada.
 
 Fase concluída em 2026-09-11: conversões unitárias e por faixa preservam cada
 intervalo recebido em bloco ou pendência, consolidam o débito por chamada e
 serializam ItemWallet, acumulador e CustomerWallet. A elegibilidade expõe seus
 fatos separadamente sem autorizar o comando posterior; Product fora do plano,
-saldo insuficiente, wallet desabilitada e workspace bloqueado não deixam efeitos.
+saldo insuficiente, wallet desabilitada e account bloqueado não deixam efeitos.
 Todos os critérios da fase 6 estão cobertos pelo gate `check-phase-gate.sh 6`.
 
 ## Fase 7 — Fronteira de Billing agnóstica ao provedor
@@ -296,7 +296,7 @@ confirmação posterior fica rejeitada sem efeitos financeiros ou de acesso.
 Falha definitiva de renovação produz o mesmo bloqueio de nova recorrência, sem
 retentativa, novo ciclo, nova solicitação ou alteração do saldo já concedido.
 Chaves estrangeiras compostas impedem uso cruzado de conexão, cartão tokenizado,
-CustomerPlan e solicitação entre workspaces ou customers.
+CustomerPlan e solicitação entre accounts ou customers.
 O contrato V1 rejeita outros meios de pagamento antes da chamada externa e não
 repete automaticamente uma tentativa cujo resultado no provedor seja incerto.
 Renovação paga confirmada conclui o ciclo anterior, preserva a âncora e inicia o
@@ -340,7 +340,7 @@ O gate acumulado `check-phase-gate.sh 8` está aprovado.
 Entregas:
 
 - `Voucher` de créditos persistentes e `Coupon` de desconto para compra inicial
-  de assinatura e/ou recarga avulsa; validade e limites total/por workspace,
+  de assinatura e/ou recarga avulsa; validade e limites total/por account,
   reservas concorrentes, histórico e referências no extrato;
 - `Compensation` com criação, aprovação quando necessária e execução;
 - referências oficiais entre promoções, créditos, pagamentos e extratos;
@@ -358,7 +358,7 @@ autorização administrativa externa permanecem pendentes; por isso, a Fase 9
 continua aberta.
 
 **Critério de saída:** vale, cupom ou Compensation nunca gera crédito duplicado,
-inclusive sob concorrência, reentrega e mudança do estado do workspace.
+inclusive sob concorrência, reentrega e mudança do estado do account.
 
 ## Fase 10 — Operação, reconciliação e prontidão de produção
 
@@ -366,7 +366,7 @@ inclusive sob concorrência, reentrega e mudança do estado do workspace.
 
 Entregas:
 
-- reconciliação da projeção de workspaces com Accounts e de wallets, saldos,
+- reconciliação da projeção de accounts com Accounts e de wallets, saldos,
   blocos, lotes, planos e cobranças dentro do Subscription;
 - métricas e alertas para atraso, lacuna, conflito, dead-letter, backlog de
   inbox/outbox, provisionamento parcial e falha de webhook;
@@ -378,7 +378,7 @@ Entregas:
 
 **Critério de saída:** uma restauração seguida de replay converge sem duplicar
 efeitos; atrasos e divergências são detectados e reparados sem editar histórico;
-o serviço mantém isolamento por workspace durante falhas de integração.
+o serviço mantém isolamento por account durante falhas de integração.
 
 ## Ordem recomendada de liberação
 
@@ -390,6 +390,6 @@ o serviço mantém isolamento por workspace durante falhas de integração.
 6. Fase 10: escala operacional e preparação para produção.
 
 Nenhuma liberação com mutações de customer antecede a autenticação, a projeção e
-o provisionamento materializado do workspace. Essa ordem valida primeiro a
+o provisionamento materializado do account. Essa ordem valida primeiro a
 consistência entre identidade externa, uso, saldo e extrato; dinheiro e
 fornecedores externos entram somente depois dessas garantias.

@@ -31,17 +31,17 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function AuditPage() {
-  const [workspace, setWorkspace] = useState("");
+  const [account, setAccount] = useState("");
   const [action, setAction] = useState("");
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
-  const valid = !workspace.trim() || uuidPattern.test(workspace.trim());
+  const valid = !account.trim() || uuidPattern.test(account.trim());
   const page = useQuery({
-    queryKey: ["audit", cursor, workspace, action],
+    queryKey: ["audit", cursor, account, action],
     queryFn: () =>
       listAuditEvents(
         cursor,
-        workspace.trim() || undefined,
+        account.trim() || undefined,
         action.trim() || undefined,
       ),
     enabled: valid,
@@ -64,18 +64,18 @@ export function AuditPage() {
         <CardHeader>
           <CardTitle>Filtros</CardTitle>
           <CardDescription>
-            Use workspace e ação para localizar evidências.
+            Use account e ação para localizar evidências.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <FieldGroup className="grid gap-4 md:grid-cols-2">
             <Field data-invalid={!valid}>
-              <FieldLabel htmlFor="audit-workspace">Workspace ID</FieldLabel>
+              <FieldLabel htmlFor="audit-account">Account ID</FieldLabel>
               <Input
-                id="audit-workspace"
-                value={workspace}
+                id="audit-account"
+                value={account}
                 onChange={(event) => {
-                  setWorkspace(event.target.value);
+                  setAccount(event.target.value);
                   resetPage();
                 }}
                 placeholder="Todos"
@@ -105,7 +105,7 @@ export function AuditPage() {
         <CardContent className="flex flex-col gap-4">
           {!valid && (
             <p role="alert" className="text-sm text-destructive">
-              Workspace deve ser um UUID válido.
+              Account deve ser um UUID válido.
             </p>
           )}
           {page.isLoading && <QueryLoading />}
@@ -123,7 +123,7 @@ export function AuditPage() {
                   <TableRow>
                     <TableHead>Quando</TableHead>
                     <TableHead>Ação</TableHead>
-                    <TableHead>Workspace</TableHead>
+                    <TableHead>Account</TableHead>
                     <TableHead>Recurso</TableHead>
                     <TableHead>Correlação</TableHead>
                     <TableHead>Referência</TableHead>
@@ -135,12 +135,12 @@ export function AuditPage() {
                       <TableCell>{formatDate(entry.occurred_at)}</TableCell>
                       <TableCell>{entry.action}</TableCell>
                       <TableCell>
-                        {entry.workspace_id ? (
+                        {entry.account_id ? (
                           <Link
                             className="font-mono text-xs text-primary hover:underline"
-                            to={`/workspaces/${entry.workspace_id}`}
+                            to={`/accounts/${entry.account_id}`}
                           >
-                            {shortId(entry.workspace_id)}
+                            {shortId(entry.account_id)}
                           </Link>
                         ) : (
                           "—"

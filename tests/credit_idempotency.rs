@@ -5,7 +5,7 @@ mod support;
 use axum::body::Body;
 use credit_fixture::{credit_body, CreditFixture};
 use serde_json::{json, Value};
-use subscription::{dto::credits::UpdateWorkspaceBillingConfigRequest, services::credits};
+use subscription::{dto::credits::UpdateAccountBillingConfigRequest, services::credits};
 use tower::ServiceExt;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -44,16 +44,16 @@ fn duplicate_variants(original: Value) -> [String; 3] {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn credit_duplicate_references_and_lookups_are_workspace_scoped() {
+async fn credit_duplicate_references_and_lookups_are_account_scoped() {
     let first = CreditFixture::new().await;
     let mut second = CreditFixture {
         router: first.router.clone(),
         pool: first.pool.clone(),
         repository: first.repository.clone(),
-        workspace_id: uuid::Uuid::new_v4(),
+        account_id: uuid::Uuid::new_v4(),
     };
-    second.event("workspace.created", 1).await;
-    second.event("workspace.activated", 2).await;
+    second.event("account.created", 1).await;
+    second.event("account.activated", 2).await;
     let a = first.grant("shared-identifier", 10).await.unwrap();
     let b = second.grant("shared-identifier", 20).await.unwrap();
     assert_ne!(a.direct_credit_id, b.direct_credit_id);
@@ -67,14 +67,14 @@ async fn credit_duplicate_references_and_lookups_are_workspace_scoped() {
             resource.to_string()
         );
         assert_eq!(
-            conflict["error"]["existing_operation"]["workspace_id"],
-            fixture.workspace_id.to_string()
+            conflict["error"]["existing_operation"]["account_id"],
+            fixture.account_id.to_string()
         );
     }
-    second.workspace_id = uuid::Uuid::new_v4();
+    second.account_id = uuid::Uuid::new_v4();
     let uri = format!(
-        "/v1/workspaces/{}/customer-wallet/transactions/shared-identifier",
-        second.workspace_id
+        "/v1/accounts/{}/customer-wallet/transactions/shared-identifier",
+        second.account_id
     );
     assert_eq!(second.get(&uri).await.status(), 404);
 }
@@ -82,21 +82,21 @@ async fn credit_duplicate_references_and_lookups_are_workspace_scoped() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn billing_config_optimistic_version_allows_one_concurrent_update() {
     let fixture = CreditFixture::new().await;
-    let request = UpdateWorkspaceBillingConfigRequest {
+    let request = UpdateAccountBillingConfigRequest {
         direct_credit_enabled: false,
         recurring_credit_enabled: true,
         expected_version: 1,
     };
     let (first, second) = tokio::join!(
-        credits::update_billing_config(&fixture.repository, fixture.workspace_id, request.clone()),
-        credits::update_billing_config(&fixture.repository, fixture.workspace_id, request)
+        credits::update_billing_config(&fixture.repository, fixture.account_id, request.clone()),
+        credits::update_billing_config(&fixture.repository, fixture.account_id, request)
     );
     assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
     assert_eq!(
         first.err().or_else(|| second.err()).unwrap().code(),
         "billing_config_version_conflict"
     );
-    let current = credits::get_billing_config(&fixture.repository, fixture.workspace_id)
+    let current = credits::get_billing_config(&fixture.repository, fixture.account_id)
         .await
         .unwrap();
     assert_eq!(current.version, 2);
@@ -131,8 +131,8 @@ async fn credit_conflict_reference_is_documented_without_changing_other_errors()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incomplete_reservation_conflict_omits_uncommitted_resource_reference() {
     let fixture = CreditFixture::new().await;
-    sqlx::query("INSERT INTO idempotency_records (workspace_id,idempotency_key,operation_kind,request_hash) VALUES ($1,'reserved','DIRECT_CREDIT','injected-incomplete')")
-        .bind(fixture.workspace_id).execute(&fixture.pool).await.unwrap();
+    sqlx::query("INSERT INTO idempotency_records (account_id,idempotency_key,operation_kind,request_hash) VALUES ($1,'reserved','DIRECT_CREDIT','injected-incomplete')")
+        .bind(fixture.account_id).execute(&fixture.pool).await.unwrap();
     let before = fixture.snapshot().await;
     let response = fixture
         .post("reserved", credit_body("uncommitted", 10))

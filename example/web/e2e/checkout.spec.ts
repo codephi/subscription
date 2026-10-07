@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 
 function account() {
-  return { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", workspace_id: "workspace-1" }
+  return { username: "admin", plan_model: "PREPAID", customer_plan_id: "plan-1", account_id: "account-1" }
 }
 
 function dashboard(balance = "0") {

@@ -15,7 +15,7 @@ pub struct AuthenticatedUser {
     pub user_id: String,
     pub username: String,
     password_hash: String,
-    pub workspace_id: String,
+    pub account_id: String,
     pub created_event_id: String,
     pub activated_event_id: String,
     pub correlation_id: String,
@@ -101,19 +101,19 @@ pub fn account_response(user: AuthenticatedUser) -> Result<AccountResponse, AppE
             .as_deref()
             .map(|value| parse_uuid("customer_plan_id", value))
             .transpose()?,
-        workspace_id: parse_uuid("workspace_id", &user.workspace_id)?,
+        account_id: parse_uuid("account_id", &user.account_id)?,
     })
 }
 
 async fn insert_user(pool: &SqlitePool, user: &NewUser) -> Result<(), AppError> {
     sqlx::query(
-        "INSERT INTO users (user_id,username,password_hash,workspace_id,created_event_id, \
+        "INSERT INTO users (user_id,username,password_hash,account_id,created_event_id, \
         activated_event_id,correlation_id) VALUES ($1,$2,$3,$4,$5,$6,$7)",
     )
     .bind(&user.user_id)
     .bind(&user.username)
     .bind(&user.password_hash)
-    .bind(&user.workspace_id)
+    .bind(&user.account_id)
     .bind(&user.created_event_id)
     .bind(&user.activated_event_id)
     .bind(&user.correlation_id)
@@ -147,7 +147,7 @@ fn new_user(username: &str, password: &str) -> Result<NewUser, AppError> {
         user_id: Uuid::new_v4().to_string(),
         username: username.to_string(),
         password_hash: hash_password(password).map_err(AppError::Internal)?,
-        workspace_id: Uuid::new_v4().to_string(),
+        account_id: Uuid::new_v4().to_string(),
         created_event_id: Uuid::new_v4().to_string(),
         activated_event_id: Uuid::new_v4().to_string(),
         correlation_id: Uuid::new_v4().to_string(),
@@ -225,7 +225,7 @@ struct NewUser {
     user_id: String,
     username: String,
     password_hash: String,
-    workspace_id: String,
+    account_id: String,
     created_event_id: String,
     activated_event_id: String,
     correlation_id: String,

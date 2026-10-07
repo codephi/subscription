@@ -14,7 +14,7 @@ use crate::{
 
 pub async fn record_usage(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     idempotency_key: &str,
     request: CreateUsageEventRequest,
 ) -> ApiResult<UsageEventResponse> {
@@ -38,7 +38,7 @@ pub async fn record_usage(
     }
     repository
         .insert_usage_event(
-            workspace_id,
+            account_id,
             idempotency_key,
             &request_hash(&request)?,
             &request,
@@ -48,65 +48,63 @@ pub async fn record_usage(
 
 pub async fn eligibility(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     product_id: Uuid,
 ) -> ApiResult<ProductEligibilityResponse> {
     repository
-        .find_product_eligibility(workspace_id, product_id)
+        .find_product_eligibility(account_id, product_id)
         .await
 }
 
 pub async fn item_meter(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
 ) -> ApiResult<ItemWalletMeterResponse> {
-    repository
-        .find_item_wallet_meter(workspace_id, item_id)
-        .await
+    repository.find_item_wallet_meter(account_id, item_id).await
 }
 
 pub async fn item_statement(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
     query: ItemStatementQuery,
 ) -> ApiResult<ItemWalletStatementResponse> {
     let cursor = query.cursor.as_deref().map(parse_cursor).transpose()?;
     let limit = validate_limit(query.limit)?;
     repository
-        .list_item_wallet_statement(workspace_id, item_id, cursor, limit)
+        .list_item_wallet_statement(account_id, item_id, cursor, limit)
         .await
 }
 
 pub async fn item_statement_entry(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
     entry_id: Uuid,
 ) -> ApiResult<ItemWalletEntryResponse> {
     repository
-        .find_item_wallet_entry(workspace_id, item_id, entry_id)
+        .find_item_wallet_entry(account_id, item_id, entry_id)
         .await
 }
 
 pub async fn pricing_accumulators(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
     price_id: Option<Uuid>,
 ) -> ApiResult<Vec<PricingAccumulatorResponse>> {
     repository
-        .list_pricing_accumulators(workspace_id, item_id, price_id)
+        .list_pricing_accumulators(account_id, item_id, price_id)
         .await
 }
 
 pub async fn reconcile_item(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_id: Uuid,
 ) -> ApiResult<UsageReconciliationResponse> {
-    repository.reconcile_item_usage(workspace_id, item_id).await
+    repository.reconcile_item_usage(account_id, item_id).await
 }
 
 fn validate_identifier(label: &str, value: &str) -> ApiResult<()> {

@@ -7,40 +7,40 @@ use axum::{
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    dto::events::{WorkspaceEventEnvelope, WorkspaceEventResponse},
+    dto::events::{AccountEventEnvelope, AccountEventResponse},
     error::{ApiError, ApiResult},
-    services::{integrations, signatures, workspace_events},
+    services::{account_events, integrations, signatures},
     state::AppState,
 };
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(receive_workspace_event))
-        .routes(routes!(replay_workspace_event))
+        .routes(routes!(receive_account_event))
+        .routes(routes!(replay_account_event))
         .routes(routes!(replay_outbox_event))
 }
 
 #[utoipa::path(
     post,
-    path = "/v1/internal/accounts/workspace-events",
+    path = "/v1/internal/accounts/account-events",
     tag = "Integrations",
-    request_body = WorkspaceEventEnvelope,
+    request_body = AccountEventEnvelope,
     responses(
-        (status = 202, body = WorkspaceEventResponse),
+        (status = 202, body = AccountEventResponse),
         (status = 401, body = crate::error::ErrorResponse, description = "Missing or invalid webhook signature"),
         (status = 409, body = crate::error::ErrorResponse, description = "Event identity reused with different content"),
-        (status = 422, body = crate::error::ErrorResponse, description = "Invalid schema, sequence, or workspace context"),
+        (status = 422, body = crate::error::ErrorResponse, description = "Invalid schema, sequence, or account context"),
         (status = 503, body = crate::error::ErrorResponse, description = "Accounts webhook secret is not configured")
     )
 )]
-async fn receive_workspace_event(
+async fn receive_account_event(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
-) -> ApiResult<(StatusCode, Json<WorkspaceEventResponse>)> {
+) -> ApiResult<(StatusCode, Json<AccountEventResponse>)> {
     verify_request(&state, &headers, &body)?;
     let event = serde_json::from_slice(&body).map_err(ApiError::invalid_json)?;
-    let response = workspace_events::process_workspace_event(&state.database(), event).await?;
+    let response = account_events::process_account_event(&state.database(), event).await?;
     Ok((StatusCode::ACCEPTED, Json(response)))
 }
 
@@ -49,13 +49,13 @@ async fn receive_workspace_event(
     path = "/v1/admin/integration-inbox/{event_id}/replay",
     tag = "Operations",
     params(("event_id" = Uuid, Path)),
-    responses((status = 200, body = WorkspaceEventResponse))
+    responses((status = 200, body = AccountEventResponse))
 )]
-async fn replay_workspace_event(
+async fn replay_account_event(
     State(state): State<AppState>,
     Path(event_id): Path<uuid::Uuid>,
-) -> ApiResult<Json<WorkspaceEventResponse>> {
-    let response = integrations::replay_workspace_event(&state.database(), event_id).await?;
+) -> ApiResult<Json<AccountEventResponse>> {
+    let response = integrations::replay_account_event(&state.database(), event_id).await?;
     Ok(Json(response))
 }
 

@@ -37,13 +37,13 @@ import { usePanelStore } from "@/store/panel-store";
 
 type ItemWallet = components["schemas"]["ItemWalletResponse"];
 
-/** Show customer plan states and current cycles; e.g. `<PlansPanel workspaceId={id} />`. */
-export function PlansPanel({ workspaceId }: { workspaceId: string }) {
+/** Show customer plan states and current cycles; e.g. `<PlansPanel accountId={id} />`. */
+export function PlansPanel({ accountId }: { accountId: string }) {
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const plans = useQuery({
-    queryKey: ["plans", workspaceId, cursor],
-    queryFn: () => listCustomerPlans(workspaceId, cursor),
+    queryKey: ["plans", accountId, cursor],
+    queryFn: () => listCustomerPlans(accountId, cursor),
   });
   return (
     <Card>
@@ -59,7 +59,7 @@ export function PlansPanel({ workspaceId }: { workspaceId: string }) {
         {plans.data?.items.length === 0 && (
           <QueryEmpty
             title="Nenhum plano"
-            description="Este workspace ainda não possui planos registrados."
+            description="Este account ainda não possui planos registrados."
           />
         )}
         {plans.data && plans.data.items.length > 0 && (
@@ -81,7 +81,7 @@ export function PlansPanel({ workspaceId }: { workspaceId: string }) {
                         <Link
                           className="font-mono text-xs text-primary hover:underline"
                           title={plan.customer_plan_id}
-                          to={`/workspaces/${workspaceId}/plans/${plan.customer_plan_id}/actions`}
+                          to={`/accounts/${accountId}/plans/${plan.customer_plan_id}/actions`}
                         >
                           {shortId(plan.customer_plan_id)}
                         </Link>
@@ -148,13 +148,13 @@ export function PlansPanel({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-/** Show the immutable customer credit statement; e.g. `<CreditsPanel workspaceId={id} />`. */
-export function CreditsPanel({ workspaceId }: { workspaceId: string }) {
+/** Show the immutable customer credit statement; e.g. `<CreditsPanel accountId={id} />`. */
+export function CreditsPanel({ accountId }: { accountId: string }) {
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const statement = useQuery({
-    queryKey: ["credits", workspaceId, cursor],
-    queryFn: () => getStatement(workspaceId, cursor),
+    queryKey: ["credits", accountId, cursor],
+    queryFn: () => getStatement(accountId, cursor),
   });
   return (
     <Card>
@@ -226,12 +226,12 @@ export function CreditsPanel({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-/** Load an item meter only after selection; e.g. `<ItemUsagePanel workspaceId={id} items={wallets} />`. */
+/** Load an item meter only after selection; e.g. `<ItemUsagePanel accountId={id} items={wallets} />`. */
 export function ItemUsagePanel({
-  workspaceId,
+  accountId,
   items,
 }: {
-  workspaceId: string;
+  accountId: string;
   items: ItemWallet[];
 }) {
   const selected = usePanelStore((state) => state.selectedItemId);
@@ -251,7 +251,7 @@ export function ItemUsagePanel({
         {items.length === 0 && (
           <QueryEmpty
             title="Sem itens"
-            description="Este workspace não possui item wallets materializadas."
+            description="Este account não possui item wallets materializadas."
           />
         )}
         {items.length > 0 && (
@@ -270,8 +270,8 @@ export function ItemUsagePanel({
         )}
         {activeItem && (
           <SelectedItemUsage
-            key={`${workspaceId}:${activeItem}`}
-            workspaceId={workspaceId}
+            key={`${accountId}:${activeItem}`}
+            accountId={accountId}
             itemId={activeItem}
           />
         )}
@@ -281,24 +281,24 @@ export function ItemUsagePanel({
 }
 
 function SelectedItemUsage({
-  workspaceId,
+  accountId,
   itemId,
 }: {
-  workspaceId: string;
+  accountId: string;
   itemId: string;
 }) {
   const [cursor, setCursor] = useState<string>();
   const [history, setHistory] = useState<(string | undefined)[]>([]);
   const meter = useQuery({
-    queryKey: ["meter", workspaceId, itemId],
-    queryFn: () => getItemMeter(workspaceId, itemId),
+    queryKey: ["meter", accountId, itemId],
+    queryFn: () => getItemMeter(accountId, itemId),
   });
   const statement = useQuery({
-    queryKey: ["usage", workspaceId, itemId, cursor],
-    queryFn: () => getItemStatement(workspaceId, itemId, cursor),
+    queryKey: ["usage", accountId, itemId, cursor],
+    queryFn: () => getItemStatement(accountId, itemId, cursor),
   });
   const reconciliation = useMutation({
-    mutationFn: () => reconcileItemUsage(workspaceId, itemId),
+    mutationFn: () => reconcileItemUsage(accountId, itemId),
   });
   return (
     <div className="flex flex-col gap-4 border-t pt-5">

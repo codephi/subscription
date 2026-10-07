@@ -3,6 +3,7 @@ pub mod admin_queries;
 pub mod admission;
 pub mod audit_admin;
 
+pub mod account_events;
 pub mod billing_attempts;
 pub mod billing_checkouts;
 pub mod billing_confirmation;
@@ -50,4 +51,3 @@ mod usage_references;
 mod usage_writes;
 mod wallet_rows;
 pub mod wallets;
-pub mod workspace_events;

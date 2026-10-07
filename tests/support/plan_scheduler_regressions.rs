@@ -4,9 +4,9 @@ use subscription::services::subscription_calendar::{dispatch_once, CalendarDispa
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn durable_calendar_workers_grant_and_expire_each_cycle_once() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 30).await;
-    let current = join_plan(&repository, workspace_id, offer.plan_version_id, "jobs").await;
+    let current = join_plan(&repository, account_id, offer.plan_version_id, "jobs").await;
     let cycle = current.current_cycle.unwrap();
     let boundary = cycle.current_period_end.unwrap();
     assert_eq!(
@@ -27,7 +27,7 @@ async fn durable_calendar_workers_grant_and_expire_each_cycle_once() {
             .count(),
         1
     );
-    assert_plan_state(&pool, workspace_id, 1, 2, 3, 30).await;
+    assert_plan_state(&pool, account_id, 1, 2, 3, 30).await;
     let jobs: (i64, i64) =
         sqlx::query_as("SELECT count(*),count(completed_at) FROM subscription_calendar_jobs")
             .fetch_one(&pool)
@@ -43,11 +43,11 @@ async fn durable_calendar_workers_grant_and_expire_each_cycle_once() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_calendar_reclaims_lost_worker_and_backfills_existing_cycles() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 30).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "recover-job",
     )
@@ -88,13 +88,13 @@ async fn durable_calendar_reclaims_lost_worker_and_backfills_existing_cycles() {
     .await
     .unwrap();
     assert_eq!(attempts, 2);
-    assert_plan_state(&pool, workspace_id, 1, 2, 3, 30).await;
+    assert_plan_state(&pool, account_id, 1, 2, 3, 30).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn blocked_calendar_job_is_deferred_without_starving_another_workspace() {
+async fn blocked_calendar_job_is_deferred_without_starving_another_account() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, blocked_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, blocked_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 30).await;
     let blocked = join_plan(
         &repository,
@@ -104,11 +104,11 @@ async fn blocked_calendar_job_is_deferred_without_starving_another_workspace() {
     )
     .await;
     let other_id = Uuid::new_v4();
-    apply_workspace_event(&repository, other_id, "workspace.created", 1).await;
-    apply_workspace_event(&repository, other_id, "workspace.activated", 2).await;
+    apply_account_event(&repository, other_id, "account.created", 1).await;
+    apply_account_event(&repository, other_id, "account.activated", 2).await;
     let other = join_plan(&repository, other_id, offer.plan_version_id, "other-job").await;
     let cutoff = other.current_cycle.unwrap().current_period_end.unwrap();
-    apply_workspace_event(&repository, blocked_id, "workspace.blocked", 3).await;
+    apply_account_event(&repository, blocked_id, "account.blocked", 3).await;
     assert_eq!(
         dispatch_once(&repository, cutoff).await.unwrap(),
         CalendarDispatchOutcome::Deferred
@@ -131,8 +131,8 @@ async fn blocked_calendar_job_is_deferred_without_starving_another_workspace() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(error, "workspace_not_operational");
-    apply_workspace_event(&repository, blocked_id, "workspace.activated", 4).await;
+    assert_eq!(error, "account_not_operational");
+    apply_account_event(&repository, blocked_id, "account.activated", 4).await;
     sqlx::query("UPDATE subscription_calendar_jobs SET retry_at='-infinity' WHERE customer_plan_cycle_id=$1")
         .bind(cycle_id).execute(&pool).await.unwrap();
     assert_eq!(
@@ -145,15 +145,9 @@ async fn blocked_calendar_job_is_deferred_without_starving_another_workspace() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn calendar_commit_failure_preserves_job_and_rolls_back_all_cycle_effects() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 30).await;
-    let current = join_plan(
-        &repository,
-        workspace_id,
-        offer.plan_version_id,
-        "failed-job",
-    )
-    .await;
+    let current = join_plan(&repository, account_id, offer.plan_version_id, "failed-job").await;
     let boundary = current.current_cycle.unwrap().current_period_end.unwrap();
     sqlx::raw_sql("CREATE FUNCTION fail_calendar_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_type='customer_plan.cycle_started' THEN RAISE EXCEPTION 'injected calendar failure'; END IF; RETURN NEW; END $$; CREATE CONSTRAINT TRIGGER fail_calendar_commit AFTER INSERT ON outbox_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_calendar_commit();")
         .execute(&pool).await.unwrap();
@@ -161,7 +155,7 @@ async fn calendar_commit_failure_preserves_job_and_rolls_back_all_cycle_effects(
         dispatch_once(&repository, boundary).await.unwrap(),
         CalendarDispatchOutcome::Deferred
     );
-    assert_plan_state(&pool, workspace_id, 1, 1, 1, 30).await;
+    assert_plan_state(&pool, account_id, 1, 1, 1, 30).await;
     let jobs: (i64, i64) =
         sqlx::query_as("SELECT count(*),count(completed_at) FROM subscription_calendar_jobs")
             .fetch_one(&pool)
@@ -174,17 +168,17 @@ async fn calendar_commit_failure_preserves_job_and_rolls_back_all_cycle_effects(
         dispatch_once(&repository, boundary).await.unwrap(),
         CalendarDispatchOutcome::Advanced
     );
-    assert_plan_state(&pool, workspace_id, 1, 2, 3, 30).await;
+    assert_plan_state(&pool, account_id, 1, 2, 3, 30).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn calendar_background_worker_runs_only_materialized_recurring_free_cycles() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let lifetime = create_free_plan(&repository, product_id, PlanRecurrence::None, 0).await;
     join_plan(
         &repository,
-        workspace_id,
+        account_id,
         lifetime.plan_version_id,
         "lifetime-job",
     )
@@ -199,7 +193,7 @@ async fn calendar_background_worker_runs_only_materialized_recurring_free_cycles
     )
     .await
     .unwrap();
-    join_plan(&repository, workspace_id, paid.plan_version_id, "paid-job").await;
+    join_plan(&repository, account_id, paid.plan_version_id, "paid-job").await;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM subscription_calendar_jobs")
         .fetch_one(&pool)
         .await
@@ -208,7 +202,7 @@ async fn calendar_background_worker_runs_only_materialized_recurring_free_cycles
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Weekly, 30).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "background-job",
     )
@@ -249,5 +243,5 @@ async fn calendar_background_worker_runs_only_materialized_recurring_free_cycles
     worker.abort();
     let _ = worker.await;
     finished.expect("background worker completes persisted overdue cycle");
-    assert_plan_state(&pool, workspace_id, 3, 3, 3, 30).await;
+    assert_plan_state(&pool, account_id, 3, 3, 3, 30).await;
 }

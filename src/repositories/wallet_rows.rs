@@ -31,7 +31,7 @@ pub(super) async fn project_wallet_state(
 
 pub(super) async fn finish_provisioning(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     scope_version: Uuid,
     target: WalletStatus,
     expected: i64,
@@ -48,7 +48,7 @@ pub(super) async fn finish_provisioning(
          error_detail=CASE WHEN $3='ERROR' THEN 'materialized wallet count differs from scope' ELSE NULL END \
          WHERE customer_id=$1 AND scope_version=$2 RETURNING *",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(scope_version)
     .bind(status.as_str())
     .bind(materialized)
@@ -63,7 +63,7 @@ pub(super) fn target_status(operational_status: &str) -> ApiResult<WalletStatus>
         "ACTIVE" => Ok(WalletStatus::Active),
         "BLOCKED" | "TERMINATED" => Ok(WalletStatus::Disabled),
         _ => Err(ApiError::unexpected(format!(
-            "workspace operational status {operational_status:?} is unknown"
+            "account operational status {operational_status:?} is unknown"
         ))),
     }
 }
@@ -72,7 +72,7 @@ pub(super) fn provisioning_from_row(
     row: &sqlx::postgres::PgRow,
 ) -> ApiResult<WalletProvisioningResponse> {
     Ok(WalletProvisioningResponse {
-        workspace_id: row.get("customer_id"),
+        account_id: row.get("customer_id"),
         scope_version: row.get("scope_version"),
         status: parse_status(row.get("status"))?,
         expected_item_wallets: row.get("expected_item_wallets"),
@@ -126,9 +126,9 @@ fn parse_status(value: &str) -> ApiResult<WalletStatus> {
     }
 }
 
-pub(super) fn wallet_not_provisioned(workspace_id: Uuid) -> ApiError {
+pub(super) fn wallet_not_provisioned(account_id: Uuid) -> ApiError {
     ApiError::service_unavailable(
         "wallet_not_provisioned",
-        format!("workspace {workspace_id} does not have a complete wallet hierarchy"),
+        format!("account {account_id} does not have a complete wallet hierarchy"),
     )
 }

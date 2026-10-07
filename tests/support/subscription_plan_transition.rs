@@ -10,7 +10,7 @@ use uuid::Uuid;
 pub async fn assert_downgrade(
     repository: &DatabaseRepository,
     pool: &PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     target_plan_id: Uuid,
 ) {
@@ -23,7 +23,7 @@ pub async fn assert_downgrade(
     };
     let changed = plans::transition_customer_plan(
         repository,
-        workspace_id,
+        account_id,
         customer_plan_id,
         "downgrade-key",
         request.clone(),
@@ -43,7 +43,7 @@ pub async fn assert_downgrade(
     );
     let retry = plans::transition_customer_plan(
         repository,
-        workspace_id,
+        account_id,
         customer_plan_id,
         "downgrade-key",
         request,
@@ -53,9 +53,9 @@ pub async fn assert_downgrade(
         retry.expect_err("duplicate transition").code(),
         "idempotency_key_already_used"
     );
-    assert_reclassified_lot(pool, workspace_id).await;
+    assert_reclassified_lot(pool, account_id).await;
     assert!(
-        credits::reconcile(repository, workspace_id)
+        credits::reconcile(repository, account_id)
             .await
             .expect("reconcile reclassified lot")
             .consistent
@@ -64,12 +64,12 @@ pub async fn assert_downgrade(
 
 pub async fn assert_blocked_join(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     plan_version_id: Uuid,
 ) {
     let result = plans::create_customer_plan(
         repository,
-        workspace_id,
+        account_id,
         "blocked-plan-key",
         subscription::dto::plans::CreateCustomerPlanRequest {
             plan_version_id,
@@ -78,19 +78,19 @@ pub async fn assert_blocked_join(
     )
     .await;
     assert_eq!(
-        result.expect_err("blocked workspace join").code(),
-        "workspace_not_operational"
+        result.expect_err("blocked account join").code(),
+        "account_not_operational"
     );
 }
 
 pub async fn revoke_for_cleanup(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
 ) {
     plans::revoke_customer_plan(
         repository,
-        workspace_id,
+        account_id,
         customer_plan_id,
         subscription::dto::plans::RevokeCustomerPlanRequest {
             reason: "test cleanup".to_string(),
@@ -116,7 +116,7 @@ pub async fn assert_audit(pool: &PgPool, resource_id: Uuid, action: &str, actor_
 
 pub async fn assert_plan_state(
     pool: &PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     active_slots: i64,
     cycles: i64,
     entries: i64,
@@ -130,20 +130,20 @@ pub async fn assert_plan_state(
          (SELECT cw.balance_credit_units FROM customer_wallets cw JOIN wallets w \
           ON w.wallet_id=cw.wallet_id WHERE w.customer_id=$1)",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(pool)
     .await
     .expect("plan state");
     assert_eq!(actual, (active_slots, cycles, entries, balance));
 }
 
-async fn assert_reclassified_lot(pool: &PgPool, workspace_id: Uuid) {
+async fn assert_reclassified_lot(pool: &PgPool, account_id: Uuid) {
     let lot: (String, Option<DateTime<Utc>>, i64) = sqlx::query_as(
         "SELECT source_kind,expires_at,(SELECT count(*) FROM credit_lot_reclassifications \
          WHERE credit_lot_id=l.credit_lot_id) FROM credit_lots l \
          WHERE customer_id=$1 AND original_credit_units=60",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(pool)
     .await
     .expect("reclassified lot");
@@ -152,7 +152,7 @@ async fn assert_reclassified_lot(pool: &PgPool, workspace_id: Uuid) {
         "UPDATE credit_lot_reclassifications SET actor_reference='changed' \
          WHERE credit_lot_id IN (SELECT credit_lot_id FROM credit_lots WHERE customer_id=$1)",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .execute(pool)
     .await
     .is_err());

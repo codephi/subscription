@@ -44,7 +44,7 @@ function PageHeading() {
     <header className="flex flex-col gap-2">
       <h1 className="text-3xl font-semibold tracking-tight">Credenciais padrão</h1>
       <p className="text-sm text-muted-foreground">
-        Novos workspaces recebem uma conexão Stripe própria usando esta conta.
+        Novos accounts recebem uma conexão Stripe própria usando esta conta.
       </p>
     </header>
   );
@@ -69,10 +69,10 @@ function CredentialSettings({
       <CardHeader>
         <div className="flex items-center gap-2">
           <KeyRound aria-hidden="true" />
-          <CardTitle>Stripe para novos workspaces</CardTitle>
+          <CardTitle>Stripe para novos accounts</CardTitle>
         </div>
         <CardDescription>
-          As chaves são armazenadas cifradas. Workspaces existentes mantêm a própria configuração.
+          As chaves são armazenadas cifradas. Accounts existentes mantêm a própria configuração.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">

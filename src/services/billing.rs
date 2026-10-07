@@ -25,7 +25,7 @@ use crate::{
 
 pub async fn create_initial_collection(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     customer_plan_id: uuid::Uuid,
     idempotency_key: &str,
     request: &CreateInitialCollectionRequest,
@@ -40,13 +40,13 @@ pub async fn create_initial_collection(
         ));
     }
     repository
-        .create_initial_collection(workspace_id, customer_plan_id, idempotency_key, request)
+        .create_initial_collection(account_id, customer_plan_id, idempotency_key, request)
         .await
 }
 
 pub async fn create_on_demand_purchase(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     customer_plan_id: uuid::Uuid,
     idempotency_key: &str,
     request: &CreateOnDemandPurchaseRequest,
@@ -61,13 +61,13 @@ pub async fn create_on_demand_purchase(
         ));
     }
     repository
-        .create_on_demand_purchase(workspace_id, customer_plan_id, idempotency_key, request)
+        .create_on_demand_purchase(account_id, customer_plan_id, idempotency_key, request)
         .await
 }
 
 pub async fn create_paid_plan_upgrade(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     customer_plan_id: uuid::Uuid,
     idempotency_key: &str,
     request: &crate::dto::plans::CreatePlanTransitionRequest,
@@ -85,20 +85,20 @@ pub async fn create_paid_plan_upgrade(
         ));
     }
     repository
-        .create_paid_plan_upgrade(workspace_id, customer_plan_id, idempotency_key, request)
+        .create_paid_plan_upgrade(account_id, customer_plan_id, idempotency_key, request)
         .await
 }
 
 pub async fn create_payment_method_setup_session(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     connection_id: uuid::Uuid,
     request: &CreatePaymentMethodSetupSessionRequest,
 ) -> ApiResult<PaymentMethodSetupSessionResponse> {
     let configuration = repository
         .billing_connector_configuration(connection_id)
         .await?;
-    if configuration.workspace_id != workspace_id
+    if configuration.account_id != account_id
         || configuration.provider != "STRIPE"
         || configuration.status != "ACTIVE"
     {
@@ -109,7 +109,7 @@ pub async fn create_payment_method_setup_session(
     }
     let secret = resolve_connection_secret(
         repository,
-        configuration.workspace_id,
+        configuration.account_id,
         connection_id,
         "stripe_api",
         &configuration.secret_reference,
@@ -120,7 +120,7 @@ pub async fn create_payment_method_setup_session(
             crate::services::billing_integrations::ensure_customer(
                 repository,
                 &repository
-                    .integration_secrets(configuration.workspace_id, connection_id)
+                    .integration_secrets(configuration.account_id, connection_id)
                     .await?,
             )
             .await?
@@ -128,7 +128,7 @@ pub async fn create_payment_method_setup_session(
         false => configuration.external_account_reference.clone(),
     };
     repository
-        .ensure_customer_plan_workspace(workspace_id, request.customer_plan_id)
+        .ensure_customer_plan_account(account_id, request.customer_plan_id)
         .await?;
     validate_setup_return_urls(&request.success_url, &request.cancel_url)?;
     let payment_method_setup_id = uuid::Uuid::new_v4();
@@ -152,7 +152,7 @@ pub async fn create_payment_method_setup_session(
     repository
         .record_payment_method_setup_session(
             payment_method_setup_id,
-            workspace_id,
+            account_id,
             connection_id,
             request.customer_plan_id,
             &session.provider_setup_id,
@@ -164,48 +164,42 @@ pub async fn create_payment_method_setup_session(
     })
 }
 
-pub async fn create_workspace_payment_method_setup_session(
+pub async fn create_account_payment_method_setup_session(
     repository: &DatabaseRepository,
     sandbox_config: Option<&crate::services::billing_checkout::BillingCheckoutConfig>,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     request: &CreatePaymentMethodSetupSessionRequest,
 ) -> ApiResult<PaymentMethodSetupSessionResponse> {
     let connection_id = match sandbox_config {
         Some(config) => {
             crate::services::billing_checkout::ensure_sandbox_integration(
-                repository,
-                config,
-                workspace_id,
+                repository, config, account_id,
             )
             .await?
             .billing_connection_id
         }
         None => {
             crate::services::billing_integrations::active_or_provision_default_stripe(
-                repository,
-                workspace_id,
+                repository, account_id,
             )
             .await?
         }
     };
-    create_payment_method_setup_session(repository, workspace_id, connection_id, request).await
+    create_payment_method_setup_session(repository, account_id, connection_id, request).await
 }
 
 pub(crate) fn resolve_connection_secret(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     connection_id: uuid::Uuid,
     purpose: &str,
     reference: &str,
     managed: bool,
 ) -> ApiResult<String> {
     if managed {
-        return repository.credential_vault()?.open(
-            workspace_id,
-            connection_id,
-            purpose,
-            reference,
-        );
+        return repository
+            .credential_vault()?
+            .open(account_id, connection_id, purpose, reference);
     }
     resolve_secret(reference)
 }
@@ -233,7 +227,7 @@ fn stripe_account(reference: &str) -> Option<String> {
 
 pub async fn create_billing_connection(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     request: &CreateBillingConnectionRequest,
 ) -> ApiResult<BillingConnectionResponse> {
     if request.provider != "STRIPE" {
@@ -252,17 +246,17 @@ pub async fn create_billing_connection(
         &request.webhook_secret_reference,
     )?;
     repository
-        .create_billing_connection(workspace_id, request)
+        .create_billing_connection(account_id, request)
         .await
 }
 
 pub async fn get_billing_connection(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     connection_id: uuid::Uuid,
 ) -> ApiResult<BillingConnectionResponse> {
     repository
-        .find_billing_connection(workspace_id, connection_id)
+        .find_billing_connection(account_id, connection_id)
         .await
 }
 
@@ -278,12 +272,12 @@ pub fn billing_capabilities() -> BillingCapabilitiesResponse {
 
 pub async fn create_payment_method_binding(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     request: &CreatePaymentMethodBindingRequest,
 ) -> ApiResult<PaymentMethodBindingResponse> {
     let setup = repository
         .find_payment_method_setup_session(
-            workspace_id,
+            account_id,
             request.customer_plan_id,
             request.payment_method_setup_id,
         )
@@ -292,23 +286,23 @@ pub async fn create_payment_method_binding(
     let configuration = repository
         .billing_connector_configuration(connection_id)
         .await?;
-    if configuration.workspace_id != workspace_id
+    if configuration.account_id != account_id
         || configuration.provider != "STRIPE"
         || configuration.status != "ACTIVE"
     {
         return Err(ApiError::conflict(
             "billing_connection_not_usable",
-            format!("billing connection {connection_id} must be an ACTIVE STRIPE connection for workspace {workspace_id}"),
+            format!("billing connection {connection_id} must be an ACTIVE STRIPE connection for account {account_id}"),
         ));
     }
     let customer_plan_id = request.customer_plan_id;
     repository
-        .ensure_customer_plan_workspace(workspace_id, customer_plan_id)
+        .ensure_customer_plan_account(account_id, customer_plan_id)
         .await?;
     let secrets = if configuration.managed {
         Some(
             repository
-                .integration_secrets(workspace_id, connection_id)
+                .integration_secrets(account_id, connection_id)
                 .await?,
         )
     } else {
@@ -316,7 +310,7 @@ pub async fn create_payment_method_binding(
     };
     let secret = resolve_connection_secret(
         repository,
-        workspace_id,
+        account_id,
         connection_id,
         "stripe_api",
         &configuration.secret_reference,
@@ -355,7 +349,7 @@ pub async fn create_payment_method_binding(
     let display_name = validate_payment_method_display_name(request.card_name.as_deref())?;
     repository
         .create_verified_payment_method_binding_with_name(
-            workspace_id,
+            account_id,
             connection_id,
             Some(customer_plan_id),
             &prepared.payment_method_id,
@@ -367,17 +361,17 @@ pub async fn create_payment_method_binding(
 pub async fn create_payment_method_from_card(
     repository: &DatabaseRepository,
     sandbox_config: Option<&crate::services::billing_checkout::BillingCheckoutConfig>,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     idempotency_key: &str,
     request: &CreatePaymentMethodFromCardRequest,
 ) -> ApiResult<CreatePaymentMethodFromCardResponse> {
     validate_card_entry(request)?;
     repository
-        .ensure_customer_plan_workspace(workspace_id, request.customer_plan_id)
+        .ensure_customer_plan_account(account_id, request.customer_plan_id)
         .await?;
-    let context = card_setup_context(repository, sandbox_config, workspace_id).await?;
+    let context = card_setup_context(repository, sandbox_config, account_id).await?;
     let prepared = confirm_card_setup(&context, request, idempotency_key).await?;
-    finish_card_setup(repository, workspace_id, request, &context, &prepared).await
+    finish_card_setup(repository, account_id, request, &context, &prepared).await
 }
 
 struct CardSetupContext {
@@ -389,22 +383,19 @@ struct CardSetupContext {
 async fn card_setup_context(
     repository: &DatabaseRepository,
     sandbox_config: Option<&crate::services::billing_checkout::BillingCheckoutConfig>,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
 ) -> ApiResult<CardSetupContext> {
     let connection_id = match sandbox_config {
         Some(config) => {
             crate::services::billing_checkout::ensure_sandbox_integration(
-                repository,
-                config,
-                workspace_id,
+                repository, config, account_id,
             )
             .await?
             .billing_connection_id
         }
         None => {
             crate::services::billing_integrations::active_or_provision_default_stripe(
-                repository,
-                workspace_id,
+                repository, account_id,
             )
             .await?
         }
@@ -412,9 +403,9 @@ async fn card_setup_context(
     let configuration = repository
         .billing_connector_configuration(connection_id)
         .await?;
-    let connector = card_setup_connector(repository, workspace_id, connection_id, &configuration)?;
+    let connector = card_setup_connector(repository, account_id, connection_id, &configuration)?;
     let customer_id =
-        card_setup_customer(repository, workspace_id, connection_id, &configuration).await?;
+        card_setup_customer(repository, account_id, connection_id, &configuration).await?;
     Ok(CardSetupContext {
         connection_id,
         connector,
@@ -424,7 +415,7 @@ async fn card_setup_context(
 
 async fn card_setup_customer(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     connection_id: uuid::Uuid,
     configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
 ) -> ApiResult<String> {
@@ -432,20 +423,20 @@ async fn card_setup_customer(
         return Ok(configuration.external_account_reference.clone());
     }
     let secrets = repository
-        .integration_secrets(workspace_id, connection_id)
+        .integration_secrets(account_id, connection_id)
         .await?;
     crate::services::billing_integrations::ensure_customer(repository, &secrets).await
 }
 
 fn card_setup_connector(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     connection_id: uuid::Uuid,
     configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
 ) -> ApiResult<crate::repositories::stripe::StripeConnector> {
     let secret = resolve_connection_secret(
         repository,
-        workspace_id,
+        account_id,
         connection_id,
         "stripe_api",
         &configuration.secret_reference,
@@ -497,13 +488,13 @@ async fn confirm_card_setup(
 
 async fn finish_card_setup(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     request: &CreatePaymentMethodFromCardRequest,
     context: &CardSetupContext,
     prepared: &crate::repositories::stripe::PreparedStripePaymentMethod,
 ) -> ApiResult<CreatePaymentMethodFromCardResponse> {
     if request.save_for_future {
-        return save_card_binding(repository, workspace_id, request, context, prepared).await;
+        return save_card_binding(repository, account_id, request, context, prepared).await;
     }
     context
         .connector
@@ -518,7 +509,7 @@ async fn finish_card_setup(
 
 async fn save_card_binding(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     request: &CreatePaymentMethodFromCardRequest,
     context: &CardSetupContext,
     prepared: &crate::repositories::stripe::PreparedStripePaymentMethod,
@@ -526,7 +517,7 @@ async fn save_card_binding(
     let display_name = card_display_name(request);
     let binding = repository
         .create_verified_payment_method_binding_with_name(
-            workspace_id,
+            account_id,
             context.connection_id,
             Some(request.customer_plan_id),
             &prepared.payment_method_id,
@@ -692,26 +683,26 @@ fn invalid_setup_return_url(url: &str, error: url::ParseError) -> ApiError {
 
 pub async fn list_payment_method_bindings(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
 ) -> ApiResult<Vec<PaymentMethodBindingResponse>> {
-    repository.list_payment_method_bindings(workspace_id).await
+    repository.list_payment_method_bindings(account_id).await
 }
 
 pub async fn remove_payment_method_binding(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     binding_id: uuid::Uuid,
 ) -> ApiResult<()> {
     let binding = repository
-        .find_payment_method_binding_for_removal(workspace_id, binding_id)
+        .find_payment_method_binding_for_removal(account_id, binding_id)
         .await?;
     if binding.binding.status == "DETACHED" {
         return Ok(());
     }
     ensure_binding_can_be_detached(&binding.binding)?;
-    detach_provider_payment_method(repository, workspace_id, &binding).await?;
+    detach_provider_payment_method(repository, account_id, &binding).await?;
     repository
-        .mark_payment_method_binding_detached(workspace_id, binding_id)
+        .mark_payment_method_binding_detached(account_id, binding_id)
         .await
 }
 
@@ -730,14 +721,14 @@ fn ensure_binding_can_be_detached(binding: &PaymentMethodBindingResponse) -> Api
 
 async fn detach_provider_payment_method(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     binding: &crate::repositories::billing_connections::PaymentMethodBindingRemoval,
 ) -> ApiResult<()> {
     let configuration = repository
         .billing_connector_configuration(binding.binding.billing_connection_id)
         .await?;
-    validate_binding_connection(workspace_id, &binding.binding, &configuration)?;
-    let connector = payment_method_removal_connector(repository, workspace_id, &configuration)?;
+    validate_binding_connection(account_id, &binding.binding, &configuration)?;
+    let connector = payment_method_removal_connector(repository, account_id, &configuration)?;
     connector
         .detach_payment_method(&binding.provider_payment_method_reference)
         .await
@@ -745,17 +736,17 @@ async fn detach_provider_payment_method(
 }
 
 fn validate_binding_connection(
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     binding: &PaymentMethodBindingResponse,
     configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
 ) -> ApiResult<()> {
-    if configuration.workspace_id == workspace_id && configuration.provider == "STRIPE" {
+    if configuration.account_id == account_id && configuration.provider == "STRIPE" {
         return Ok(());
     }
     Err(ApiError::conflict(
         "billing_connection_not_usable",
         format!(
-            "billing connection {} must belong to workspace {workspace_id} and use STRIPE",
+            "billing connection {} must belong to account {account_id} and use STRIPE",
             binding.billing_connection_id
         ),
     ))
@@ -763,12 +754,12 @@ fn validate_binding_connection(
 
 fn payment_method_removal_connector(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
 ) -> ApiResult<crate::repositories::stripe::StripeConnector> {
     let secret = resolve_connection_secret(
         repository,
-        workspace_id,
+        account_id,
         configuration.billing_connection_id,
         "stripe_api",
         &configuration.secret_reference,
@@ -784,9 +775,9 @@ fn payment_method_removal_connector(
 
 pub async fn list_unmatched_payments(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
 ) -> ApiResult<Vec<UnmatchedPaymentCaseResponse>> {
-    repository.list_unmatched_payments(workspace_id).await
+    repository.list_unmatched_payments(account_id).await
 }
 
 fn validate_reference(name: &str, reference: &str) -> ApiResult<()> {
@@ -894,7 +885,7 @@ fn unmatched_payment_response(
 ) -> UnmatchedPaymentCaseResponse {
     UnmatchedPaymentCaseResponse {
         unmatched_payment_case_id: record.unmatched_payment_case_id,
-        workspace_id: record.workspace_id,
+        account_id: record.account_id,
         billing_connection_id: record.billing_connection_id,
         provider: record.provider,
         provider_event_id: record.provider_event_id,
@@ -910,7 +901,7 @@ fn unmatched_payment_response(
 /// Creates or returns the manual collection used to recover a past-due plan.
 pub async fn create_renewal_regularization(
     repository: &DatabaseRepository,
-    workspace_id: uuid::Uuid,
+    account_id: uuid::Uuid,
     customer_plan_id: uuid::Uuid,
     idempotency_key: &str,
     request: &CreateRenewalRegularizationRequest,
@@ -925,7 +916,7 @@ pub async fn create_renewal_regularization(
         ));
     }
     repository
-        .create_renewal_regularization(workspace_id, customer_plan_id, idempotency_key, request)
+        .create_renewal_regularization(account_id, customer_plan_id, idempotency_key, request)
         .await
 }
 

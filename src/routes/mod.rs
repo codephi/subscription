@@ -113,18 +113,20 @@ mod tests {
     #[test]
     fn administrative_reads_are_in_openapi() {
         let paths = openapi_document().paths;
-        assert!(paths.paths.contains_key("/v1/admin/workspaces"));
+        assert!(paths.paths.contains_key("/v1/admin/accounts"));
+        assert!(paths.paths.contains_key("/v1/admin/accounts/{account_id}"));
         assert!(paths
             .paths
-            .contains_key("/v1/admin/workspaces/{workspace_id}"));
+            .contains_key("/v1/admin/accounts/{account_id}/terminate"));
         assert!(paths
             .paths
-            .contains_key("/v1/admin/workspaces/{workspace_id}/terminate"));
-        assert!(paths
-            .paths
-            .contains_key("/v1/admin/workspaces/{workspace_id}/customer-plans"));
+            .contains_key("/v1/admin/accounts/{account_id}/customer-plans"));
         assert!(paths
             .paths
             .contains_key("/v1/admin/billing/stripe-defaults"));
+        assert!(paths
+            .paths
+            .contains_key("/v1/internal/accounts/account-events"));
+        assert!(paths.paths.keys().all(|path| !path.contains("workspace")));
     }
 }

@@ -4,9 +4,9 @@ use subscription::services::{calendar::cycle_end, credits};
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn downgrade_renewals_use_new_anchor_and_preserve_reclassified_credit() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let source = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 60).await;
-    let current = join_plan(&repository, workspace_id, source.plan_version_id, "anchor").await;
+    let current = join_plan(&repository, account_id, source.plan_version_id, "anchor").await;
     let target = plans::create_plan(
         &repository,
         source.subscription_id,
@@ -22,12 +22,12 @@ async fn downgrade_renewals_use_new_anchor_and_preserve_reclassified_credit() {
     assert_downgrade(
         &repository,
         &pool,
-        workspace_id,
+        account_id,
         current.customer_plan_id,
         target.plan_version_id,
     )
     .await;
-    let changed = plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
+    let changed = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
         .await
         .unwrap();
     let mut migration = pool.begin().await.unwrap();
@@ -59,7 +59,7 @@ async fn downgrade_renewals_use_new_anchor_and_preserve_reclassified_credit() {
             .unwrap();
         let outcome = plans::run_due_cycles(&repository, boundary).await.unwrap();
         assert_eq!(outcome.created_cycles, 1);
-        let renewed = plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
+        let renewed = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
             .await
             .unwrap();
         let cycle = renewed.current_cycle.unwrap();
@@ -70,10 +70,10 @@ async fn downgrade_renewals_use_new_anchor_and_preserve_reclassified_credit() {
         );
         assert_eq!(cycle.cycle_ordinal, ordinal + 2);
         let balance: i64 = sqlx::query_scalar("SELECT balance_credit_units FROM customer_wallets w JOIN wallets r ON r.wallet_id=w.wallet_id WHERE r.customer_id=$1")
-            .bind(workspace_id).fetch_one(&pool).await.unwrap();
+            .bind(account_id).fetch_one(&pool).await.unwrap();
         assert_eq!(balance, 70);
         assert!(
-            credits::reconcile(&repository, workspace_id)
+            credits::reconcile(&repository, account_id)
                 .await
                 .unwrap()
                 .consistent
@@ -91,11 +91,11 @@ async fn downgrade_renewals_use_new_anchor_and_preserve_reclassified_credit() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn renewal_observes_revocation_committed_while_waiting_for_plan_lock() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
-    let (_, pool, repository, workspace_id, product_id) = setup_active_workspace().await;
+    let (_, pool, repository, account_id, product_id) = setup_active_account().await;
     let offer = create_free_plan(&repository, product_id, PlanRecurrence::Monthly, 60).await;
     let current = join_plan(
         &repository,
-        workspace_id,
+        account_id,
         offer.plan_version_id,
         "revocation-race",
     )
@@ -132,12 +132,12 @@ async fn renewal_observes_revocation_committed_while_waiting_for_plan_lock() {
     let outcome = worker.await.unwrap().unwrap();
     assert_eq!(outcome.created_cycles, 0);
     assert_eq!(outcome.canceled_customer_plans, 1);
-    let expired = plans::get_customer_plan(&repository, workspace_id, current.customer_plan_id)
+    let expired = plans::get_customer_plan(&repository, account_id, current.customer_plan_id)
         .await
         .unwrap();
     assert_eq!(expired.commercial_status, "EXPIRED");
     assert_eq!(expired.end_reason.as_deref(), Some("PLAN_REVOKED"));
-    assert_plan_state(&pool, workspace_id, 0, 1, 2, 0).await;
+    assert_plan_state(&pool, account_id, 0, 1, 2, 0).await;
     assert_eq!(
         plans::run_due_cycles(&repository, boundary)
             .await

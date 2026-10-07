@@ -109,7 +109,7 @@ pub async fn get_on_demand_plan(
 
 pub async fn create_customer_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     idempotency_key: &str,
     request: CreateCustomerPlanRequest,
 ) -> ApiResult<CustomerPlanResponse> {
@@ -128,7 +128,7 @@ pub async fn create_customer_plan(
     let hash = request_hash(&request)?;
     repository
         .create_customer_plan(
-            workspace_id,
+            account_id,
             idempotency_key,
             &hash,
             &request,
@@ -141,27 +141,27 @@ pub async fn create_customer_plan(
 
 pub async fn get_customer_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
 ) -> ApiResult<CustomerPlanResponse> {
     repository
-        .find_customer_plan(workspace_id, customer_plan_id)
+        .find_customer_plan(account_id, customer_plan_id)
         .await
 }
 
 pub async fn cancel_customer_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
 ) -> ApiResult<CustomerPlanResponse> {
     repository
-        .cancel_customer_plan(workspace_id, customer_plan_id)
+        .cancel_customer_plan(account_id, customer_plan_id)
         .await
 }
 
 pub async fn revoke_customer_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     request: RevokeCustomerPlanRequest,
 ) -> ApiResult<CustomerPlanResponse> {
@@ -169,7 +169,7 @@ pub async fn revoke_customer_plan(
     validate_identifier("actor_reference", &request.actor_reference)?;
     repository
         .revoke_customer_plan(
-            workspace_id,
+            account_id,
             customer_plan_id,
             &request.reason,
             &request.actor_reference,
@@ -179,7 +179,7 @@ pub async fn revoke_customer_plan(
 
 pub async fn transition_customer_plan(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     idempotency_key: &str,
     request: CreatePlanTransitionRequest,
@@ -220,7 +220,7 @@ pub async fn transition_customer_plan(
     let hash = request_hash(&request)?;
     repository
         .apply_plan_downgrade(
-            workspace_id,
+            account_id,
             customer_plan_id,
             idempotency_key,
             &hash,

@@ -22,7 +22,7 @@ pub async fn create_voucher(
         request.valid_from,
         request.valid_until,
         request.max_total_uses,
-        request.max_uses_per_workspace,
+        request.max_uses_per_account,
     )?;
     if request.credit_units.value() <= 0 {
         return Err(ApiError::unprocessable(
@@ -48,7 +48,7 @@ pub async fn create_coupon(
         request.valid_from,
         request.valid_until,
         request.max_total_uses,
-        request.max_uses_per_workspace,
+        request.max_uses_per_account,
     )?;
     validate_discount(
         &request.discount_kind,
@@ -106,7 +106,7 @@ pub async fn update(
         request.valid_from,
         request.valid_until,
         request.max_total_uses,
-        request.max_uses_per_workspace,
+        request.max_uses_per_account,
     )?;
     if request.expected_version < 1 {
         return Err(ApiError::unprocessable(
@@ -115,9 +115,7 @@ pub async fn update(
         ));
     }
     if request.max_total_uses.is_some_and(|value| value <= 0)
-        || request
-            .max_uses_per_workspace
-            .is_some_and(|value| value <= 0)
+        || request.max_uses_per_account.is_some_and(|value| value <= 0)
     {
         return Err(ApiError::unprocessable(
             "invalid_promotion_limit",
@@ -128,14 +126,14 @@ pub async fn update(
         validate_text("actor_reference", actor, 255)?;
     }
     let body = json!({"status":request.status,"valid_from":request.valid_from,"valid_until":request.valid_until,
-        "max_total_uses":request.max_total_uses,"max_uses_per_workspace":request.max_uses_per_workspace,"expected_version":request.expected_version});
+        "max_total_uses":request.max_total_uses,"max_uses_per_account":request.max_uses_per_account,"expected_version":request.expected_version});
     repo.update_promotion(kind, id, body, request.actor_reference.as_deref())
         .await
 }
 
 pub async fn redeem_voucher(
     repo: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
     mut request: RedeemVoucherRequest,
 ) -> ApiResult<crate::dto::promotions::VoucherRedemptionResponse> {
@@ -155,8 +153,7 @@ pub async fn redeem_voucher(
     }
     let canonical = serde_json::to_vec(&request).map_err(ApiError::serialization)?;
     let hash = format!("{:x}", Sha256::digest(canonical));
-    repo.redeem_voucher(workspace_id, key, &hash, &request)
-        .await
+    repo.redeem_voucher(account_id, key, &hash, &request).await
 }
 
 fn normalize_code(code: &str) -> ApiResult<String> {
@@ -205,7 +202,7 @@ fn validate_common(
     start: Option<chrono::DateTime<chrono::Utc>>,
     end: Option<chrono::DateTime<chrono::Utc>>,
     total: Option<i64>,
-    per_workspace: Option<i64>,
+    per_account: Option<i64>,
 ) -> ApiResult<()> {
     validate_text("name", name, 160)?;
     if let Some(value) = description {
@@ -217,7 +214,7 @@ fn validate_common(
             "valid_until must be later than valid_from",
         ));
     }
-    if total.is_some_and(|value| value <= 0) || per_workspace.is_some_and(|value| value <= 0) {
+    if total.is_some_and(|value| value <= 0) || per_account.is_some_and(|value| value <= 0) {
         return Err(ApiError::unprocessable(
             "invalid_promotion_limit",
             "promotion limits must be positive or null for unlimited",

@@ -8,7 +8,7 @@ CREATE TABLE vouchers (
   valid_from timestamptz,
   valid_until timestamptz,
   max_total_uses bigint CHECK (max_total_uses > 0),
-  max_uses_per_workspace bigint CHECK (max_uses_per_workspace > 0),
+  max_uses_per_account bigint CHECK (max_uses_per_account > 0),
   version bigint NOT NULL DEFAULT 1 CHECK (version > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -29,7 +29,7 @@ CREATE TABLE coupons (
   valid_from timestamptz,
   valid_until timestamptz,
   max_total_uses bigint CHECK (max_total_uses > 0),
-  max_uses_per_workspace bigint CHECK (max_uses_per_workspace > 0),
+  max_uses_per_account bigint CHECK (max_uses_per_account > 0),
   version bigint NOT NULL DEFAULT 1 CHECK (version > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -63,28 +63,28 @@ ALTER TABLE collection_requests
 CREATE TABLE promotion_usage_counters (
   promotion_kind text NOT NULL CHECK (promotion_kind IN ('VOUCHER','COUPON')),
   promotion_id uuid NOT NULL,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   completed_uses bigint NOT NULL DEFAULT 0 CHECK (completed_uses >= 0),
   reserved_uses bigint NOT NULL DEFAULT 0 CHECK (reserved_uses >= 0),
-  PRIMARY KEY (promotion_kind,promotion_id,workspace_id)
+  PRIMARY KEY (promotion_kind,promotion_id,account_id)
 );
 
 CREATE TABLE voucher_redemptions (
   voucher_redemption_id uuid PRIMARY KEY,
   voucher_id uuid NOT NULL REFERENCES vouchers(voucher_id) ON DELETE RESTRICT,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   transaction_id text NOT NULL CHECK (length(transaction_id) BETWEEN 1 AND 255),
   customer_wallet_entry_id uuid NOT NULL UNIQUE REFERENCES customer_wallet_entries(customer_wallet_entry_id) ON DELETE RESTRICT,
   credit_lot_id uuid NOT NULL UNIQUE REFERENCES credit_lots(credit_lot_id) ON DELETE RESTRICT,
   credit_units bigint NOT NULL CHECK (credit_units > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,transaction_id)
+  UNIQUE(account_id,transaction_id)
 );
 
 CREATE TABLE coupon_checkout_reservations (
   coupon_checkout_reservation_id uuid PRIMARY KEY,
   coupon_id uuid NOT NULL REFERENCES coupons(coupon_id) ON DELETE RESTRICT,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   checkout_id uuid NOT NULL UNIQUE REFERENCES billing_checkouts(checkout_id) ON DELETE RESTRICT,
   collection_request_id uuid UNIQUE REFERENCES collection_requests(collection_request_id) ON DELETE RESTRICT,
   checkout_kind text NOT NULL CHECK (checkout_kind IN ('INITIAL','ON_DEMAND')),
@@ -167,7 +167,7 @@ BEGIN
       RETURNING * INTO reservation;
     IF FOUND THEN
       UPDATE promotion_usage_counters SET reserved_uses=reserved_uses-1,completed_uses=completed_uses+1
-        WHERE promotion_kind='COUPON' AND promotion_id=reservation.coupon_id AND workspace_id=reservation.workspace_id;
+        WHERE promotion_kind='COUPON' AND promotion_id=reservation.coupon_id AND account_id=reservation.account_id;
     END IF;
   ELSIF NEW.status IN ('EXPIRED','EXHAUSTED','CANCELED') THEN
     UPDATE coupon_checkout_reservations SET status='RELEASED'
@@ -175,7 +175,7 @@ BEGIN
       RETURNING * INTO reservation;
     IF FOUND THEN
       UPDATE promotion_usage_counters SET reserved_uses=reserved_uses-1
-        WHERE promotion_kind='COUPON' AND promotion_id=reservation.coupon_id AND workspace_id=reservation.workspace_id;
+        WHERE promotion_kind='COUPON' AND promotion_id=reservation.coupon_id AND account_id=reservation.account_id;
     END IF;
   END IF;
   RETURN NEW;

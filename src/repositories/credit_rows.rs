@@ -4,8 +4,8 @@ use uuid::Uuid;
 use crate::{
     dto::{
         credits::{
-            CustomerWalletEntryResponse, WalletTransactionReferenceResponse,
-            WorkspaceBillingConfigResponse,
+            AccountBillingConfigResponse, CustomerWalletEntryResponse,
+            WalletTransactionReferenceResponse,
         },
         units::CreditUnits,
     },
@@ -68,11 +68,9 @@ pub(super) fn reference_from_row(
     }
 }
 
-pub(super) fn billing_config_from_row(
-    row: &sqlx::postgres::PgRow,
-) -> WorkspaceBillingConfigResponse {
-    WorkspaceBillingConfigResponse {
-        workspace_id: row.get("workspace_id"),
+pub(super) fn billing_config_from_row(row: &sqlx::postgres::PgRow) -> AccountBillingConfigResponse {
+    AccountBillingConfigResponse {
+        account_id: row.get("account_id"),
         direct_credit_enabled: row.get("direct_credit_enabled"),
         recurring_credit_enabled: row.get("recurring_credit_enabled"),
         version: row.get("version"),
@@ -81,10 +79,10 @@ pub(super) fn billing_config_from_row(
     }
 }
 
-pub(super) fn entry_not_found(workspace_id: Uuid, transaction_id: &str) -> crate::error::ApiError {
+pub(super) fn entry_not_found(account_id: Uuid, transaction_id: &str) -> crate::error::ApiError {
     crate::error::ApiError::not_found(
         "wallet_transaction_not_found",
-        format!("transaction_id {transaction_id:?} does not exist in workspace {workspace_id}"),
+        format!("transaction_id {transaction_id:?} does not exist in account {account_id}"),
     )
 }
 

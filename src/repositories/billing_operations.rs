@@ -10,13 +10,13 @@ use crate::{
 impl DatabaseRepository {
     pub async fn list_unmatched_payments(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
     ) -> ApiResult<Vec<UnmatchedPaymentCaseResponse>> {
         let rows = sqlx::query(
-            "SELECT * FROM unmatched_payment_cases WHERE workspace_id=$1 \
+            "SELECT * FROM unmatched_payment_cases WHERE account_id=$1 \
              ORDER BY created_at,unmatched_payment_case_id",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_all(&self.pool())
         .await?;
         Ok(rows.iter().map(unmatched_from_row).collect())
@@ -55,8 +55,8 @@ impl DatabaseRepository {
     ) -> ApiResult<bool> {
         let result = sqlx::query(
             "INSERT INTO external_refund_observations (external_refund_observation_id, \
-             billing_connection_id,workspace_id,provider,provider_event_id,provider_payment_id, \
-             amount_minor,currency,payload_sha256) SELECT $1,bc.billing_connection_id,bc.workspace_id, \
+             billing_connection_id,account_id,provider,provider_event_id,provider_payment_id, \
+             amount_minor,currency,payload_sha256) SELECT $1,bc.billing_connection_id,bc.account_id, \
              bc.provider,$3,$4,$5,$6,$7 FROM billing_connections bc \
              WHERE bc.billing_connection_id=$2 ON CONFLICT (provider,provider_event_id) DO NOTHING",
         )
@@ -76,7 +76,7 @@ impl DatabaseRepository {
 fn unmatched_from_row(row: &sqlx::postgres::PgRow) -> UnmatchedPaymentCaseResponse {
     UnmatchedPaymentCaseResponse {
         unmatched_payment_case_id: row.get("unmatched_payment_case_id"),
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         billing_connection_id: row.get("billing_connection_id"),
         provider: row.get("provider"),
         provider_event_id: row.get("provider_event_id"),

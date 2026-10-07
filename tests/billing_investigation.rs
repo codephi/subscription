@@ -10,20 +10,18 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn billing_queues_filter_page_and_open_details() {
     let (router, pool) = support::setup_router_with_options(false, None).await;
-    let workspace_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO workspace_projections (workspace_id,operational_status,external_sequence,external_occurred_at,last_event_id) VALUES ($1,'ACTIVE',1,now(),$2)")
-        .bind(workspace_id).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
+    let account_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO account_projections (account_id,operational_status,external_sequence,external_occurred_at,last_event_id) VALUES ($1,'ACTIVE',1,now(),$2)")
+        .bind(account_id).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
     let first = Uuid::from_u128(1);
     let second = Uuid::from_u128(2);
     for id in [first, second] {
-        sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence,workspace_id,correlation_id,payload) VALUES ($1,'test.created','test',$2,1,$3,$4,'{}'::jsonb)")
-            .bind(id).bind(id).bind(workspace_id).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id,aggregate_sequence,account_id,correlation_id,payload) VALUES ($1,'test.created','test',$2,1,$3,$4,'{}'::jsonb)")
+            .bind(id).bind(id).bind(account_id).bind(Uuid::new_v4()).execute(&pool).await.unwrap();
     }
     let page = get_json(
         &router,
-        &format!(
-            "/v1/admin/billing/records/outbox?workspace_id={workspace_id}&status=PENDING&limit=1"
-        ),
+        &format!("/v1/admin/billing/records/outbox?account_id={account_id}&status=PENDING&limit=1"),
     )
     .await;
     assert_eq!(page["items"][0]["id"], first.to_string());
@@ -40,7 +38,7 @@ async fn billing_queues_filter_page_and_open_details() {
         &format!("/v1/admin/billing/records/outbox/{first}"),
     )
     .await;
-    assert_eq!(detail["workspace_id"], workspace_id.to_string());
+    assert_eq!(detail["account_id"], account_id.to_string());
     assert_eq!(detail["status"], "PENDING");
     for kind in [
         "collections",

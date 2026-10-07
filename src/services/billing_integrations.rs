@@ -2,10 +2,10 @@ use uuid::Uuid;
 
 use crate::{
     dto::billing::{
-        CreateStripeIntegrationRequest, DefaultStripeCredentialsResponse,
-        IntegrationProviderResponse, StripeIntegrationTestResponse,
-        UpdateDefaultStripeCredentialsRequest, UpdateStripeIntegrationRequest,
-        WorkspaceIntegrationResponse,
+        AccountIntegrationResponse, CreateStripeIntegrationRequest,
+        DefaultStripeCredentialsResponse, IntegrationProviderResponse,
+        StripeIntegrationTestResponse, UpdateDefaultStripeCredentialsRequest,
+        UpdateStripeIntegrationRequest,
     },
     error::{ApiError, ApiResult},
     repositories::{
@@ -28,7 +28,7 @@ pub async fn update_default_stripe_credentials(
         Some(secret) => {
             let environment = split_stripe_key(secret)?.0;
             let account = StripeConnector::new(secret.to_string(), None)
-                .identify_account()
+                .identify_stripe_account()
                 .await
                 .map_err(invalid_stripe_credentials)?;
             (environment, account)
@@ -94,31 +94,31 @@ fn current_has_webhook(
         .is_some_and(|secrets| secrets.webhook_secret.is_some())
 }
 
-pub async fn provision_workspace_defaults(
+pub async fn provision_account_defaults(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<()> {
     let Some(defaults) = repository.load_default_stripe_secrets().await? else {
         return Ok(());
     };
     repository
-        .provision_workspace_default_stripe(workspace_id, &defaults)
+        .provision_account_default_stripe(account_id, &defaults)
         .await
 }
 
 pub async fn active_or_provision_default_stripe(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<Uuid> {
     match repository
-        .active_stripe_billing_connection(workspace_id)
+        .active_stripe_billing_connection(account_id)
         .await
     {
         Ok(connection_id) => Ok(connection_id),
         Err(error) if error.code() == "billing_connection_not_usable" => {
-            provision_workspace_defaults(repository, workspace_id).await?;
+            provision_account_defaults(repository, account_id).await?;
             repository
-                .active_stripe_billing_connection(workspace_id)
+                .active_stripe_billing_connection(account_id)
                 .await
         }
         Err(error) => Err(error),
@@ -135,33 +135,31 @@ pub fn providers() -> Vec<IntegrationProviderResponse> {
 
 pub async fn list(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
-) -> ApiResult<Vec<WorkspaceIntegrationResponse>> {
-    repository.list_integrations(workspace_id).await
+    account_id: Uuid,
+) -> ApiResult<Vec<AccountIntegrationResponse>> {
+    repository.list_integrations(account_id).await
 }
 
 pub async fn get(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
-) -> ApiResult<WorkspaceIntegrationResponse> {
-    repository
-        .get_integration(workspace_id, connection_id)
-        .await
+) -> ApiResult<AccountIntegrationResponse> {
+    repository.get_integration(account_id, connection_id).await
 }
 
 pub async fn create_stripe(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     request: &CreateStripeIntegrationRequest,
-) -> ApiResult<WorkspaceIntegrationResponse> {
+) -> ApiResult<AccountIntegrationResponse> {
     let environment = validate_stripe_key(&request.secret_key, &request.environment)?;
     if let Some(customer_id) = &request.existing_customer_reference {
         validate_customer_id(customer_id)?;
     }
     let connector = StripeConnector::new(request.secret_key.clone(), None);
-    let account_id = connector
-        .identify_account()
+    let stripe_account_id = connector
+        .identify_stripe_account()
         .await
         .map_err(invalid_stripe_credentials)?;
     if let Some(customer_id) = &request.existing_customer_reference {
@@ -172,8 +170,8 @@ pub async fn create_stripe(
     }
     repository
         .create_stripe_integration(
-            workspace_id,
-            &account_id,
+            account_id,
+            &stripe_account_id,
             environment,
             request.existing_customer_reference.as_deref(),
             &request.secret_key,
@@ -183,12 +181,12 @@ pub async fn create_stripe(
 
 pub async fn update_stripe(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     request: &UpdateStripeIntegrationRequest,
-) -> ApiResult<WorkspaceIntegrationResponse> {
+) -> ApiResult<AccountIntegrationResponse> {
     let current = repository
-        .integration_secrets(workspace_id, connection_id)
+        .integration_secrets(account_id, connection_id)
         .await?;
     require_managed_stripe(&current)?;
     if let Some(secret_key) = &request.secret_key {
@@ -197,7 +195,7 @@ pub async fn update_stripe(
     validate_webhook_secret(request.webhook_secret.as_deref())?;
     repository
         .update_stripe_integration(
-            workspace_id,
+            account_id,
             connection_id,
             request.expected_version,
             request.secret_key.as_deref(),
@@ -208,17 +206,17 @@ pub async fn update_stripe(
 
 pub async fn test_stripe(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
 ) -> ApiResult<StripeIntegrationTestResponse> {
     let current = repository
-        .integration_secrets(workspace_id, connection_id)
+        .integration_secrets(account_id, connection_id)
         .await?;
     require_managed_stripe(&current)?;
     let secret = open_api_secret(repository, &current)?;
     let connector = StripeConnector::new(secret, None);
     let account = connector
-        .identify_account()
+        .identify_stripe_account()
         .await
         .map_err(invalid_stripe_credentials)?;
     let expected = current.provider_account_reference.as_deref().unwrap_or("");
@@ -243,7 +241,7 @@ pub async fn ensure_customer(
         return Ok(customer_id.clone());
     }
     let recovered = repository
-        .begin_customer_operation(current.workspace_id, current.billing_connection_id)
+        .begin_customer_operation(current.account_id, current.billing_connection_id)
         .await?;
     if let Some(customer_id) = recovered {
         return Ok(customer_id);
@@ -251,15 +249,15 @@ pub async fn ensure_customer(
     let secret = open_api_secret(repository, current)?;
     let connector = StripeConnector::new(secret, None);
     let customer_id = connector
-        .create_workspace_customer(
-            &current.workspace_id.to_string(),
+        .create_account_customer(
+            &current.account_id.to_string(),
             &current.billing_connection_id.to_string(),
         )
         .await
         .map_err(invalid_stripe_credentials)?;
     repository
         .finish_customer_operation(
-            current.workspace_id,
+            current.account_id,
             current.billing_connection_id,
             &customer_id,
         )
@@ -276,7 +274,7 @@ async fn validate_rotation(current: &IntegrationSecrets, secret_key: &str) -> Ap
         ));
     }
     let account = StripeConnector::new(secret_key.to_string(), None)
-        .identify_account()
+        .identify_stripe_account()
         .await
         .map_err(invalid_stripe_credentials)?;
     if Some(account.as_str()) != current.provider_account_reference.as_deref() {
@@ -347,7 +345,7 @@ fn open_api_secret(
     current: &IntegrationSecrets,
 ) -> ApiResult<String> {
     repository.credential_vault()?.open(
-        current.workspace_id,
+        current.account_id,
         current.billing_connection_id,
         "stripe_api",
         &current.secret_reference,

@@ -23,7 +23,7 @@ impl DatabaseRepository {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn apply_plan_downgrade(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
         idempotency_key: &str,
         request_hash: &str,
@@ -33,10 +33,10 @@ impl DatabaseRepository {
         new_period_end: Option<DateTime<Utc>>,
     ) -> ApiResult<PlanTransitionResponse> {
         let mut transaction = self.pool().begin().await?;
-        lock_active_customer_wallet(&mut transaction, workspace_id).await?;
+        lock_active_customer_wallet(&mut transaction, account_id).await?;
         reserve_transition_keys(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             request_hash,
             &request.transaction_id,
@@ -45,12 +45,12 @@ impl DatabaseRepository {
         lock_valid_plan(&mut transaction, target_plan.response.plan_version_id).await?;
         let evidence_id = super::admission::ensure_admission_evidence(
             &mut transaction,
-            workspace_id,
+            account_id,
             target_plan.response.plan_version_id,
         )
         .await?;
         let current =
-            lock_transition_source(&mut transaction, workspace_id, customer_plan_id).await?;
+            lock_transition_source(&mut transaction, account_id, customer_plan_id).await?;
         validate_transition_source(customer_plan_id, &current, target_plan)?;
         let transition_id = Uuid::new_v4();
         insert_transition_row(
@@ -90,7 +90,7 @@ impl DatabaseRepository {
         .await?;
         complete_reservations(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             &request.transaction_id,
             transition_id,
@@ -98,7 +98,7 @@ impl DatabaseRepository {
         .await?;
         insert_plan_outbox(
             &mut transaction,
-            workspace_id,
+            account_id,
             customer_plan_id,
             transition_id,
             "customer_plan.plan_changed",
@@ -113,7 +113,7 @@ impl DatabaseRepository {
             new_plan_version_id: target_plan.response.plan_version_id,
             reclassified_credit_units: CreditUnits::new(reclassified),
             customer_plan: self
-                .find_customer_plan(workspace_id, customer_plan_id)
+                .find_customer_plan(account_id, customer_plan_id)
                 .await?,
         })
     }
@@ -123,7 +123,7 @@ impl DatabaseRepository {
 pub(super) async fn apply_confirmed_upgrade(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &crate::repositories::credits::LockedWallet,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
     target_plan: &PlanRecord,
     effective_at: DateTime<Utc>,
@@ -131,7 +131,7 @@ pub(super) async fn apply_confirmed_upgrade(
     transaction_id: &str,
     actor_reference: &str,
 ) -> ApiResult<Uuid> {
-    let current = lock_transition_source(transaction, workspace_id, customer_plan_id).await?;
+    let current = lock_transition_source(transaction, account_id, customer_plan_id).await?;
     validate_transition_source(customer_plan_id, &current, target_plan)?;
     let incremental_credits = target_plan
         .response
@@ -205,7 +205,7 @@ pub(super) async fn apply_confirmed_upgrade(
         grant_cycle_credit(
             transaction,
             wallet,
-            workspace_id,
+            account_id,
             customer_plan_id,
             cycle_id,
             &grant_plan,
@@ -216,7 +216,7 @@ pub(super) async fn apply_confirmed_upgrade(
     }
     insert_plan_outbox(
         transaction,
-        workspace_id,
+        account_id,
         customer_plan_id,
         transition_id,
         "customer_plan.plan_changed",
@@ -282,25 +282,25 @@ struct TransitionSource {
 
 async fn reserve_transition_keys(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
     request_hash: &str,
     transaction_id: &str,
 ) -> ApiResult<()> {
     reserve_idempotency(
         transaction,
-        workspace_id,
+        account_id,
         key,
         request_hash,
         "PLAN_TRANSITION",
     )
     .await?;
-    reserve_transaction(transaction, workspace_id, transaction_id, "PLAN_TRANSITION").await
+    reserve_transaction(transaction, account_id, transaction_id, "PLAN_TRANSITION").await
 }
 
 async fn lock_transition_source(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_plan_id: Uuid,
 ) -> ApiResult<TransitionSource> {
     let row = sqlx::query(
@@ -312,11 +312,11 @@ async fn lock_transition_source(
          LEFT JOIN customer_plan_cycles cy ON cy.customer_plan_id=c.customer_plan_id AND cy.status='ACTIVE' \
          WHERE c.customer_id=$1 AND c.customer_plan_id=$2 FOR UPDATE OF c",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_plan_id)
     .fetch_optional(&mut **transaction)
     .await?
-    .ok_or_else(|| missing_customer_plan(workspace_id, customer_plan_id))?;
+    .ok_or_else(|| missing_customer_plan(account_id, customer_plan_id))?;
     let status: String = row.get("commercial_status");
     let activation: String = row.get("activation_status");
     if !matches!(status.as_str(), "ACTIVE" | "ACTIVE_PAID") || activation != "ACTIVATED" {
@@ -484,9 +484,9 @@ async fn insert_transition_cycle(
     Ok(())
 }
 
-fn missing_customer_plan(workspace_id: Uuid, customer_plan_id: Uuid) -> ApiError {
+fn missing_customer_plan(account_id: Uuid, customer_plan_id: Uuid) -> ApiError {
     ApiError::not_found(
         "commercial_resource_not_found",
-        format!("customer_plan {customer_plan_id} does not exist in workspace {workspace_id}"),
+        format!("customer_plan {customer_plan_id} does not exist in account {account_id}"),
     )
 }

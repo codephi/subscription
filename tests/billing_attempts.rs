@@ -228,22 +228,22 @@ async fn future_collection_does_not_start_or_persist_an_attempt() {
 async fn setup_collection_request() -> (DatabaseRepository, Uuid) {
     let (_, pool) = support::setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
-    let workspace_id = Uuid::new_v4();
+    let account_id = Uuid::new_v4();
     let connection_id = Uuid::new_v4();
     let binding_id = Uuid::new_v4();
     let request_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO workspace_projections (workspace_id,operational_status,external_sequence, \
+        "INSERT INTO account_projections (account_id,operational_status,external_sequence, \
          external_occurred_at,last_event_id) VALUES ($1,'ACTIVE',1,now(),$2)",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(Uuid::new_v4())
     .execute(&pool)
     .await
-    .expect("workspace");
-    insert_billing_connection(&pool, workspace_id, connection_id).await;
-    insert_payment_binding(&pool, workspace_id, connection_id, binding_id).await;
-    insert_collection_request(&pool, workspace_id, binding_id, request_id).await;
+    .expect("account");
+    insert_billing_connection(&pool, account_id, connection_id).await;
+    insert_payment_binding(&pool, account_id, connection_id, binding_id).await;
+    insert_collection_request(&pool, account_id, binding_id, request_id).await;
     (repository, request_id)
 }
 
@@ -277,14 +277,14 @@ async fn terminal_collection_ignores_late_synchronous_result() {
     assert_persisted_state(&repository, request_id, "PAID", "SUCCEEDED", "CONFIRMED", 1).await;
 }
 
-async fn insert_billing_connection(pool: &sqlx::PgPool, workspace_id: Uuid, connection_id: Uuid) {
+async fn insert_billing_connection(pool: &sqlx::PgPool, account_id: Uuid, connection_id: Uuid) {
     sqlx::query(
-        "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+        "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
          external_account_reference,secret_reference,capabilities,status) \
          VALUES ($1,$2,'FAKE','fake-account','secret://fake',ARRAY['CARD'],'ACTIVE')",
     )
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .execute(pool)
     .await
     .expect("billing connection");
@@ -292,18 +292,18 @@ async fn insert_billing_connection(pool: &sqlx::PgPool, workspace_id: Uuid, conn
 
 async fn insert_payment_binding(
     pool: &sqlx::PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
     binding_id: Uuid,
 ) {
     sqlx::query(
         "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-         workspace_id,customer_id,payment_method,provider_payment_method_reference,status) \
+         account_id,customer_id,payment_method,provider_payment_method_reference,status) \
          VALUES ($1,$2,$3,$3,'CARD',$4,'ACTIVE')",
     )
     .bind(binding_id)
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(format!("pm_{binding_id}"))
     .execute(pool)
     .await
@@ -312,18 +312,18 @@ async fn insert_payment_binding(
 
 async fn insert_collection_request(
     pool: &sqlx::PgPool,
-    workspace_id: Uuid,
+    account_id: Uuid,
     binding_id: Uuid,
     request_id: Uuid,
 ) {
     sqlx::query(
-        "INSERT INTO collection_requests (collection_request_id,workspace_id,customer_id, \
+        "INSERT INTO collection_requests (collection_request_id,account_id,customer_id, \
          payment_method_binding_id,request_kind,amount_minor,currency,granted_credit_units,status, \
          transaction_id,idempotency_key,correlation_id,scheduled_at,payment_expires_at) \
          VALUES ($1,$2,$2,$3,'INITIAL',1500,'BRL',100,'SCHEDULED',$4,$5,$6,now(),now()+interval '15 minutes')",
     )
     .bind(request_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(binding_id)
     .bind(format!("transaction-{request_id}"))
     .bind(format!("key-{request_id}"))

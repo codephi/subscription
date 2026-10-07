@@ -12,9 +12,9 @@ pub async fn assert_plan_swagger(router: &Router) {
     let openapi = get_json(router, "/openapi.json").await;
     for path in [
         "/v1/subscriptions",
-        "/v1/workspaces/{workspace_id}/customer-plans",
-        "/v1/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/plan-transitions",
-        "/v1/admin/workspaces/{workspace_id}/customer-plans/{customer_plan_id}/revoke",
+        "/v1/accounts/{account_id}/customer-plans",
+        "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/plan-transitions",
+        "/v1/admin/accounts/{account_id}/customer-plans/{customer_plan_id}/revoke",
         "/v1/admin/subscription-cycles/run",
     ] {
         assert!(

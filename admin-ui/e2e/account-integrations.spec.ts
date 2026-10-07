@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const workspaceId = "00000000-0000-4000-8000-000000000001";
+const accountId = "00000000-0000-4000-8000-000000000001";
 const connectionId = "00000000-0000-4000-8000-000000000009";
 
 test("operator configures Stripe and resumes the webhook step", async ({ page }) => {
@@ -12,7 +12,7 @@ test("operator configures Stripe and resumes the webhook step", async ({ page })
       json: [{ provider: "STRIPE", display_name: "Stripe", available: true }],
     }),
   );
-  await page.route("**/v1/admin/workspaces/*/integrations", async (route) => {
+  await page.route("**/v1/admin/accounts/*/integrations", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as { secret_key: string };
       sentApiKey = body.secret_key;
@@ -21,7 +21,7 @@ test("operator configures Stripe and resumes the webhook step", async ({ page })
     }
     await route.fulfill({ json: [integration] });
   });
-  await page.route("**/v1/admin/workspaces/*/integrations/*", async (route) => {
+  await page.route("**/v1/admin/accounts/*/integrations/*", async (route) => {
     if (route.request().method() === "PATCH") {
       const body = route.request().postDataJSON() as { webhook_secret: string };
       sentWebhookSecret = body.webhook_secret;
@@ -31,7 +31,7 @@ test("operator configures Stripe and resumes the webhook step", async ({ page })
     }
     await route.fulfill({ json: integration });
   });
-  await page.route("**/v1/admin/workspaces/*/integrations/*/test", (route) =>
+  await page.route("**/v1/admin/accounts/*/integrations/*/test", (route) =>
     route.fulfill({
       json: {
         successful: true,
@@ -41,7 +41,7 @@ test("operator configures Stripe and resumes the webhook step", async ({ page })
     }),
   );
 
-  await page.goto(`/workspaces/${workspaceId}/integrations`);
+  await page.goto(`/accounts/${accountId}/integrations`);
   await page.getByLabel("Chave secreta do Stripe").fill("sk_test_example_secret");
   await page.getByRole("button", { name: "Validar e continuar" }).click();
   await expect(page.getByText("Configuração pendente")).toBeVisible();

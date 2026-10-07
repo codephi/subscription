@@ -1,5 +1,5 @@
-CREATE TABLE workspace_projections (
-  workspace_id uuid PRIMARY KEY,
+CREATE TABLE account_projections (
+  account_id uuid PRIMARY KEY,
   operational_status text NOT NULL
     CHECK (operational_status IN ('CREATED', 'ACTIVE', 'BLOCKED', 'TERMINATED')),
   external_sequence bigint NOT NULL CHECK (external_sequence >= 1),
@@ -9,13 +9,13 @@ CREATE TABLE workspace_projections (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TRIGGER trg_workspace_projections_updated_at
-BEFORE UPDATE ON workspace_projections
+CREATE TRIGGER trg_account_projections_updated_at
+BEFORE UPDATE ON account_projections
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE integration_inbox (
   event_id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL,
+  account_id uuid NOT NULL,
   event_type text NOT NULL,
   schema_version integer NOT NULL CHECK (schema_version > 0),
   aggregate_id uuid NOT NULL,
@@ -30,8 +30,8 @@ CREATE TABLE integration_inbox (
   processed_at timestamptz
 );
 
-CREATE INDEX idx_integration_inbox_workspace_sequence
-  ON integration_inbox (workspace_id, external_sequence);
+CREATE INDEX idx_integration_inbox_account_sequence
+  ON integration_inbox (account_id, external_sequence);
 
 CREATE TABLE integration_inbox_quarantine (
   event_id uuid PRIMARY KEY REFERENCES integration_inbox(event_id) ON DELETE RESTRICT,
@@ -47,7 +47,7 @@ CREATE TABLE outbox_events (
   aggregate_type text NOT NULL,
   aggregate_id uuid NOT NULL,
   aggregate_sequence bigint NOT NULL CHECK (aggregate_sequence >= 1),
-  workspace_id uuid NOT NULL,
+  account_id uuid NOT NULL,
   correlation_id uuid NOT NULL,
   causation_id uuid,
   payload jsonb NOT NULL,
@@ -67,27 +67,27 @@ CREATE INDEX idx_outbox_events_delivery
   WHERE delivered_at IS NULL AND dead_lettered_at IS NULL;
 
 CREATE TABLE idempotency_records (
-  workspace_id uuid NOT NULL,
+  account_id uuid NOT NULL,
   idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 255),
   operation_kind text NOT NULL,
   request_hash text NOT NULL,
   resource_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (workspace_id, idempotency_key)
+  PRIMARY KEY (account_id, idempotency_key)
 );
 
 CREATE TABLE transaction_reservations (
-  workspace_id uuid NOT NULL,
+  account_id uuid NOT NULL,
   transaction_id text NOT NULL CHECK (length(transaction_id) BETWEEN 1 AND 255),
   operation_kind text NOT NULL,
   resource_id uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (workspace_id, transaction_id)
+  PRIMARY KEY (account_id, transaction_id)
 );
 
 CREATE TABLE audit_events (
   audit_event_id uuid PRIMARY KEY,
-  workspace_id uuid,
+  account_id uuid,
   actor_reference text,
   action text NOT NULL,
   resource_kind text NOT NULL,
@@ -97,5 +97,5 @@ CREATE TABLE audit_events (
   occurred_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_audit_events_workspace_time
-  ON audit_events (workspace_id, occurred_at DESC);
+CREATE INDEX idx_audit_events_account_time
+  ON audit_events (account_id, occurred_at DESC);

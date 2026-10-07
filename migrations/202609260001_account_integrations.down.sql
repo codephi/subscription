@@ -3,7 +3,7 @@ DROP INDEX uq_billing_connection_provider_environment;
 DROP INDEX uq_billing_connection_legacy_scope;
 ALTER TABLE billing_connections
   ADD CONSTRAINT billing_connections_scope_unique
-    UNIQUE (workspace_id,provider,external_account_reference);
+    UNIQUE (account_id,provider,external_account_reference);
 ALTER TABLE billing_connections
   DROP COLUMN configuration_version,
   DROP COLUMN provider_customer_reference,

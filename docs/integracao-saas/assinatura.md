@@ -4,10 +4,10 @@ Este procedimento vende um plano `PAID` recorrente. Cada pagamento confirmado
 ativa ou renova o direito aos produtos e pode conceder uma franquia de créditos
 para execuções. O preço em dinheiro do plano e o preço em créditos de cada
 execução são regras diferentes. Uma conta do SaaS corresponde a um
-`workspace_id` da Subscription API; os workspaces de infraestrutura internos
+`account_id` da Subscription API; os accounts de infraestrutura internos
 compartilham a carteira dessa conta. Veja o [mapeamento comum](README.md).
 
-Os exemplos usam `<API>`, `<WORKSPACE_ID>`, `<PRODUCT_ID>`, `<ITEM_ID>`,
+Os exemplos usam `<API>`, `<ACCOUNT_ID>`, `<PRODUCT_ID>`, `<ITEM_ID>`,
 `<SUBSCRIPTION_ID>`, `<PLAN_VERSION_ID>`, `<CUSTOMER_PLAN_ID>`,
 `<CONNECTION_ID>` e `<BINDING_ID>` como valores substituíveis.
 
@@ -59,7 +59,7 @@ versões do plano. A adesão de um cliente específico ainda é feita pela API.
    `billing_connection_id` e `webhook_path` retornados.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/billing-connections
+POST /v1/accounts/<ACCOUNT_ID>/billing-connections
 {"provider":"STRIPE","external_account_reference":"cus_...","secret_reference":"env://STRIPE_SECRET_KEY","webhook_secret_reference":"env://STRIPE_WEBHOOK_SECRET_001"}
 ```
 
@@ -80,23 +80,23 @@ ou por automação externa.
 ## 3. Ativar a conta e preparar a carteira
 
 1. O SaaS cria uma conta com UUID estável. Envie para
-   `POST /v1/internal/accounts/workspace-events` os eventos assinados
-   `workspace.created` (`sequence=1`) e `workspace.activated` (`sequence=2`).
-   `aggregate_id`, `workspace_id` e `payload.workspace_id` devem coincidir.
+   `POST /v1/internal/accounts/account-events` os eventos assinados
+   `account.created` (`sequence=1`) e `account.activated` (`sequence=2`).
+   `aggregate_id`, `account_id` e `payload.account_id` devem coincidir.
    O [índice](README.md#preparação-comum-do-serviço) descreve a assinatura; o
-   [schema](../contracts/accounts-workspace-event-v1.schema.json) lista todos
+   [schema](../contracts/accounts-account-event-v1.schema.json) lista todos
    os campos obrigatórios.
-2. Confirme `GET /v1/workspaces/<WORKSPACE_ID>/wallet-provisioning` com status
-   `ACTIVE` e `GET /v1/workspaces/<WORKSPACE_ID>/wallets` com `ready=true`.
+2. Confirme `GET /v1/accounts/<ACCOUNT_ID>/wallet-provisioning` com status
+   `ACTIVE` e `GET /v1/accounts/<ACCOUNT_ID>/wallets` com `ready=true`.
    Se o catálogo mudou depois do provisionamento, reconcilie a hierarquia.
-3. Consulte `GET /v1/workspaces/<WORKSPACE_ID>/billing-config`. A opção
+3. Consulte `GET /v1/accounts/<ACCOUNT_ID>/billing-config`. A opção
    `recurring_credit_enabled` precisa ser `true` para criar o CustomerPlan;
-   se estiver `false`, use `PUT /v1/workspaces/<WORKSPACE_ID>/billing-config`
+   se estiver `false`, use `PUT /v1/accounts/<ACCOUNT_ID>/billing-config`
    com `expected_version` da leitura, mantendo o valor desejado de
    `direct_credit_enabled`.
 
-**Admin-ui atual:** mostra estado do workspace, carteira e provisionamento;
-`Workspaces > Ações` ajusta `billing-config` e reconcilia a wallet. O evento
+**Admin-ui atual:** mostra estado do account, carteira e provisionamento;
+`Accounts > Ações` ajusta `billing-config` e reconcilia a wallet. O evento
 de Accounts deve partir do backend do SaaS/Accounts.
 
 ## 4. Criar a assinatura do cliente e salvar o cartão
@@ -107,9 +107,9 @@ de Accounts deve partir do backend do SaaS/Accounts.
    franquia liberados.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/customer-plans
-Idempotency-Key: account:<WORKSPACE_ID>:pro-plan
-{"plan_version_id":"<PLAN_VERSION_ID>","transaction_id":"account:<WORKSPACE_ID>:pro-plan"}
+POST /v1/accounts/<ACCOUNT_ID>/customer-plans
+Idempotency-Key: account:<ACCOUNT_ID>:pro-plan
+{"plan_version_id":"<PLAN_VERSION_ID>","transaction_id":"account:<ACCOUNT_ID>:pro-plan"}
 ```
 
 2. Seu backend pede à Subscription uma sessão de setup associada ao CustomerPlan.
@@ -117,10 +117,10 @@ Idempotency-Key: account:<WORKSPACE_ID>:pro-plan
    Redirecione o cliente autenticado à URL para informar o cartão.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/payment-method-setup-sessions
+POST /v1/accounts/<ACCOUNT_ID>/payment-method-setup-sessions
 {"customer_plan_id":"<CUSTOMER_PLAN_ID>","success_url":"https://app.example/return?payment_setup=complete","cancel_url":"https://app.example/return?payment_setup=cancelled"}
 
-POST /v1/workspaces/<WORKSPACE_ID>/payment-method-bindings
+POST /v1/accounts/<ACCOUNT_ID>/payment-method-bindings
 {"customer_plan_id":"<CUSTOMER_PLAN_ID>","payment_method_setup_id":"<PAYMENT_METHOD_SETUP_ID>"}
 ```
 
@@ -140,7 +140,7 @@ setup ou vínculo de método de pagamento.
    `202` significa cobrança agendada, não pagamento confirmado.
 
 ```http
-POST /v1/workspaces/<WORKSPACE_ID>/customer-plans/<CUSTOMER_PLAN_ID>/collection-requests
+POST /v1/accounts/<ACCOUNT_ID>/customer-plans/<CUSTOMER_PLAN_ID>/collection-requests
 Idempotency-Key: initial:<CUSTOMER_PLAN_ID>
 {"payment_method_binding_id":"<BINDING_ID>","transaction_id":"initial:<CUSTOMER_PLAN_ID>"}
 ```
@@ -151,11 +151,11 @@ Idempotency-Key: initial:<CUSTOMER_PLAN_ID>
    método, plano e janela comercial antes de ativar o contrato e conceder a
    franquia do primeiro ciclo uma única vez.
 3. Acompanhe
-   `GET /v1/workspaces/<WORKSPACE_ID>/collection-requests/<COLLECTION_ID>` e
-   `GET /v1/workspaces/<WORKSPACE_ID>/customer-plans/<CUSTOMER_PLAN_ID>`.
+   `GET /v1/accounts/<ACCOUNT_ID>/collection-requests/<COLLECTION_ID>` e
+   `GET /v1/accounts/<ACCOUNT_ID>/customer-plans/<CUSTOMER_PLAN_ID>`.
    Libere a infraestrutura quando `activation_status=ACTIVATED` e o produto
    aparecer entre `entitled_product_ids`. Confira a concessão em
-   `GET /v1/workspaces/<WORKSPACE_ID>/wallets` e no extrato da carteira.
+   `GET /v1/accounts/<ACCOUNT_ID>/wallets` e no extrato da carteira.
 4. Se o Stripe exigir ação do cliente, a cobrança permanece pendente e a
    interface do SaaS precisa levá-lo ao fluxo de autenticação do mesmo
    PaymentIntent. A API atual não fornece um fluxo completo de retomada no
@@ -174,9 +174,9 @@ antes da primeira cobrança real. Veja a
 
 ## 6. Cobrar execuções e acompanhar o ciclo
 
-1. Cada execução usa `POST /v1/workspaces/<WORKSPACE_ID>/usage-events` com
+1. Cada execução usa `POST /v1/accounts/<ACCOUNT_ID>/usage-events` com
    `product_id`, `item_id`, `item_units="1"`, `transaction_id` e
-   `Idempotency-Key` estáveis por execução. Inclua o ID do workspace interno
+   `Idempotency-Key` estáveis por execução. Inclua o ID do account interno
    do SaaS em `metadata`. Só enfileire a execução após `201`.
 2. O débito sai da carteira principal. `403` significa produto sem direito;
    `409 insufficient_credit` significa saldo insuficiente. A leitura de
@@ -198,7 +198,7 @@ de vender recorrência automática.
 
 Uma falha definitiva de renovação leva o plano a `PAST_DUE` /
 `RENEWAL_INACTIVE`. A regularização manual usa
-`POST /v1/workspaces/<WORKSPACE_ID>/customer-plans/<CUSTOMER_PLAN_ID>/renewal-regularizations`
+`POST /v1/accounts/<ACCOUNT_ID>/customer-plans/<CUSTOMER_PLAN_ID>/renewal-regularizations`
 com `Idempotency-Key`, `payment_method_binding_id` e `transaction_id` novos;
 só a confirmação reativa o ciclo. `POST .../cancel` agenda o cancelamento ao
 fim do período confirmado. Não cria estorno automático. O `admin-ui` já permite

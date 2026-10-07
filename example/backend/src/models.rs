@@ -67,7 +67,7 @@ pub struct AccountResponse {
     pub username: String,
     pub plan_model: Option<PlanModel>,
     pub customer_plan_id: Option<Uuid>,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize)]

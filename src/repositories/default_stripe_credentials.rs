@@ -134,15 +134,15 @@ impl DatabaseRepository {
         self.default_stripe_credentials().await
     }
 
-    pub async fn provision_workspace_default_stripe(
+    pub async fn provision_account_default_stripe(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         defaults: &DefaultStripeSecrets,
     ) -> ApiResult<()> {
         let connection_id = Uuid::new_v4();
         let vault = self.credential_vault()?;
         let api_ciphertext = vault.seal(
-            workspace_id,
+            account_id,
             connection_id,
             "stripe_api",
             &defaults.api_secret,
@@ -150,7 +150,7 @@ impl DatabaseRepository {
         let webhook_ciphertext = defaults
             .webhook_secret
             .as_deref()
-            .map(|secret| vault.seal(workspace_id, connection_id, "stripe_webhook", secret))
+            .map(|secret| vault.seal(account_id, connection_id, "stripe_webhook", secret))
             .transpose()?;
         let status = if webhook_ciphertext.is_some() {
             "ACTIVE"
@@ -158,12 +158,12 @@ impl DatabaseRepository {
             "PENDING_SETUP"
         };
         let mut transaction = self.pool().begin().await?;
-        let inserted = sqlx::query("INSERT INTO billing_connections (billing_connection_id,workspace_id,provider,external_account_reference,secret_reference,webhook_secret_reference,capabilities,status,environment,provider_account_reference) VALUES ($1,$2,'STRIPE',$3,$4,$5,ARRAY['CARD','SETUP_SESSION','OFF_SESSION','WEBHOOK'],$6,$7,$3) ON CONFLICT DO NOTHING")
-            .bind(connection_id).bind(workspace_id).bind(&defaults.account_reference).bind(api_ciphertext)
+        let inserted = sqlx::query("INSERT INTO billing_connections (billing_connection_id,account_id,provider,external_account_reference,secret_reference,webhook_secret_reference,capabilities,status,environment,provider_account_reference) VALUES ($1,$2,'STRIPE',$3,$4,$5,ARRAY['CARD','SETUP_SESSION','OFF_SESSION','WEBHOOK'],$6,$7,$3) ON CONFLICT DO NOTHING")
+            .bind(connection_id).bind(account_id).bind(&defaults.account_reference).bind(api_ciphertext)
             .bind(webhook_ciphertext).bind(status).bind(&defaults.environment)
             .execute(&mut *transaction).await?;
         if inserted.rows_affected() == 1 {
-            audit_default_provision(&mut transaction, workspace_id, connection_id).await?;
+            audit_default_provision(&mut transaction, account_id, connection_id).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -172,11 +172,11 @@ impl DatabaseRepository {
 
 async fn audit_default_provision(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     connection_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO audit_events (audit_event_id,workspace_id,actor_reference,action,resource_kind,resource_id,correlation_id,details) VALUES ($1,$2,'system-default-stripe','integration.default_provisioned','billing_connection',$3,$4,'{}'::jsonb)")
-        .bind(Uuid::new_v4()).bind(workspace_id).bind(connection_id).bind(Uuid::new_v4())
+    sqlx::query("INSERT INTO audit_events (audit_event_id,account_id,actor_reference,action,resource_kind,resource_id,correlation_id,details) VALUES ($1,$2,'system-default-stripe','integration.default_provisioned','billing_connection',$3,$4,'{}'::jsonb)")
+        .bind(Uuid::new_v4()).bind(account_id).bind(connection_id).bind(Uuid::new_v4())
         .execute(&mut **transaction).await?;
     Ok(())
 }

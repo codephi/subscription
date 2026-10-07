@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 const ACCOUNTS_EVENT_SCHEMA: &str =
-    include_str!("../docs/contracts/accounts-workspace-event-v1.schema.json");
+    include_str!("../docs/contracts/accounts-account-event-v1.schema.json");
 const DOMAIN_EVENT_SCHEMA: &str =
     include_str!("../docs/contracts/subscription-domain-event-v1.schema.json");
 
@@ -18,7 +18,7 @@ fn contract_documents_cover_phase_zero_decisions() {
             "event_id",
             "event_type",
             "sequence",
-            "workspace_id",
+            "account_id",
             "correlation_id",
         ],
     );
@@ -28,7 +28,7 @@ fn contract_documents_cover_phase_zero_decisions() {
             "event_id",
             "event_type",
             "sequence",
-            "workspace_id",
+            "account_id",
             "correlation_id",
         ],
     );
@@ -38,13 +38,30 @@ fn contract_documents_cover_phase_zero_decisions() {
     assert!(accounts_boundary.contains("autenticação geral foi adiada"));
     assert!(event_delivery.contains("HMAC-SHA256"));
     assert!(event_delivery.contains("quarentena"));
-    assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.started"));
-    assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.completed"));
-    assert!(DOMAIN_EVENT_SCHEMA.contains("workspace_provisioning.failed"));
+    assert!(!ACCOUNTS_EVENT_SCHEMA.contains("workspace"));
+    assert!(!DOMAIN_EVENT_SCHEMA.contains("workspace"));
+    assert!(ACCOUNTS_EVENT_SCHEMA.contains("account.created"));
+    assert!(ACCOUNTS_EVENT_SCHEMA.contains("account.activated"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("account_provisioning.started"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("account_provisioning.completed"));
+    assert!(DOMAIN_EVENT_SCHEMA.contains("account_provisioning.failed"));
     assert!(DOMAIN_EVENT_SCHEMA.contains("credit.granted"));
     assert!(DOMAIN_EVENT_SCHEMA.contains("customer_plan.activated"));
     assert!(DOMAIN_EVENT_SCHEMA.contains("customer_plan.plan_changed"));
     assert!(DOMAIN_EVENT_SCHEMA.contains("credit.expired"));
+}
+
+#[test]
+fn account_event_contract_rejects_workspace_field_names() {
+    let schema: Value = serde_json::from_str(ACCOUNTS_EVENT_SCHEMA).expect("valid account schema");
+    let properties = schema["properties"].as_object().expect("properties object");
+    assert!(properties.contains_key("account_id"));
+    assert!(!properties.contains_key("workspace_id"));
+    let payload = properties["payload"]["properties"]
+        .as_object()
+        .expect("payload properties object");
+    assert!(payload.contains_key("account_id"));
+    assert!(!payload.contains_key("workspace_id"));
 }
 
 fn assert_required_fields(schema: &Value, expected_fields: &[&str]) {

@@ -19,11 +19,11 @@ use crate::{
 impl DatabaseRepository {
     pub async fn find_product_eligibility(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         product_id: Uuid,
     ) -> ApiResult<ProductEligibilityResponse> {
         let mut transaction = self.pool().begin().await?;
-        super::credits::lock_active_customer_wallet(&mut transaction, workspace_id).await?;
+        super::credits::lock_active_customer_wallet(&mut transaction, account_id).await?;
         let product = sqlx::query("SELECT usage_model,status FROM products WHERE product_id=$1")
             .bind(product_id)
             .fetch_optional(&mut *transaction)
@@ -33,7 +33,7 @@ impl DatabaseRepository {
             .fetch_one(&mut *transaction)
             .await?;
         let plan = sqlx::query(include_str!("product_eligibility_plan.sql"))
-            .bind(workspace_id)
+            .bind(account_id)
             .bind(product_id)
             .bind(evaluated_at)
             .fetch_optional(&mut *transaction)
@@ -51,7 +51,7 @@ impl DatabaseRepository {
             "SELECT cw.balance_credit_units,cw.version FROM customer_wallets cw JOIN wallets w \
              ON w.wallet_id=cw.wallet_id WHERE w.customer_id=$1",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&mut *transaction)
         .await?;
         let balance = wallet
@@ -78,7 +78,7 @@ impl DatabaseRepository {
 
     pub async fn find_item_wallet_meter(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         item_id: Uuid,
     ) -> ApiResult<ItemWalletMeterResponse> {
         let row = sqlx::query(
@@ -88,11 +88,11 @@ impl DatabaseRepository {
              iw.pending_credit_units,iw.version,iw.updated_at FROM wallets w JOIN item_wallets iw ON iw.wallet_id=w.wallet_id \
              JOIN items i ON i.item_id=w.item_id WHERE w.customer_id=$1 AND w.item_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_item_wallet(workspace_id, item_id))?;
+        .ok_or_else(|| missing_item_wallet(account_id, item_id))?;
         let pending: i64 = row.get("pending_item_units");
         let quote = if pending > 0 {
             (
@@ -102,15 +102,15 @@ impl DatabaseRepository {
                 row.get("pending_credit_units"),
             )
         } else {
-            self.next_active_quote(workspace_id, item_id).await?
+            self.next_active_quote(account_id, item_id).await?
         };
         let block_size: i64 = required_quote(quote.2, item_id, "unit_block_size")?;
         let next_price_id = required_quote(quote.0, item_id, "price_version_id")?;
         let pricing_accumulators = self
-            .list_pricing_accumulators(workspace_id, item_id, None)
+            .list_pricing_accumulators(account_id, item_id, None)
             .await?;
         Ok(ItemWalletMeterResponse {
-            customer_id: workspace_id,
+            customer_id: account_id,
             product_id: row.get("product_id"),
             item_id,
             item_wallet_id: row.get("wallet_id"),
@@ -140,7 +140,7 @@ impl DatabaseRepository {
 
     async fn next_active_quote(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         item_id: Uuid,
     ) -> ApiResult<(Option<Uuid>, Option<i32>, Option<i64>, Option<i64>)> {
         let price = sqlx::query(
@@ -167,7 +167,7 @@ impl DatabaseRepository {
             "SELECT COALESCE((SELECT accumulated_converted_item_units FROM pricing_accumulators \
              WHERE customer_id=$1 AND item_id=$2 AND price_version_id=$3 AND cycle_key=$4),0)",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .bind(price_id)
         .bind(cycle_key)
@@ -192,7 +192,7 @@ impl DatabaseRepository {
 
     pub async fn list_item_wallet_statement(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         item_id: Uuid,
         cursor: Option<i64>,
         limit: i64,
@@ -203,7 +203,7 @@ impl DatabaseRepository {
              WHERE w.customer_id=$1 AND w.item_id=$2 AND ($3::bigint IS NULL OR \
              e.total_received_item_units_after<$3) ORDER BY e.total_received_item_units_after DESC LIMIT $4",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .bind(cursor)
         .bind(limit + 1)
@@ -226,7 +226,7 @@ impl DatabaseRepository {
 
     pub async fn find_item_wallet_entry(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         item_id: Uuid,
         entry_id: Uuid,
     ) -> ApiResult<ItemWalletEntryResponse> {
@@ -235,7 +235,7 @@ impl DatabaseRepository {
              ON u.usage_event_id=e.usage_event_id JOIN wallets w ON w.wallet_id=e.item_wallet_id \
              WHERE w.customer_id=$1 AND w.item_id=$2 AND e.item_wallet_entry_id=$3",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .bind(entry_id)
         .fetch_optional(&self.pool())
@@ -286,7 +286,7 @@ impl DatabaseRepository {
 
     pub async fn list_pricing_accumulators(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         item_id: Uuid,
         price_id: Option<Uuid>,
     ) -> ApiResult<Vec<PricingAccumulatorResponse>> {
@@ -296,7 +296,7 @@ impl DatabaseRepository {
              WHERE customer_id=$1 AND item_id=$2 AND ($3::uuid IS NULL OR price_version_id=$3) \
              ORDER BY created_at,pricing_accumulator_id",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .bind(price_id)
         .fetch_all(&self.pool())
@@ -318,7 +318,7 @@ impl DatabaseRepository {
 
     pub async fn reconcile_item_usage(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         item_id: Uuid,
     ) -> ApiResult<UsageReconciliationResponse> {
         let row = sqlx::query(
@@ -335,11 +335,11 @@ impl DatabaseRepository {
              FROM item_wallets iw JOIN wallets w ON w.wallet_id=iw.wallet_id \
              WHERE w.customer_id=$1 AND w.item_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(item_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| missing_item_wallet(workspace_id, item_id))?;
+        .ok_or_else(|| missing_item_wallet(account_id, item_id))?;
         let received: i64 = row.get("total_received_item_units");
         let converted: i64 = row.get("total_converted_item_units");
         let pending: i64 = row.get("pending_item_units");
@@ -348,7 +348,7 @@ impl DatabaseRepository {
         let allocated: i64 = row.get("allocated");
         let debited: i64 = row.get("debited");
         Ok(UsageReconciliationResponse {
-            customer_id: workspace_id,
+            customer_id: account_id,
             item_id,
             meter_received_item_units: boundary(received),
             statement_received_item_units: boundary(statement),
@@ -429,9 +429,9 @@ fn missing(kind: &str, id: Uuid) -> ApiError {
     )
 }
 
-fn missing_item_wallet(workspace_id: Uuid, item_id: Uuid) -> ApiError {
+fn missing_item_wallet(account_id: Uuid, item_id: Uuid) -> ApiError {
     ApiError::service_unavailable(
         "wallet_not_provisioned",
-        format!("workspace {workspace_id} has no item wallet for item {item_id}"),
+        format!("account {account_id} has no item wallet for item {item_id}"),
     )
 }

@@ -27,7 +27,7 @@ FOR EACH ROW EXECUTE FUNCTION protect_admission_policy_reference();
 
 CREATE TABLE subscription_admission_evidence (
   event_id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id),
+  account_id uuid NOT NULL REFERENCES account_projections(account_id),
   policy_version_id uuid NOT NULL REFERENCES subscription_admission_policies(policy_version_id),
   sequence bigint NOT NULL CHECK (sequence > 0),
   verified_facts text[] NOT NULL CHECK (verified_facts <@ ARRAY['EMAIL_VERIFIED','IDENTITY_VERIFIED']::text[]),
@@ -35,7 +35,7 @@ CREATE TABLE subscription_admission_evidence (
   valid_until timestamptz NOT NULL,
   request_hash text NOT NULL,
   received_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE(workspace_id,policy_version_id,sequence)
+  UNIQUE(account_id,policy_version_id,sequence)
 );
 CREATE TRIGGER trg_admission_evidence_immutable BEFORE UPDATE OR DELETE
 ON subscription_admission_evidence FOR EACH ROW EXECUTE FUNCTION reject_credit_history_mutation();

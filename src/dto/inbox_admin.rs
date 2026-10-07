@@ -8,14 +8,14 @@ use uuid::Uuid;
 pub struct InboxPageQuery {
     pub cursor: Option<Uuid>,
     pub limit: Option<u16>,
-    pub workspace_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
     pub status: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct InboxEventResponse {
     pub event_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub event_type: String,
     pub external_sequence: i64,
     pub processing_status: String,

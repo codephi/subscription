@@ -128,10 +128,10 @@ async fn coupon_history(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/voucher-redemptions", tag = "Promotions", params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)), request_body = RedeemVoucherRequest, responses((status = 201, body = VoucherRedemptionResponse), (status = 409, body = ErrorResponse)))]
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/voucher-redemptions", tag = "Promotions", params(("account_id" = Uuid, Path), ("Idempotency-Key" = String, Header)), request_body = RedeemVoucherRequest, responses((status = 201, body = VoucherRedemptionResponse), (status = 409, body = ErrorResponse)))]
 async fn redeem_voucher(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     headers: HeaderMap,
     Json(body): Json<RedeemVoucherRequest>,
 ) -> ApiResult<(StatusCode, Json<VoucherRedemptionResponse>)> {
@@ -144,6 +144,6 @@ async fn redeem_voucher(
                 "Idempotency-Key must contain 1 to 255 ASCII characters",
             )
         })?;
-    let response = promotions::redeem_voucher(&state.database(), workspace_id, key, body).await?;
+    let response = promotions::redeem_voucher(&state.database(), account_id, key, body).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }

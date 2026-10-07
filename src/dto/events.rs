@@ -6,50 +6,50 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkspaceEventType {
-    #[serde(rename = "workspace.created")]
+pub enum AccountEventType {
+    #[serde(rename = "account.created")]
     Created,
-    #[serde(rename = "workspace.activated")]
+    #[serde(rename = "account.activated")]
     Activated,
-    #[serde(rename = "workspace.blocked")]
+    #[serde(rename = "account.blocked")]
     Blocked,
-    #[serde(rename = "workspace.terminated")]
+    #[serde(rename = "account.terminated")]
     Terminated,
 }
 
-impl WorkspaceEventType {
+impl AccountEventType {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Created => "workspace.created",
-            Self::Activated => "workspace.activated",
-            Self::Blocked => "workspace.blocked",
-            Self::Terminated => "workspace.terminated",
+            Self::Created => "account.created",
+            Self::Activated => "account.activated",
+            Self::Blocked => "account.blocked",
+            Self::Terminated => "account.terminated",
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct WorkspaceEventPayload {
-    pub workspace_id: Uuid,
+pub struct AccountEventPayload {
+    pub account_id: Uuid,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct WorkspaceEventEnvelope {
+pub struct AccountEventEnvelope {
     pub event_id: Uuid,
-    pub event_type: WorkspaceEventType,
+    pub event_type: AccountEventType,
     pub schema_version: u16,
     pub aggregate_id: Uuid,
     pub sequence: i64,
     pub occurred_at: DateTime<Utc>,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub correlation_id: Uuid,
     pub causation_id: Option<Uuid>,
-    pub payload: WorkspaceEventPayload,
+    pub payload: AccountEventPayload,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkspaceEventOutcome {
+pub enum AccountEventOutcome {
     Applied,
     Duplicate,
     Stale,
@@ -57,10 +57,10 @@ pub enum WorkspaceEventOutcome {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct WorkspaceEventResponse {
+pub struct AccountEventResponse {
     pub event_id: Uuid,
-    pub outcome: WorkspaceEventOutcome,
-    pub workspace_status: Option<String>,
+    pub outcome: AccountEventOutcome,
+    pub account_status: Option<String>,
     pub external_sequence: Option<i64>,
 }
 
@@ -73,7 +73,7 @@ pub struct DomainEventEnvelope {
     pub aggregate_id: Uuid,
     pub sequence: i64,
     pub occurred_at: DateTime<Utc>,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub correlation_id: Uuid,
     pub causation_id: Option<Uuid>,
     pub payload: Value,

@@ -3,7 +3,7 @@ interface PendingKey {
   key: string;
 }
 
-/** Reuse a key for retries of one transaction; e.g. `pendingKey("credit:workspace", "tx-1")`. */
+/** Reuse a key for retries of one transaction; e.g. `pendingKey("credit:account", "tx-1")`. */
 export function pendingKey(scope: string, transactionId: string): string {
   const storageKey = `subscription-admin:${scope}`;
   const saved = localStorage.getItem(storageKey);
@@ -24,7 +24,7 @@ export function pendingKey(scope: string, transactionId: string): string {
   return key;
 }
 
-/** Clear a resolved transaction key; e.g. `clearPendingKey("credit:workspace")`. */
+/** Clear a resolved transaction key; e.g. `clearPendingKey("credit:account")`. */
 export function clearPendingKey(scope: string): void {
   localStorage.removeItem(`subscription-admin:${scope}`);
 }

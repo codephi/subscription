@@ -26,7 +26,7 @@ async fn credit_strict_accepts_positive_and_zero_balance_then_rejects_negative()
     let positive = setup_usage(1, 3, 5).await;
     let receipt = usage::record_usage(
         &positive.repository,
-        positive.workspace_id,
+        positive.account_id,
         "positive-key",
         usage_request(&positive, "positive-transaction", 1),
     )
@@ -37,7 +37,7 @@ async fn credit_strict_accepts_positive_and_zero_balance_then_rejects_negative()
     let zero = setup_usage(1, 5, 5).await;
     let receipt = usage::record_usage(
         &zero.repository,
-        zero.workspace_id,
+        zero.account_id,
         "zero-key",
         usage_request(&zero, "zero-transaction", 1),
     )
@@ -46,7 +46,7 @@ async fn credit_strict_accepts_positive_and_zero_balance_then_rejects_negative()
     assert_eq!(receipt.balance_after_credit_units.unwrap().value(), 0);
     let rejected = usage::record_usage(
         &zero.repository,
-        zero.workspace_id,
+        zero.account_id,
         "negative-key",
         usage_request(&zero, "negative-transaction", 1),
     )
@@ -62,7 +62,7 @@ async fn usage_overflow_and_insufficient_credit_roll_back_every_related_table() 
     let overflow = setup_usage(i64::MAX, 1, 1).await;
     usage::record_usage(
         &overflow.repository,
-        overflow.workspace_id,
+        overflow.account_id,
         "overflow-prime-key",
         usage_request(&overflow, "overflow-prime-transaction", i64::MAX - 1),
     )
@@ -70,7 +70,7 @@ async fn usage_overflow_and_insufficient_credit_roll_back_every_related_table() 
     .expect("prime pending");
     let error = usage::record_usage(
         &overflow.repository,
-        overflow.workspace_id,
+        overflow.account_id,
         "overflow-key",
         usage_request(&overflow, "overflow-transaction", 2),
     )
@@ -82,7 +82,7 @@ async fn usage_overflow_and_insufficient_credit_roll_back_every_related_table() 
     let insufficient = setup_usage(1, 7, 5).await;
     let error = usage::record_usage(
         &insufficient.repository,
-        insufficient.workspace_id,
+        insufficient.account_id,
         "atomic-key",
         usage_request(&insufficient, "atomic-transaction", 1),
     )
@@ -91,10 +91,10 @@ async fn usage_overflow_and_insufficient_credit_roll_back_every_related_table() 
     assert_eq!(error.code(), "insufficient_credit");
     assert_atomic_counts(&insufficient, 0, 0, 0).await;
     let reservations: i64 = sqlx::query_scalar(
-        "SELECT (SELECT count(*) FROM idempotency_records WHERE workspace_id=$1 AND operation_kind='USAGE') \
-         +(SELECT count(*) FROM transaction_reservations WHERE workspace_id=$1 AND operation_kind='USAGE')",
+        "SELECT (SELECT count(*) FROM idempotency_records WHERE account_id=$1 AND operation_kind='USAGE') \
+         +(SELECT count(*) FROM transaction_reservations WHERE account_id=$1 AND operation_kind='USAGE')",
     )
-    .bind(insufficient.workspace_id)
+    .bind(insufficient.account_id)
     .fetch_one(&insufficient.pool)
     .await
     .expect("reservations");
@@ -109,7 +109,7 @@ async fn price_and_catalog_conflicts_leave_usage_unchanged() {
     changed.expected_price_version_id = Some(uuid::Uuid::new_v4());
     let error = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "changed-price-key",
         changed,
     )
@@ -120,7 +120,7 @@ async fn price_and_catalog_conflicts_leave_usage_unchanged() {
     invalid_item.item_id = uuid::Uuid::new_v4();
     let error = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "invalid-item-key",
         invalid_item,
     )
@@ -137,7 +137,7 @@ async fn item_statement_cursor_is_stable_and_events_are_versioned() {
     for index in 1..=3 {
         usage::record_usage(
             &fixture.repository,
-            fixture.workspace_id,
+            fixture.account_id,
             &format!("cursor-key-{index}"),
             usage_request(&fixture, &format!("cursor-transaction-{index}"), 1),
         )
@@ -147,15 +147,15 @@ async fn item_statement_cursor_is_stable_and_events_are_versioned() {
     let first = get_json(
         &fixture.router,
         &format!(
-            "/v1/workspaces/{}/items/{}/item-wallet/statement?limit=2",
-            fixture.workspace_id, fixture.item_id
+            "/v1/accounts/{}/items/{}/item-wallet/statement?limit=2",
+            fixture.account_id, fixture.item_id
         ),
     )
     .await;
     let cursor = first["next_cursor"].as_str().expect("next cursor");
     usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "cursor-key-4",
         usage_request(&fixture, "cursor-transaction-4", 1),
     )
@@ -164,8 +164,8 @@ async fn item_statement_cursor_is_stable_and_events_are_versioned() {
     let second = get_json(
         &fixture.router,
         &format!(
-            "/v1/workspaces/{}/items/{}/item-wallet/statement?limit=2&cursor={cursor}",
-            fixture.workspace_id, fixture.item_id
+            "/v1/accounts/{}/items/{}/item-wallet/statement?limit=2&cursor={cursor}",
+            fixture.account_id, fixture.item_id
         ),
     )
     .await;
@@ -178,9 +178,9 @@ async fn item_statement_cursor_is_stable_and_events_are_versioned() {
     );
     let events: Vec<(String, i64, String)> = sqlx::query_as(
         "SELECT event_type,(payload->>'schema_version')::bigint,payload->>'event_type' \
-         FROM outbox_events WHERE workspace_id=$1 AND event_type='usage.recorded' ORDER BY aggregate_sequence",
+         FROM outbox_events WHERE account_id=$1 AND event_type='usage.recorded' ORDER BY aggregate_sequence",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_all(&fixture.pool)
     .await
     .expect("usage events");
@@ -196,7 +196,7 @@ async fn usage_history_is_append_only_and_reconciliation_detects_divergence() {
     let fixture = setup_usage(1, 1, 10).await;
     usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "history-key",
         usage_request(&fixture, "history-transaction", 1),
     )
@@ -220,7 +220,7 @@ async fn usage_history_is_append_only_and_reconciliation_detects_divergence() {
         sqlx::query_scalar::<_, uuid::Uuid>(
             "SELECT wallet_id FROM wallets WHERE customer_id=$1 AND item_id=$2",
         )
-        .bind(fixture.workspace_id)
+        .bind(fixture.account_id)
         .bind(fixture.item_id)
         .fetch_one(&fixture.pool)
         .await
@@ -231,7 +231,7 @@ async fn usage_history_is_append_only_and_reconciliation_detects_divergence() {
     .await
     .expect("introduce meter divergence");
     let reconciliation =
-        usage::reconcile_item(&fixture.repository, fixture.workspace_id, fixture.item_id)
+        usage::reconcile_item(&fixture.repository, fixture.account_id, fixture.item_id)
             .await
             .expect("reconciliation");
     assert!(!reconciliation.consistent);
@@ -243,7 +243,7 @@ async fn splitting_tiered_usage_does_not_change_blocks_or_total_debit() {
     let single = setup_tiered_usage(standard_tiers(), None, 100).await;
     let receipt = usage::record_usage(
         &single.repository,
-        single.workspace_id,
+        single.account_id,
         "single-tier-key",
         usage_request(&single, "single-tier-transaction", 25),
     )
@@ -256,7 +256,7 @@ async fn splitting_tiered_usage_does_not_change_blocks_or_total_debit() {
     for (index, units) in [7, 18].into_iter().enumerate() {
         usage::record_usage(
             &split.repository,
-            split.workspace_id,
+            split.account_id,
             &format!("split-tier-key-{index}"),
             usage_request(&split, &format!("split-tier-transaction-{index}"), units),
         )
@@ -268,7 +268,7 @@ async fn splitting_tiered_usage_does_not_change_blocks_or_total_debit() {
          count(DISTINCT (price_version_id,cycle_key,price_block_ordinal)) \
          FROM billing_blocks WHERE customer_id=$1 AND item_id=$2",
     )
-    .bind(split.workspace_id)
+    .bind(split.account_id)
     .bind(split.item_id)
     .fetch_one(&split.pool)
     .await
@@ -288,13 +288,10 @@ async fn renewal_inactive_plan_can_spend_existing_credits() {
     .execute(&fixture.pool)
     .await
     .expect("mark renewal inactive");
-    let eligibility = usage::eligibility(
-        &fixture.repository,
-        fixture.workspace_id,
-        fixture.product_id,
-    )
-    .await
-    .expect("eligibility");
+    let eligibility =
+        usage::eligibility(&fixture.repository, fixture.account_id, fixture.product_id)
+            .await
+            .expect("eligibility");
     assert!(eligibility.access_allowed);
     assert!(eligibility.customer_plan_entitled);
     assert!(eligibility.credit_sufficient);
@@ -305,7 +302,7 @@ async fn renewal_inactive_plan_can_spend_existing_credits() {
     );
     let receipt = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "renewal-inactive-key",
         usage_request(&fixture, "renewal-inactive-transaction", 1),
     )
@@ -346,7 +343,7 @@ async fn pending_block_completed_after_cycle_boundary_uses_new_cycle() {
     let previous_start = current_start - chrono::Duration::days(1);
     let wallet_id: uuid::Uuid =
         sqlx::query_scalar("SELECT wallet_id FROM wallets WHERE customer_id=$1 AND item_id=$2")
-            .bind(fixture.workspace_id)
+            .bind(fixture.account_id)
             .bind(fixture.item_id)
             .fetch_one(&fixture.pool)
             .await
@@ -366,7 +363,7 @@ async fn pending_block_completed_after_cycle_boundary_uses_new_cycle() {
          cycle_key,accumulated_converted_item_units,converted_blocks) VALUES ($1,$2,$3,$4,$5,10,5)",
     )
     .bind(uuid::Uuid::new_v4())
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .bind(fixture.price_id)
     .bind(previous_start.to_rfc3339())
@@ -375,7 +372,7 @@ async fn pending_block_completed_after_cycle_boundary_uses_new_cycle() {
     .expect("previous accumulator");
     let receipt = usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "cross-cycle-key",
         usage_request(&fixture, "cross-cycle-transaction", 1),
     )
@@ -387,7 +384,7 @@ async fn pending_block_completed_after_cycle_boundary_uses_new_cycle() {
         "SELECT accumulated_converted_item_units FROM pricing_accumulators \
          WHERE customer_id=$1 AND item_id=$2 AND cycle_key=$3",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .bind(fixture.item_id)
     .bind(previous_start.to_rfc3339())
     .fetch_one(&fixture.pool)
@@ -411,7 +408,7 @@ async fn assert_atomic_counts(
          (SELECT count(*) FROM billing_blocks WHERE customer_id=$1), \
          (SELECT count(*) FROM pricing_accumulators WHERE customer_id=$1)",
     )
-    .bind(fixture.workspace_id)
+    .bind(fixture.account_id)
     .fetch_one(&fixture.pool)
     .await
     .expect("atomic counts");

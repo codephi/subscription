@@ -2,7 +2,7 @@ CREATE TABLE users (
   user_id TEXT PRIMARY KEY,
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
   password_hash TEXT NOT NULL,
-  workspace_id TEXT NOT NULL UNIQUE,
+  account_id TEXT NOT NULL UNIQUE,
   created_event_id TEXT NOT NULL UNIQUE,
   activated_event_id TEXT NOT NULL UNIQUE,
   correlation_id TEXT NOT NULL,

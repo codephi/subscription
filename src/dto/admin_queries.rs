@@ -11,8 +11,8 @@ pub struct AdminPageQuery {
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct WorkspaceProjectionResponse {
-    pub workspace_id: Uuid,
+pub struct AccountProjectionResponse {
+    pub account_id: Uuid,
     pub operational_status: String,
     pub external_sequence: i64,
     pub external_occurred_at: DateTime<Utc>,
@@ -21,13 +21,13 @@ pub struct WorkspaceProjectionResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
-pub struct CreateWorkspaceRequest {
+pub struct CreateAccountRequest {
     pub actor_reference: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct WorkspacePageResponse {
-    pub items: Vec<WorkspaceProjectionResponse>,
+pub struct AccountPageResponse {
+    pub items: Vec<AccountProjectionResponse>,
     pub next_cursor: Option<Uuid>,
 }
 

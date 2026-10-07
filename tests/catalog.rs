@@ -1,11 +1,11 @@
 mod support;
 
 use axum::{
-    Router,
     body::Body,
     http::{Method, Request, StatusCode},
+    Router,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sqlx::PgPool;
 use subscription::{repositories::database::DatabaseRepository, services::catalog};
 use tower::ServiceExt;

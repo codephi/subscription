@@ -15,8 +15,8 @@ use usage_fixture::setup_usage;
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unmatched_payment_is_opened_once_without_plan_or_credit_effects() {
     let fixture = setup_usage(1, 1, 10).await;
-    let connection_id = insert_connection(&fixture.pool, fixture.workspace_id).await;
-    let before = financial_state(&fixture.pool, fixture.workspace_id).await;
+    let connection_id = insert_connection(&fixture.pool, fixture.account_id).await;
+    let before = financial_state(&fixture.pool, fixture.account_id).await;
     let webhook = Arc::new(unmatched_webhook());
     let first = spawn_unmatched(&fixture.repository, connection_id, Arc::clone(&webhook));
     let second = spawn_unmatched(&fixture.repository, connection_id, Arc::clone(&webhook));
@@ -27,7 +27,7 @@ async fn unmatched_payment_is_opened_once_without_plan_or_credit_effects() {
     assert_eq!(first.reason, "COLLECTION_REQUEST_NOT_FOUND");
     assert_eq!(first.status, "OPEN");
     assert_eq!(
-        financial_state(&fixture.pool, fixture.workspace_id).await,
+        financial_state(&fixture.pool, fixture.account_id).await,
         before
     );
     assert_unmatched_records(&fixture.pool, first.unmatched_payment_case_id).await;
@@ -47,15 +47,15 @@ fn spawn_unmatched(
     })
 }
 
-async fn insert_connection(pool: &sqlx::PgPool, workspace_id: Uuid) -> Uuid {
+async fn insert_connection(pool: &sqlx::PgPool, account_id: Uuid) -> Uuid {
     let connection_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO billing_connections (billing_connection_id,workspace_id,provider, \
+        "INSERT INTO billing_connections (billing_connection_id,account_id,provider, \
          external_account_reference,secret_reference,capabilities,status) \
          VALUES ($1,$2,'FAKE',$3,$4,ARRAY['CARD','WEBHOOK'],'ACTIVE')",
     )
     .bind(connection_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(format!("account-{connection_id}"))
     .bind(format!("secret-{connection_id}"))
     .execute(pool)
@@ -78,7 +78,7 @@ fn unmatched_webhook() -> ConfirmedBillingWebhook {
     }
 }
 
-async fn financial_state(pool: &sqlx::PgPool, workspace_id: Uuid) -> (i64, i64, i64, i64) {
+async fn financial_state(pool: &sqlx::PgPool, account_id: Uuid) -> (i64, i64, i64, i64) {
     sqlx::query_as(
         "SELECT (SELECT count(*) FROM customer_plans WHERE customer_id=$1), \
          (SELECT count(*) FROM customer_plan_cycles c JOIN customer_plans p USING(customer_plan_id) \
@@ -87,7 +87,7 @@ async fn financial_state(pool: &sqlx::PgPool, workspace_id: Uuid) -> (i64, i64, 
          (SELECT balance_credit_units FROM customer_wallets cw JOIN wallets w USING(wallet_id) \
           WHERE w.customer_id=$1 AND w.wallet_type='CUSTOMER')",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(pool)
     .await
     .unwrap()

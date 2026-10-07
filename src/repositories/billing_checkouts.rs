@@ -27,7 +27,7 @@ pub struct HostedCheckoutRecovery {
 
 pub(super) async fn lock_coupon_discount(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     checkout_kind: CheckoutKind,
     code: &str,
     base_amount_minor: i64,
@@ -67,18 +67,18 @@ pub(super) async fn lock_coupon_discount(
     }
     let total: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM coupon_checkout_reservations WHERE coupon_id=$1 AND status IN ('COMPLETED','RESERVED')")
         .bind(id).fetch_one(&mut **transaction).await?;
-    let local: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM coupon_checkout_reservations WHERE coupon_id=$1 AND workspace_id=$2 AND status IN ('COMPLETED','RESERVED')")
-        .bind(id).bind(workspace_id).fetch_one(&mut **transaction).await?;
+    let local: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM coupon_checkout_reservations WHERE coupon_id=$1 AND account_id=$2 AND status IN ('COMPLETED','RESERVED')")
+        .bind(id).bind(account_id).fetch_one(&mut **transaction).await?;
     if coupon
         .get::<Option<i64>, _>("max_total_uses")
         .is_some_and(|limit| total >= limit)
         || coupon
-            .get::<Option<i64>, _>("max_uses_per_workspace")
+            .get::<Option<i64>, _>("max_uses_per_account")
             .is_some_and(|limit| local >= limit)
     {
         return Err(ApiError::conflict(
             "coupon_usage_limit_reached",
-            format!("coupon {id} has no remaining use for workspace {workspace_id}"),
+            format!("coupon {id} has no remaining use for account {account_id}"),
         ));
     }
     let kind: String = coupon.get("discount_kind");
@@ -112,19 +112,19 @@ pub(super) async fn lock_coupon_discount(
 
 pub(super) async fn store_coupon_reservation(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     checkout_id: Uuid,
     collection_request_id: Uuid,
     checkout_kind: CheckoutKind,
     coupon: &CouponDiscount,
 ) -> ApiResult<()> {
-    sqlx::query("INSERT INTO coupon_checkout_reservations (coupon_checkout_reservation_id,coupon_id,workspace_id,checkout_id,collection_request_id,checkout_kind,base_amount_minor,discount_amount_minor,final_amount_minor,currency,discount_kind,discount_value,coupon_version,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'RESERVED')")
-        .bind(Uuid::new_v4()).bind(coupon.coupon_id).bind(workspace_id).bind(checkout_id).bind(collection_request_id)
+    sqlx::query("INSERT INTO coupon_checkout_reservations (coupon_checkout_reservation_id,coupon_id,account_id,checkout_id,collection_request_id,checkout_kind,base_amount_minor,discount_amount_minor,final_amount_minor,currency,discount_kind,discount_value,coupon_version,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'RESERVED')")
+        .bind(Uuid::new_v4()).bind(coupon.coupon_id).bind(account_id).bind(checkout_id).bind(collection_request_id)
         .bind(checkout_kind_text(checkout_kind)).bind(coupon.base_amount_minor).bind(coupon.discount_amount_minor)
         .bind(coupon.final_amount_minor).bind(&coupon.currency).bind(&coupon.kind).bind(coupon.value).bind(coupon.version)
         .execute(&mut **transaction).await?;
-    sqlx::query("INSERT INTO promotion_usage_counters (promotion_kind,promotion_id,workspace_id,reserved_uses) VALUES ('COUPON',$1,$2,1) ON CONFLICT (promotion_kind,promotion_id,workspace_id) DO UPDATE SET reserved_uses=promotion_usage_counters.reserved_uses+1")
-        .bind(coupon.coupon_id).bind(workspace_id).execute(&mut **transaction).await?;
+    sqlx::query("INSERT INTO promotion_usage_counters (promotion_kind,promotion_id,account_id,reserved_uses) VALUES ('COUPON',$1,$2,1) ON CONFLICT (promotion_kind,promotion_id,account_id) DO UPDATE SET reserved_uses=promotion_usage_counters.reserved_uses+1")
+        .bind(coupon.coupon_id).bind(account_id).execute(&mut **transaction).await?;
     sqlx::query("UPDATE billing_checkouts SET coupon_id=$2,base_amount_minor=$3,discount_amount_minor=$4,checkout_currency=$5 WHERE checkout_id=$1")
         .bind(checkout_id).bind(coupon.coupon_id).bind(coupon.base_amount_minor).bind(coupon.discount_amount_minor).bind(&coupon.currency)
         .execute(&mut **transaction).await?;
@@ -133,18 +133,18 @@ pub(super) async fn store_coupon_reservation(
 
 async fn store_free_coupon_redemption(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     checkout_id: Uuid,
     checkout_kind: CheckoutKind,
     coupon: &CouponDiscount,
 ) -> ApiResult<()> {
-    sqlx::query("INSERT INTO coupon_checkout_reservations (coupon_checkout_reservation_id,coupon_id,workspace_id,checkout_id,collection_request_id,checkout_kind,base_amount_minor,discount_amount_minor,final_amount_minor,currency,discount_kind,discount_value,coupon_version,status,completed_at) VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,0,$8,$9,$10,$11,'COMPLETED',clock_timestamp())")
-        .bind(Uuid::new_v4()).bind(coupon.coupon_id).bind(workspace_id).bind(checkout_id)
+    sqlx::query("INSERT INTO coupon_checkout_reservations (coupon_checkout_reservation_id,coupon_id,account_id,checkout_id,collection_request_id,checkout_kind,base_amount_minor,discount_amount_minor,final_amount_minor,currency,discount_kind,discount_value,coupon_version,status,completed_at) VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,0,$8,$9,$10,$11,'COMPLETED',clock_timestamp())")
+        .bind(Uuid::new_v4()).bind(coupon.coupon_id).bind(account_id).bind(checkout_id)
         .bind(checkout_kind_text(checkout_kind)).bind(coupon.base_amount_minor).bind(coupon.discount_amount_minor)
         .bind(&coupon.currency).bind(&coupon.kind).bind(coupon.value).bind(coupon.version)
         .execute(&mut **transaction).await?;
-    sqlx::query("INSERT INTO promotion_usage_counters (promotion_kind,promotion_id,workspace_id,completed_uses) VALUES ('COUPON',$1,$2,1) ON CONFLICT (promotion_kind,promotion_id,workspace_id) DO UPDATE SET completed_uses=promotion_usage_counters.completed_uses+1")
-        .bind(coupon.coupon_id).bind(workspace_id).execute(&mut **transaction).await?;
+    sqlx::query("INSERT INTO promotion_usage_counters (promotion_kind,promotion_id,account_id,completed_uses) VALUES ('COUPON',$1,$2,1) ON CONFLICT (promotion_kind,promotion_id,account_id) DO UPDATE SET completed_uses=promotion_usage_counters.completed_uses+1")
+        .bind(coupon.coupon_id).bind(account_id).execute(&mut **transaction).await?;
     sqlx::query("UPDATE billing_checkouts SET coupon_id=$2,base_amount_minor=$3,discount_amount_minor=$4,checkout_currency=$5,completed_without_payment=true,lease_expires_at=NULL WHERE checkout_id=$1")
         .bind(checkout_id).bind(coupon.coupon_id).bind(coupon.base_amount_minor).bind(coupon.discount_amount_minor).bind(&coupon.currency)
         .execute(&mut **transaction).await?;
@@ -161,7 +161,7 @@ pub enum CheckoutClaim {
 #[derive(Clone, Debug)]
 pub struct CheckoutRecord {
     pub checkout_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub customer_plan_id: Uuid,
     pub checkout_kind: CheckoutKind,
     pub on_demand_plan_id: Option<Uuid>,
@@ -238,7 +238,7 @@ impl DatabaseRepository {
         let mut transaction = self.pool().begin().await?;
         let row = sqlx::query(
             "SELECT hs.collection_request_id,hs.provider_session_id,hs.payment_method_binding_id, \
-             cr.workspace_id,cr.amount_minor,cr.currency FROM billing_hosted_payment_sessions hs \
+             cr.account_id,cr.amount_minor,cr.currency FROM billing_hosted_payment_sessions hs \
              JOIN collection_requests cr ON cr.collection_request_id=hs.collection_request_id \
              WHERE hs.checkout_id=$1 FOR UPDATE OF hs,cr",
         )
@@ -270,7 +270,7 @@ impl DatabaseRepository {
             .bind(checkout_id).execute(&mut *transaction).await?;
         let confirmation = HostedCheckoutConfirmation {
             collection_request_id: row.get("collection_request_id"),
-            workspace_id: row.get("workspace_id"),
+            account_id: row.get("account_id"),
             amount_minor: stored_amount,
             currency: stored_currency,
         };
@@ -281,16 +281,16 @@ impl DatabaseRepository {
     pub async fn ensure_hosted_payment_binding(
         &self,
         checkout_id: Uuid,
-        workspace_id: Uuid,
+        account_id: Uuid,
         connection_id: Uuid,
     ) -> ApiResult<Uuid> {
         let mut transaction = self.pool().begin().await?;
         if let Some(binding_id) = sqlx::query_scalar(
             "SELECT h.payment_method_binding_id FROM billing_hosted_payment_sessions h \
-             JOIN billing_checkouts c USING(checkout_id) WHERE h.checkout_id=$1 AND c.workspace_id=$2 FOR UPDATE OF h",
+             JOIN billing_checkouts c USING(checkout_id) WHERE h.checkout_id=$1 AND c.account_id=$2 FOR UPDATE OF h",
         )
         .bind(checkout_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&mut *transaction)
         .await?
         {
@@ -301,15 +301,15 @@ impl DatabaseRepository {
         let placeholder = format!("pending_checkout_{checkout_id}");
         sqlx::query(
             "INSERT INTO payment_method_bindings (payment_method_binding_id,billing_connection_id, \
-             workspace_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,status) \
-             SELECT $1,$2,workspace_id,workspace_id,customer_plan_id,'CARD',$3,'ACTIVE' \
-             FROM billing_checkouts WHERE checkout_id=$4 AND workspace_id=$5",
+             account_id,customer_id,customer_plan_id,payment_method,provider_payment_method_reference,status) \
+             SELECT $1,$2,account_id,account_id,customer_plan_id,'CARD',$3,'ACTIVE' \
+             FROM billing_checkouts WHERE checkout_id=$4 AND account_id=$5",
         )
         .bind(binding_id)
         .bind(connection_id)
         .bind(placeholder)
         .bind(checkout_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .execute(&mut *transaction)
         .await?;
         sqlx::query(
@@ -437,7 +437,7 @@ impl DatabaseRepository {
             .ok_or_else(|| ApiError::unexpected("zero-price checkout requires a coupon"))?;
         let mut transaction = self.pool().begin().await?;
         let wallet =
-            super::credits::lock_active_customer_wallet(&mut transaction, record.workspace_id)
+            super::credits::lock_active_customer_wallet(&mut transaction, record.account_id)
                 .await?;
         let completed: bool = sqlx::query_scalar("SELECT completed_without_payment FROM billing_checkouts WHERE checkout_id=$1 FOR UPDATE")
             .bind(record.checkout_id).fetch_one(&mut *transaction).await?;
@@ -448,7 +448,7 @@ impl DatabaseRepository {
         let terms = lock_free_checkout_terms(&mut transaction, record).await?;
         let coupon = lock_coupon_discount(
             &mut transaction,
-            record.workspace_id,
+            record.account_id,
             record.checkout_kind,
             code,
             terms.base_amount_minor,
@@ -471,14 +471,14 @@ impl DatabaseRepository {
                         .await?;
                 super::plan_writes::ensure_recurring_credit_enabled(
                     &mut transaction,
-                    record.workspace_id,
+                    record.account_id,
                     &plan,
                 )
                 .await?;
                 let cycle = super::plan_writes::activate_customer_plan(
                     &mut transaction,
                     &wallet,
-                    record.workspace_id,
+                    record.account_id,
                     record.customer_plan_id,
                     &plan,
                     terms.scheduled_at,
@@ -494,7 +494,7 @@ impl DatabaseRepository {
             }
             CheckoutKind::OnDemand => {
                 let grant = super::billing_on_demand_confirmation::OnDemandCreditGrant {
-                    workspace_id: record.workspace_id,
+                    account_id: record.account_id,
                     on_demand_plan_id: terms.on_demand_plan_id,
                     plan_version_id: terms.plan_version_id,
                     granted_credit_units: terms.credit_units,
@@ -522,7 +522,7 @@ impl DatabaseRepository {
         }
         store_free_coupon_redemption(
             &mut transaction,
-            record.workspace_id,
+            record.account_id,
             record.checkout_id,
             record.checkout_kind,
             &coupon,
@@ -535,7 +535,7 @@ impl DatabaseRepository {
     pub async fn checkout_credit_units(&self, record: &CheckoutRecord) -> ApiResult<i64> {
         let credits = match record.checkout_kind {
             CheckoutKind::Initial => sqlx::query_scalar("SELECT p.granted_credit_units FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) WHERE cp.customer_plan_id=$1 AND cp.customer_id=$2")
-                .bind(record.customer_plan_id).bind(record.workspace_id).fetch_optional(&self.pool()).await?,
+                .bind(record.customer_plan_id).bind(record.account_id).fetch_optional(&self.pool()).await?,
             CheckoutKind::OnDemand => sqlx::query_scalar("SELECT od.credit_units FROM on_demand_plans od WHERE od.on_demand_plan_id=$1")
                 .bind(record.on_demand_plan_id).fetch_optional(&self.pool()).await?,
             CheckoutKind::PlanUpgrade => sqlx::query_scalar("SELECT granted_credit_units FROM customer_plan_transitions WHERE customer_plan_id=$1 AND new_plan_version_id=$2 ORDER BY created_at DESC LIMIT 1")
@@ -554,17 +554,17 @@ impl DatabaseRepository {
 
     pub async fn quote_checkout(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         request: &crate::dto::checkouts::CheckoutQuoteRequest,
     ) -> ApiResult<crate::dto::checkouts::CheckoutQuoteResponse> {
-        let terms = quote_terms(self, workspace_id, request).await?;
+        let terms = quote_terms(self, account_id, request).await?;
         let coupon = sqlx::query("SELECT * FROM coupons WHERE code=$1 FOR SHARE")
             .bind(request.coupon_code.trim().to_ascii_uppercase())
             .fetch_optional(&self.pool())
             .await?
             .ok_or_else(|| ApiError::not_found("coupon_not_found", "coupon code does not exist"))?;
         let coupon_id: Uuid = coupon.get("coupon_id");
-        validate_coupon_for_quote(&self.pool(), &coupon, workspace_id, request, terms.1).await?;
+        validate_coupon_for_quote(&self.pool(), &coupon, account_id, request, terms.1).await?;
         let discount = calculate_discount(
             terms.0,
             coupon.get("discount_kind"),
@@ -596,20 +596,20 @@ impl DatabaseRepository {
 
     pub async fn claim_checkout(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         key: &str,
         request: &CreateCheckoutRequest,
         request_hash: &str,
     ) -> ApiResult<CheckoutClaim> {
         let mut transaction = self.pool().begin().await?;
-        lock_checkout_key(&mut transaction, workspace_id, key).await?;
-        let record = match find_by_key(&mut transaction, workspace_id, key).await? {
+        lock_checkout_key(&mut transaction, account_id, key).await?;
+        let record = match find_by_key(&mut transaction, account_id, key).await? {
             Some(record) => {
                 validate_same_request(&record, request_hash)?;
                 record
             }
             None => {
-                insert_checkout(&mut transaction, workspace_id, key, request, request_hash).await?
+                insert_checkout(&mut transaction, account_id, key, request, request_hash).await?
             }
         };
         if record.collection_request_id.is_some() || record.completed_without_payment {
@@ -663,13 +663,13 @@ impl DatabaseRepository {
     pub async fn checkout(
         &self,
         checkout_id: Uuid,
-        workspace_id: Option<Uuid>,
+        account_id: Option<Uuid>,
     ) -> ApiResult<CheckoutRecord> {
         let row = sqlx::query(
-            "SELECT * FROM billing_checkouts WHERE checkout_id=$1 AND ($2::uuid IS NULL OR workspace_id=$2)",
+            "SELECT * FROM billing_checkouts WHERE checkout_id=$1 AND ($2::uuid IS NULL OR account_id=$2)",
         )
         .bind(checkout_id)
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&self.pool())
         .await?
         .ok_or_else(|| ApiError::not_found("checkout_not_found", format!("checkout {checkout_id} does not exist")))?;
@@ -712,7 +712,7 @@ impl DatabaseRepository {
 
 pub struct HostedCheckoutConfirmation {
     pub collection_request_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub amount_minor: i64,
     pub currency: String,
 }
@@ -732,9 +732,9 @@ async fn lock_free_checkout_terms(
 ) -> ApiResult<FreeCheckoutTerms> {
     let row = match record.checkout_kind {
         CheckoutKind::Initial => sqlx::query("SELECT cp.plan_version_id,p.price_amount_minor,p.currency,p.granted_credit_units,statement_timestamp() scheduled_at FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) WHERE cp.customer_plan_id=$1 AND cp.customer_id=$2 AND cp.commercial_status='ACTIVE' AND cp.activation_status='PENDING_INITIAL_PAYMENT' AND p.commercial_model='PAID' AND p.revoked_at IS NULL FOR UPDATE OF cp,p")
-            .bind(record.customer_plan_id).bind(record.workspace_id).fetch_optional(&mut **transaction).await?,
+            .bind(record.customer_plan_id).bind(record.account_id).fetch_optional(&mut **transaction).await?,
         CheckoutKind::OnDemand => sqlx::query("SELECT cp.plan_version_id,od.on_demand_plan_id,od.price_amount_minor,od.currency,od.credit_units granted_credit_units,statement_timestamp() scheduled_at FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) JOIN on_demand_plans od USING(subscription_id) WHERE cp.customer_plan_id=$1 AND cp.customer_id=$2 AND od.on_demand_plan_id=$3 AND cp.commercial_status IN ('ACTIVE','ACTIVE_PAID') AND cp.activation_status='ACTIVATED' AND cp.renewal_status='CURRENT' AND p.revoked_at IS NULL AND od.revoked_at IS NULL FOR UPDATE OF cp,p,od")
-            .bind(record.customer_plan_id).bind(record.workspace_id).bind(record.on_demand_plan_id).fetch_optional(&mut **transaction).await?,
+            .bind(record.customer_plan_id).bind(record.account_id).bind(record.on_demand_plan_id).fetch_optional(&mut **transaction).await?,
         CheckoutKind::PlanUpgrade => return Err(ApiError::unexpected("plan upgrade checkout cannot be completed without payment")),
     }.ok_or_else(|| ApiError::conflict("checkout_not_eligible", format!("customer plan {} is not eligible for free checkout",record.customer_plan_id)))?;
     Ok(FreeCheckoutTerms {
@@ -749,7 +749,7 @@ async fn lock_free_checkout_terms(
 
 async fn quote_terms(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     request: &crate::dto::checkouts::CheckoutQuoteRequest,
 ) -> ApiResult<(i64, bool, String, i64)> {
     let row = match request.checkout_kind {
@@ -758,12 +758,12 @@ async fn quote_terms(
                 return Err(invalid_quote_shape(request));
             }
             sqlx::query("SELECT p.price_amount_minor amount_minor,p.currency,p.granted_credit_units FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) WHERE cp.customer_plan_id=$1 AND cp.customer_id=$2 AND cp.commercial_status='ACTIVE' AND cp.activation_status='PENDING_INITIAL_PAYMENT' AND p.commercial_model='PAID' AND p.revoked_at IS NULL")
-                .bind(request.customer_plan_id).bind(workspace_id).fetch_optional(&repository.pool()).await?
+                .bind(request.customer_plan_id).bind(account_id).fetch_optional(&repository.pool()).await?
         }
         CheckoutKind::OnDemand => {
             let Some(plan_id) = request.on_demand_plan_id else { return Err(invalid_quote_shape(request)); };
             sqlx::query("SELECT od.price_amount_minor amount_minor,od.currency,od.credit_units granted_credit_units FROM customer_plans cp JOIN subscription_plan_versions p USING(plan_version_id) JOIN on_demand_plans od USING(subscription_id) WHERE cp.customer_plan_id=$1 AND cp.customer_id=$2 AND od.on_demand_plan_id=$3 AND cp.commercial_status IN ('ACTIVE','ACTIVE_PAID') AND cp.activation_status='ACTIVATED' AND cp.renewal_status='CURRENT' AND p.revoked_at IS NULL AND od.revoked_at IS NULL")
-                .bind(request.customer_plan_id).bind(workspace_id).bind(plan_id).fetch_optional(&repository.pool()).await?
+                .bind(request.customer_plan_id).bind(account_id).bind(plan_id).fetch_optional(&repository.pool()).await?
         }
         CheckoutKind::PlanUpgrade => return Err(invalid_quote_shape(request)),
     }.ok_or_else(|| ApiError::conflict("checkout_quote_not_eligible", format!("customer plan {} is not eligible for {:?} checkout",request.customer_plan_id,request.checkout_kind)))?;
@@ -803,7 +803,7 @@ async fn quote_terms(
 async fn validate_coupon_for_quote(
     pool: &sqlx::PgPool,
     coupon: &sqlx::postgres::PgRow,
-    workspace_id: Uuid,
+    account_id: Uuid,
     request: &crate::dto::checkouts::CheckoutQuoteRequest,
     initial: bool,
 ) -> ApiResult<()> {
@@ -831,8 +831,8 @@ async fn validate_coupon_for_quote(
     }
     let total: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM coupon_checkout_reservations WHERE coupon_id=$1 AND status IN ('COMPLETED','RESERVED')")
         .bind(id).fetch_one(pool).await?;
-    let local: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM coupon_checkout_reservations WHERE coupon_id=$1 AND workspace_id=$2 AND status IN ('COMPLETED','RESERVED')")
-        .bind(id).bind(workspace_id).fetch_one(pool).await?;
+    let local: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM coupon_checkout_reservations WHERE coupon_id=$1 AND account_id=$2 AND status IN ('COMPLETED','RESERVED')")
+        .bind(id).bind(account_id).fetch_one(pool).await?;
     if coupon
         .get::<Option<i64>, _>("max_total_uses")
         .is_some_and(|limit| total >= limit)
@@ -843,12 +843,12 @@ async fn validate_coupon_for_quote(
         ));
     }
     if coupon
-        .get::<Option<i64>, _>("max_uses_per_workspace")
+        .get::<Option<i64>, _>("max_uses_per_account")
         .is_some_and(|limit| local >= limit)
     {
         return Err(ApiError::conflict(
             "coupon_usage_limit_reached",
-            format!("coupon {id} workspace usage limit reached"),
+            format!("coupon {id} account usage limit reached"),
         ));
     }
     Ok(())
@@ -895,11 +895,11 @@ fn invalid_quote_shape(request: &crate::dto::checkouts::CheckoutQuoteRequest) ->
 
 async fn lock_checkout_key(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-        .bind(format!("checkout:{workspace_id}:{key}"))
+        .bind(format!("checkout:{account_id}:{key}"))
         .execute(&mut **transaction)
         .await?;
     Ok(())
@@ -907,13 +907,13 @@ async fn lock_checkout_key(
 
 async fn find_by_key(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
 ) -> Result<Option<CheckoutRecord>, sqlx::Error> {
     Ok(sqlx::query(
-        "SELECT * FROM billing_checkouts WHERE workspace_id=$1 AND idempotency_key=$2 FOR UPDATE",
+        "SELECT * FROM billing_checkouts WHERE account_id=$1 AND idempotency_key=$2 FOR UPDATE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(key)
     .fetch_optional(&mut **transaction)
     .await?
@@ -923,19 +923,19 @@ async fn find_by_key(
 
 async fn insert_checkout(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     key: &str,
     request: &CreateCheckoutRequest,
     request_hash: &str,
 ) -> ApiResult<CheckoutRecord> {
     let row = sqlx::query(
-        "INSERT INTO billing_checkouts (checkout_id,workspace_id,customer_plan_id,checkout_kind, \
+        "INSERT INTO billing_checkouts (checkout_id,account_id,customer_plan_id,checkout_kind, \
          on_demand_plan_id,target_plan_version_id,transaction_id,idempotency_key,request_sha256,coupon_code,payment_method_binding_id, \
          credit_quantity,success_url,cancel_url) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *",
     )
     .bind(Uuid::new_v4())
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(request.customer_plan_id)
     .bind(checkout_kind_text(request.checkout_kind))
     .bind(request.on_demand_plan_id)
@@ -986,7 +986,7 @@ fn validate_same_request(record: &CheckoutRecord, request_hash: &str) -> ApiResu
 fn checkout_from_row(row: &sqlx::postgres::PgRow) -> CheckoutRecord {
     CheckoutRecord {
         checkout_id: row.get("checkout_id"),
-        workspace_id: row.get("workspace_id"),
+        account_id: row.get("account_id"),
         customer_plan_id: row.get("customer_plan_id"),
         checkout_kind: match row.get::<String, _>("checkout_kind").as_str() {
             "INITIAL" => CheckoutKind::Initial,

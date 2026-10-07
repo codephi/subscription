@@ -29,8 +29,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reconcile_item_usage))
 }
 
-#[utoipa::path(post, path = "/v1/workspaces/{workspace_id}/usage-events", tag = "Usage",
-    params(("workspace_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/usage-events", tag = "Usage",
+    params(("account_id" = Uuid, Path), ("Idempotency-Key" = String, Header)),
     request_body = CreateUsageEventRequest,
     responses(
         (status = 201, body = UsageEventResponse),
@@ -40,7 +40,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ))]
 async fn create_usage_event(
     State(state): State<AppState>,
-    Path(workspace_id): Path<Uuid>,
+    Path(account_id): Path<Uuid>,
     headers: HeaderMap,
     Json(request): Json<CreateUsageEventRequest>,
 ) -> ApiResult<(StatusCode, Json<UsageEventResponse>)> {
@@ -53,73 +53,73 @@ async fn create_usage_event(
                 "Idempotency-Key header must contain visible ASCII",
             )
         })?;
-    let response = usage::record_usage(&state.database(), workspace_id, key, request).await?;
+    let response = usage::record_usage(&state.database(), account_id, key, request).await?;
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/products/{product_id}/eligibility", tag = "Usage",
-    params(("workspace_id" = Uuid, Path), ("product_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/products/{product_id}/eligibility", tag = "Usage",
+    params(("account_id" = Uuid, Path), ("product_id" = Uuid, Path)),
     responses((status = 200, body = ProductEligibilityResponse), (status = 404, body = ErrorResponse),
-        (status = 409, body = ErrorResponse, description = "Workspace is inactive or has unresolved event gaps"),
+        (status = 409, body = ErrorResponse, description = "Account is inactive or has unresolved event gaps"),
         (status = 503, body = ErrorResponse, description = "Wallet hierarchy is not provisioned for the current scope")))]
 async fn get_product_eligibility(
     State(state): State<AppState>,
-    Path((workspace_id, product_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, product_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<ProductEligibilityResponse>> {
     Ok(Json(
-        usage::eligibility(&state.database(), workspace_id, product_id).await?,
+        usage::eligibility(&state.database(), account_id, product_id).await?,
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet", tag = "Usage",
-    params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/items/{item_id}/item-wallet", tag = "Usage",
+    params(("account_id" = Uuid, Path), ("item_id" = Uuid, Path)),
     responses((status = 200, body = ItemWalletMeterResponse), (status = 503, body = ErrorResponse)))]
 async fn get_item_meter(
     State(state): State<AppState>,
-    Path((workspace_id, item_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, item_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<ItemWalletMeterResponse>> {
     Ok(Json(
-        usage::item_meter(&state.database(), workspace_id, item_id).await?,
+        usage::item_meter(&state.database(), account_id, item_id).await?,
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement", tag = "Usage",
-    params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path), ItemStatementQuery),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement", tag = "Usage",
+    params(("account_id" = Uuid, Path), ("item_id" = Uuid, Path), ItemStatementQuery),
     responses((status = 200, body = ItemWalletStatementResponse), (status = 422, body = ErrorResponse)))]
 async fn get_item_statement(
     State(state): State<AppState>,
-    Path((workspace_id, item_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, item_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<ItemStatementQuery>,
 ) -> ApiResult<Json<ItemWalletStatementResponse>> {
     Ok(Json(
-        usage::item_statement(&state.database(), workspace_id, item_id, query).await?,
+        usage::item_statement(&state.database(), account_id, item_id, query).await?,
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/statement/{entry_id}", tag = "Usage",
-    params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path), ("entry_id" = Uuid, Path)),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement/{entry_id}", tag = "Usage",
+    params(("account_id" = Uuid, Path), ("item_id" = Uuid, Path), ("entry_id" = Uuid, Path)),
     responses((status = 200, body = ItemWalletEntryResponse), (status = 404, body = ErrorResponse)))]
 async fn get_item_statement_entry(
     State(state): State<AppState>,
-    Path((workspace_id, item_id, entry_id)): Path<(Uuid, Uuid, Uuid)>,
+    Path((account_id, item_id, entry_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> ApiResult<Json<ItemWalletEntryResponse>> {
     Ok(Json(
-        usage::item_statement_entry(&state.database(), workspace_id, item_id, entry_id).await?,
+        usage::item_statement_entry(&state.database(), account_id, item_id, entry_id).await?,
     ))
 }
 
-#[utoipa::path(get, path = "/v1/workspaces/{workspace_id}/items/{item_id}/item-wallet/pricing-accumulators", tag = "Usage",
-    params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path), PricingAccumulatorQuery),
+#[utoipa::path(get, path = "/v1/accounts/{account_id}/items/{item_id}/item-wallet/pricing-accumulators", tag = "Usage",
+    params(("account_id" = Uuid, Path), ("item_id" = Uuid, Path), PricingAccumulatorQuery),
     responses((status = 200, body = [PricingAccumulatorResponse])))]
 async fn get_pricing_accumulators(
     State(state): State<AppState>,
-    Path((workspace_id, item_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, item_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<PricingAccumulatorQuery>,
 ) -> ApiResult<Json<Vec<PricingAccumulatorResponse>>> {
     Ok(Json(
         usage::pricing_accumulators(
             &state.database(),
-            workspace_id,
+            account_id,
             item_id,
             query.price_version_id,
         )
@@ -127,14 +127,14 @@ async fn get_pricing_accumulators(
     ))
 }
 
-#[utoipa::path(post, path = "/v1/admin/workspaces/{workspace_id}/items/{item_id}/usage/reconcile", tag = "Operations",
-    params(("workspace_id" = Uuid, Path), ("item_id" = Uuid, Path)),
+#[utoipa::path(post, path = "/v1/admin/accounts/{account_id}/items/{item_id}/usage/reconcile", tag = "Operations",
+    params(("account_id" = Uuid, Path), ("item_id" = Uuid, Path)),
     responses((status = 200, body = UsageReconciliationResponse), (status = 503, body = ErrorResponse)))]
 async fn reconcile_item_usage(
     State(state): State<AppState>,
-    Path((workspace_id, item_id)): Path<(Uuid, Uuid)>,
+    Path((account_id, item_id)): Path<(Uuid, Uuid)>,
 ) -> ApiResult<Json<UsageReconciliationResponse>> {
     Ok(Json(
-        usage::reconcile_item(&state.database(), workspace_id, item_id).await?,
+        usage::reconcile_item(&state.database(), account_id, item_id).await?,
     ))
 }

@@ -35,21 +35,21 @@ impl DatabaseRepository {
         let valid_from = body["valid_from"].as_str().map(parse_time).transpose()?;
         let valid_until = body["valid_until"].as_str().map(parse_time).transpose()?;
         let max_total = body["max_total_uses"].as_i64();
-        let max_workspace = body["max_uses_per_workspace"].as_i64();
+        let max_account = body["max_uses_per_account"].as_i64();
         match kind {
             "VOUCHER" => {
-                sqlx::query("INSERT INTO vouchers (voucher_id,code,name,description,credit_units,valid_from,valid_until,max_total_uses,max_uses_per_workspace) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
+                sqlx::query("INSERT INTO vouchers (voucher_id,code,name,description,credit_units,valid_from,valid_until,max_total_uses,max_uses_per_account) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
                     .bind(id).bind(&code).bind(&name).bind(description).bind(json_i64(&body["credit_units"]))
-                    .bind(valid_from).bind(valid_until).bind(max_total).bind(max_workspace)
+                    .bind(valid_from).bind(valid_until).bind(max_total).bind(max_account)
                     .execute(&mut *transaction).await?;
             }
             "COUPON" => {
-                sqlx::query("INSERT INTO coupons (coupon_id,code,name,description,discount_kind,discount_value,currency,applies_to_initial,applies_to_on_demand,valid_from,valid_until,max_total_uses,max_uses_per_workspace) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+                sqlx::query("INSERT INTO coupons (coupon_id,code,name,description,discount_kind,discount_value,currency,applies_to_initial,applies_to_on_demand,valid_from,valid_until,max_total_uses,max_uses_per_account) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
                     .bind(id).bind(&code).bind(&name).bind(description).bind(body["discount_kind"].as_str())
                     .bind(body["discount_value"].as_i64()).bind(body["currency"].as_str())
                     .bind(body["applies_to_initial"].as_bool().unwrap_or(false))
                     .bind(body["applies_to_on_demand"].as_bool().unwrap_or(false))
-                    .bind(valid_from).bind(valid_until).bind(max_total).bind(max_workspace)
+                    .bind(valid_from).bind(valid_until).bind(max_total).bind(max_account)
                     .execute(&mut *transaction).await?;
             }
             _ => return Err(invalid_kind(kind)),
@@ -148,15 +148,15 @@ impl DatabaseRepository {
             .get("max_total_uses")
             .filter(|v| !v.is_null())
             .and_then(Value::as_i64);
-        let max_workspace = body
-            .get("max_uses_per_workspace")
+        let max_account = body
+            .get("max_uses_per_account")
             .filter(|v| !v.is_null())
             .and_then(Value::as_i64);
         validate_editable_status(status, &before)?;
-        validate_usage_limits(&mut transaction, kind, id, max_total, max_workspace).await?;
+        validate_usage_limits(&mut transaction, kind, id, max_total, max_account).await?;
         let table = table_for(kind)?;
         let statement = format!(
-            "UPDATE {table} SET status=$2,valid_from=$3,valid_until=$4,max_total_uses=$5,max_uses_per_workspace=$6,version=version+1 WHERE {}=$1 AND version=$7 RETURNING version",
+            "UPDATE {table} SET status=$2,valid_from=$3,valid_until=$4,max_total_uses=$5,max_uses_per_account=$6,version=version+1 WHERE {}=$1 AND version=$7 RETURNING version",
             id_column(kind)?
         );
         let version = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(statement))
@@ -165,7 +165,7 @@ impl DatabaseRepository {
             .bind(valid_from)
             .bind(valid_until)
             .bind(max_total)
-            .bind(max_workspace)
+            .bind(max_account)
             .bind(expected)
             .fetch_optional(&mut *transaction)
             .await?
@@ -218,16 +218,16 @@ impl DatabaseRepository {
 
     pub async fn redeem_voucher(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         key: &str,
         hash: &str,
         request: &RedeemVoucherRequest,
     ) -> ApiResult<VoucherRedemptionResponse> {
         let mut transaction = self.pool().begin().await?;
-        let wallet = lock_active_customer_wallet(&mut transaction, workspace_id).await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, account_id).await?;
         reserve_idempotency(
             &mut transaction,
-            workspace_id,
+            account_id,
             key,
             hash,
             "VOUCHER_REDEMPTION",
@@ -235,7 +235,7 @@ impl DatabaseRepository {
         .await?;
         reserve_transaction(
             &mut transaction,
-            workspace_id,
+            account_id,
             &request.transaction_id,
             "VOUCHER_REDEMPTION",
         )
@@ -250,7 +250,7 @@ impl DatabaseRepository {
             &mut transaction,
             "VOUCHER",
             voucher_id,
-            workspace_id,
+            account_id,
             &voucher,
         )
         .await?;
@@ -259,20 +259,20 @@ impl DatabaseRepository {
         let lot_id = Uuid::new_v4();
         let redemption_id = Uuid::new_v4();
         let entry = sqlx::query("INSERT INTO customer_wallet_entries (customer_wallet_entry_id,customer_wallet_id,customer_id,entry_sequence,entry_type,source_channel,signed_credit_units,balance_before_credit_units,balance_after_credit_units,transaction_id,description,metadata,request_id) VALUES ($1,$2,$3,$4,'VOUCHER_CREDIT','voucher',$5,$6,$7,$8,$9,$10,$11) RETURNING *")
-            .bind(entry_id).bind(wallet.wallet_id).bind(workspace_id).bind(wallet.next_sequence).bind(units)
+            .bind(entry_id).bind(wallet.wallet_id).bind(account_id).bind(wallet.next_sequence).bind(units)
             .bind(wallet.balance.value()).bind(new_balance.value()).bind(&request.transaction_id)
             .bind(request.description.as_deref()).bind(json!({"voucher_id":voucher_id})).bind(Uuid::new_v4())
             .fetch_one(&mut *transaction).await?;
         sqlx::query("INSERT INTO credit_lots (credit_lot_id,customer_id,granting_entry_id,source_kind,original_credit_units,remaining_credit_units) VALUES ($1,$2,$3,'VOUCHER',$4,$4)")
-            .bind(lot_id).bind(workspace_id).bind(entry_id).bind(units).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO voucher_redemptions (voucher_redemption_id,voucher_id,workspace_id,transaction_id,customer_wallet_entry_id,credit_lot_id,credit_units) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-            .bind(redemption_id).bind(voucher_id).bind(workspace_id).bind(&request.transaction_id).bind(entry_id).bind(lot_id).bind(units)
+            .bind(lot_id).bind(account_id).bind(entry_id).bind(units).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO voucher_redemptions (voucher_redemption_id,voucher_id,account_id,transaction_id,customer_wallet_entry_id,credit_lot_id,credit_units) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+            .bind(redemption_id).bind(voucher_id).bind(account_id).bind(&request.transaction_id).bind(entry_id).bind(lot_id).bind(units)
             .execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO wallet_transaction_references (wallet_transaction_reference_id,customer_wallet_entry_id,reference_kind,voucher_id) VALUES ($1,$2,'VOUCHER',$3)")
             .bind(Uuid::new_v4()).bind(entry_id).bind(voucher_id).execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO wallet_transaction_references (wallet_transaction_reference_id,customer_wallet_entry_id,reference_kind,credit_lot_id) VALUES ($1,$2,'CREDIT_LOT',$3)")
             .bind(Uuid::new_v4()).bind(entry_id).bind(lot_id).execute(&mut *transaction).await?;
-        increment_usage(&mut transaction, "VOUCHER", voucher_id, workspace_id).await?;
+        increment_usage(&mut transaction, "VOUCHER", voucher_id, account_id).await?;
         super::credit_writes::update_wallet_balance(
             &mut transaction,
             wallet.wallet_id,
@@ -281,7 +281,7 @@ impl DatabaseRepository {
         .await?;
         super::credit_writes::insert_credit_outbox(
             &mut transaction,
-            workspace_id,
+            account_id,
             wallet.wallet_id,
             wallet.next_sequence,
             entry_id,
@@ -290,14 +290,14 @@ impl DatabaseRepository {
         .await?;
         super::credit_writes::complete_reservations(
             &mut transaction,
-            workspace_id,
+            account_id,
             key,
             &request.transaction_id,
             redemption_id,
         )
         .await?;
-        sqlx::query("INSERT INTO audit_events (audit_event_id,workspace_id,action,resource_kind,resource_id,correlation_id,details) VALUES ($1,$2,'voucher.redeemed','voucher',$3,$4,$5)")
-            .bind(Uuid::new_v4()).bind(workspace_id).bind(voucher_id).bind(Uuid::new_v4())
+        sqlx::query("INSERT INTO audit_events (audit_event_id,account_id,action,resource_kind,resource_id,correlation_id,details) VALUES ($1,$2,'voucher.redeemed','voucher',$3,$4,$5)")
+            .bind(Uuid::new_v4()).bind(account_id).bind(voucher_id).bind(Uuid::new_v4())
             .bind(json!({"voucher_redemption_id":redemption_id,"customer_wallet_entry_id":entry_id,"transaction_id":request.transaction_id}))
             .execute(&mut *transaction).await?;
         transaction.commit().await?;
@@ -306,7 +306,7 @@ impl DatabaseRepository {
         Ok(VoucherRedemptionResponse {
             voucher_redemption_id: redemption_id,
             voucher_id,
-            workspace_id,
+            account_id,
             credit_units: CreditUnits::new(units),
             entry: entry_from_row(&entry, references),
             created_at,
@@ -318,11 +318,11 @@ async fn enforce_limits(
     transaction: &mut Transaction<'_, Postgres>,
     kind: &str,
     id: Uuid,
-    workspace_id: Uuid,
+    account_id: Uuid,
     promotion: &sqlx::postgres::PgRow,
 ) -> ApiResult<()> {
-    let (total_completed, total_reserved, workspace_completed, workspace_reserved) =
-        usage_totals(transaction, kind, id, workspace_id).await?;
+    let (total_completed, total_reserved, account_completed, account_reserved) =
+        usage_totals(transaction, kind, id, account_id).await?;
     check_limit(
         "total",
         promotion.get("max_total_uses"),
@@ -330,10 +330,10 @@ async fn enforce_limits(
         total_reserved,
     )?;
     check_limit(
-        "workspace",
-        promotion.get("max_uses_per_workspace"),
-        workspace_completed,
-        workspace_reserved,
+        "account",
+        promotion.get("max_uses_per_account"),
+        account_completed,
+        account_reserved,
     )
 }
 
@@ -341,7 +341,7 @@ async fn usage_totals(
     transaction: &mut Transaction<'_, Postgres>,
     kind: &str,
     id: Uuid,
-    workspace: Uuid,
+    account: Uuid,
 ) -> ApiResult<(i64, i64, i64, i64)> {
     if kind == "VOUCHER" {
         let all: i64 = sqlx::query_scalar(
@@ -350,11 +350,11 @@ async fn usage_totals(
         .bind(id)
         .fetch_one(&mut **transaction)
         .await?;
-        let local: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM voucher_redemptions WHERE voucher_id=$1 AND workspace_id=$2").bind(id).bind(workspace).fetch_one(&mut **transaction).await?;
+        let local: i64 = sqlx::query_scalar("SELECT count(*)::bigint FROM voucher_redemptions WHERE voucher_id=$1 AND account_id=$2").bind(id).bind(account).fetch_one(&mut **transaction).await?;
         Ok((all, 0, local, 0))
     } else {
         let total = sqlx::query("SELECT count(*) FILTER(WHERE status='COMPLETED')::bigint completed,count(*) FILTER(WHERE status='RESERVED')::bigint reserved FROM coupon_checkout_reservations WHERE coupon_id=$1").bind(id).fetch_one(&mut **transaction).await?;
-        let local = sqlx::query("SELECT count(*) FILTER(WHERE status='COMPLETED')::bigint completed,count(*) FILTER(WHERE status='RESERVED')::bigint reserved FROM coupon_checkout_reservations WHERE coupon_id=$1 AND workspace_id=$2").bind(id).bind(workspace).fetch_one(&mut **transaction).await?;
+        let local = sqlx::query("SELECT count(*) FILTER(WHERE status='COMPLETED')::bigint completed,count(*) FILTER(WHERE status='RESERVED')::bigint reserved FROM coupon_checkout_reservations WHERE coupon_id=$1 AND account_id=$2").bind(id).bind(account).fetch_one(&mut **transaction).await?;
         Ok((
             total.get("completed"),
             total.get("reserved"),
@@ -378,10 +378,10 @@ async fn increment_usage(
     transaction: &mut Transaction<'_, Postgres>,
     kind: &str,
     id: Uuid,
-    workspace: Uuid,
+    account: Uuid,
 ) -> ApiResult<()> {
-    sqlx::query("INSERT INTO promotion_usage_counters (promotion_kind,promotion_id,workspace_id,completed_uses) VALUES ($1,$2,$3,1) ON CONFLICT (promotion_kind,promotion_id,workspace_id) DO UPDATE SET completed_uses=promotion_usage_counters.completed_uses+1")
-        .bind(kind).bind(id).bind(workspace).execute(&mut **transaction).await?;
+    sqlx::query("INSERT INTO promotion_usage_counters (promotion_kind,promotion_id,account_id,completed_uses) VALUES ($1,$2,$3,1) ON CONFLICT (promotion_kind,promotion_id,account_id) DO UPDATE SET completed_uses=promotion_usage_counters.completed_uses+1")
+        .bind(kind).bind(id).bind(account).execute(&mut **transaction).await?;
     Ok(())
 }
 
@@ -408,7 +408,7 @@ async fn validate_usage_limits(
     kind: &str,
     id: Uuid,
     total: Option<i64>,
-    per_workspace: Option<i64>,
+    per_account: Option<i64>,
 ) -> ApiResult<()> {
     let (completed, reserved, local_max): (i64, i64, i64) = if kind == "VOUCHER" {
         let all: i64 = sqlx::query_scalar(
@@ -417,15 +417,15 @@ async fn validate_usage_limits(
         .bind(id)
         .fetch_one(&mut **transaction)
         .await?;
-        let local: i64 = sqlx::query_scalar("SELECT COALESCE(max(uses),0)::bigint FROM (SELECT count(*) uses FROM voucher_redemptions WHERE voucher_id=$1 GROUP BY workspace_id) counts").bind(id).fetch_one(&mut **transaction).await?;
+        let local: i64 = sqlx::query_scalar("SELECT COALESCE(max(uses),0)::bigint FROM (SELECT count(*) uses FROM voucher_redemptions WHERE voucher_id=$1 GROUP BY account_id) counts").bind(id).fetch_one(&mut **transaction).await?;
         (all, 0, local)
     } else {
         let row = sqlx::query("SELECT count(*) FILTER(WHERE status='COMPLETED')::bigint completed,count(*) FILTER(WHERE status='RESERVED')::bigint reserved FROM coupon_checkout_reservations WHERE coupon_id=$1").bind(id).fetch_one(&mut **transaction).await?;
-        let local: i64 = sqlx::query_scalar("SELECT COALESCE(max(uses),0)::bigint FROM (SELECT count(*) uses FROM coupon_checkout_reservations WHERE coupon_id=$1 GROUP BY workspace_id) counts").bind(id).fetch_one(&mut **transaction).await?;
+        let local: i64 = sqlx::query_scalar("SELECT COALESCE(max(uses),0)::bigint FROM (SELECT count(*) uses FROM coupon_checkout_reservations WHERE coupon_id=$1 GROUP BY account_id) counts").bind(id).fetch_one(&mut **transaction).await?;
         (row.get("completed"), row.get("reserved"), local)
     };
     if total.is_some_and(|limit| limit < completed + reserved)
-        || per_workspace.is_some_and(|limit| limit < local_max)
+        || per_account.is_some_and(|limit| limit < local_max)
     {
         return Err(ApiError::conflict(
             "promotion_limit_below_usage",
@@ -437,8 +437,8 @@ async fn validate_usage_limits(
 
 fn promotion_select(kind: &str) -> ApiResult<String> {
     Ok(match kind {
-        "VOUCHER" => "SELECT p.voucher_id promotion_id,'VOUCHER' promotion_kind,p.code,p.name,p.description,p.status,p.version,p.valid_from,p.valid_until,p.max_total_uses,p.max_uses_per_workspace,p.credit_units,NULL::text discount_kind,NULL::bigint discount_value,NULL::text currency,NULL::boolean applies_to_initial,NULL::boolean applies_to_on_demand,p.created_at,p.updated_at,COALESCE((SELECT count(*) FROM voucher_redemptions r WHERE r.voucher_id=p.voucher_id),0)::bigint completed_uses,0::bigint reserved_uses,CASE WHEN p.status<>'ACTIVE' THEN p.status WHEN p.valid_from>statement_timestamp() THEN 'NOT_STARTED' WHEN p.valid_until<=statement_timestamp() THEN 'EXPIRED' WHEN p.max_total_uses IS NOT NULL AND (SELECT count(*) FROM voucher_redemptions r WHERE r.voucher_id=p.voucher_id)>=p.max_total_uses THEN 'EXHAUSTED' ELSE 'AVAILABLE' END availability FROM (SELECT vouchers.*,voucher_id promotion_id FROM vouchers) p".to_string(),
-        "COUPON" => "SELECT p.coupon_id promotion_id,'COUPON' promotion_kind,p.code,p.name,p.description,p.status,p.version,p.valid_from,p.valid_until,p.max_total_uses,p.max_uses_per_workspace,NULL::bigint credit_units,p.discount_kind,p.discount_value,p.currency,p.applies_to_initial,p.applies_to_on_demand,p.created_at,p.updated_at,COALESCE((SELECT count(*) FROM coupon_checkout_reservations r WHERE r.coupon_id=p.coupon_id AND r.status='COMPLETED'),0)::bigint completed_uses,COALESCE((SELECT count(*) FROM coupon_checkout_reservations r WHERE r.coupon_id=p.coupon_id AND r.status='RESERVED'),0)::bigint reserved_uses,CASE WHEN p.status<>'ACTIVE' THEN p.status WHEN p.valid_from>statement_timestamp() THEN 'NOT_STARTED' WHEN p.valid_until<=statement_timestamp() THEN 'EXPIRED' WHEN p.max_total_uses IS NOT NULL AND (SELECT count(*) FROM coupon_checkout_reservations r WHERE r.coupon_id=p.coupon_id AND r.status IN ('COMPLETED','RESERVED'))>=p.max_total_uses THEN 'EXHAUSTED' ELSE 'AVAILABLE' END availability FROM (SELECT coupons.*,coupon_id promotion_id FROM coupons) p".to_string(),
+        "VOUCHER" => "SELECT p.voucher_id promotion_id,'VOUCHER' promotion_kind,p.code,p.name,p.description,p.status,p.version,p.valid_from,p.valid_until,p.max_total_uses,p.max_uses_per_account,p.credit_units,NULL::text discount_kind,NULL::bigint discount_value,NULL::text currency,NULL::boolean applies_to_initial,NULL::boolean applies_to_on_demand,p.created_at,p.updated_at,COALESCE((SELECT count(*) FROM voucher_redemptions r WHERE r.voucher_id=p.voucher_id),0)::bigint completed_uses,0::bigint reserved_uses,CASE WHEN p.status<>'ACTIVE' THEN p.status WHEN p.valid_from>statement_timestamp() THEN 'NOT_STARTED' WHEN p.valid_until<=statement_timestamp() THEN 'EXPIRED' WHEN p.max_total_uses IS NOT NULL AND (SELECT count(*) FROM voucher_redemptions r WHERE r.voucher_id=p.voucher_id)>=p.max_total_uses THEN 'EXHAUSTED' ELSE 'AVAILABLE' END availability FROM (SELECT vouchers.*,voucher_id promotion_id FROM vouchers) p".to_string(),
+        "COUPON" => "SELECT p.coupon_id promotion_id,'COUPON' promotion_kind,p.code,p.name,p.description,p.status,p.version,p.valid_from,p.valid_until,p.max_total_uses,p.max_uses_per_account,NULL::bigint credit_units,p.discount_kind,p.discount_value,p.currency,p.applies_to_initial,p.applies_to_on_demand,p.created_at,p.updated_at,COALESCE((SELECT count(*) FROM coupon_checkout_reservations r WHERE r.coupon_id=p.coupon_id AND r.status='COMPLETED'),0)::bigint completed_uses,COALESCE((SELECT count(*) FROM coupon_checkout_reservations r WHERE r.coupon_id=p.coupon_id AND r.status='RESERVED'),0)::bigint reserved_uses,CASE WHEN p.status<>'ACTIVE' THEN p.status WHEN p.valid_from>statement_timestamp() THEN 'NOT_STARTED' WHEN p.valid_until<=statement_timestamp() THEN 'EXPIRED' WHEN p.max_total_uses IS NOT NULL AND (SELECT count(*) FROM coupon_checkout_reservations r WHERE r.coupon_id=p.coupon_id AND r.status IN ('COMPLETED','RESERVED'))>=p.max_total_uses THEN 'EXHAUSTED' ELSE 'AVAILABLE' END availability FROM (SELECT coupons.*,coupon_id promotion_id FROM coupons) p".to_string(),
         _ => return Err(invalid_kind(kind)),
     })
 }
@@ -455,7 +455,7 @@ fn promotion_from_row(row: &sqlx::postgres::PgRow) -> PromotionResponse {
         valid_from: row.get("valid_from"),
         valid_until: row.get("valid_until"),
         max_total_uses: row.get("max_total_uses"),
-        max_uses_per_workspace: row.get("max_uses_per_workspace"),
+        max_uses_per_account: row.get("max_uses_per_account"),
         completed_uses: row.get("completed_uses"),
         reserved_uses: row.get("reserved_uses"),
         availability: row.get("availability"),

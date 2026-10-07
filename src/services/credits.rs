@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     dto::credits::{
+        AccountBillingConfigResponse, AccountTransactionResponse,
         CreditLedgerReconciliationResponse, CustomerWalletStatementResponse, DirectCreditRequest,
-        DirectCreditResponse, StatementQuery, UpdateWorkspaceBillingConfigRequest,
-        WorkspaceBillingConfigResponse, WorkspaceTransactionResponse,
+        DirectCreditResponse, StatementQuery, UpdateAccountBillingConfigRequest,
     },
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
@@ -14,31 +14,31 @@ use crate::{
 
 pub async fn grant_direct_credit(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     idempotency_key: &str,
     request: DirectCreditRequest,
 ) -> ApiResult<DirectCreditResponse> {
     validate_direct_credit(idempotency_key, &request)?;
     let request_hash = canonical_request_hash(&request)?;
     repository
-        .insert_direct_credit(workspace_id, idempotency_key, &request_hash, &request)
+        .insert_direct_credit(account_id, idempotency_key, &request_hash, &request)
         .await
 }
 
 pub async fn find_transaction(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     transaction_id: &str,
-) -> ApiResult<WorkspaceTransactionResponse> {
+) -> ApiResult<AccountTransactionResponse> {
     validate_identifier("transaction_id", transaction_id)?;
     repository
-        .find_customer_wallet_transaction(workspace_id, transaction_id)
+        .find_customer_wallet_transaction(account_id, transaction_id)
         .await
 }
 
 pub async fn statement(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     query: StatementQuery,
 ) -> ApiResult<CustomerWalletStatementResponse> {
     let cursor = query.cursor.as_deref().map(parse_cursor).transpose()?;
@@ -50,32 +50,30 @@ pub async fn statement(
         ));
     }
     repository
-        .list_customer_wallet_entries(workspace_id, cursor, limit)
+        .list_customer_wallet_entries(account_id, cursor, limit)
         .await
 }
 
 pub async fn reconcile(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<CreditLedgerReconciliationResponse> {
-    repository.reconcile_credit_ledger(workspace_id).await
+    repository.reconcile_credit_ledger(account_id).await
 }
 
 pub async fn get_billing_config(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
-) -> ApiResult<WorkspaceBillingConfigResponse> {
-    repository.find_billing_config(workspace_id).await
+    account_id: Uuid,
+) -> ApiResult<AccountBillingConfigResponse> {
+    repository.find_billing_config(account_id).await
 }
 
 pub async fn update_billing_config(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
-    request: UpdateWorkspaceBillingConfigRequest,
-) -> ApiResult<WorkspaceBillingConfigResponse> {
-    repository
-        .update_billing_config(workspace_id, &request)
-        .await
+    account_id: Uuid,
+    request: UpdateAccountBillingConfigRequest,
+) -> ApiResult<AccountBillingConfigResponse> {
+    repository.update_billing_config(account_id, &request).await
 }
 
 fn validate_direct_credit(key: &str, request: &DirectCreditRequest) -> ApiResult<()> {

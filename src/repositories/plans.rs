@@ -183,7 +183,7 @@ impl DatabaseRepository {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn create_customer_plan(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         idempotency_key: &str,
         request_hash: &str,
         request: &CreateCustomerPlanRequest,
@@ -192,11 +192,11 @@ impl DatabaseRepository {
         period_end: Option<DateTime<Utc>>,
     ) -> ApiResult<CustomerPlanResponse> {
         let mut transaction = self.pool().begin().await?;
-        let wallet = lock_active_customer_wallet(&mut transaction, workspace_id).await?;
-        ensure_recurring_credit_enabled(&mut transaction, workspace_id, plan).await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, account_id).await?;
+        ensure_recurring_credit_enabled(&mut transaction, account_id, plan).await?;
         reserve_idempotency(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             request_hash,
             "CUSTOMER_PLAN_CREATE",
@@ -204,7 +204,7 @@ impl DatabaseRepository {
         .await?;
         reserve_transaction(
             &mut transaction,
-            workspace_id,
+            account_id,
             &request.transaction_id,
             "CUSTOMER_PLAN_CREATE",
         )
@@ -212,7 +212,7 @@ impl DatabaseRepository {
         lock_valid_plan(&mut transaction, plan.response.plan_version_id).await?;
         let evidence_id = super::admission::ensure_admission_evidence(
             &mut transaction,
-            workspace_id,
+            account_id,
             plan.response.plan_version_id,
         )
         .await?;
@@ -222,7 +222,7 @@ impl DatabaseRepository {
         let row = insert_customer_plan_row(
             &mut transaction,
             customer_plan_id,
-            workspace_id,
+            account_id,
             plan.response.plan_version_id,
             anchor_at,
             plan.response.commercial_model,
@@ -239,7 +239,7 @@ impl DatabaseRepository {
         .await?;
         reserve_active_slot(
             &mut transaction,
-            workspace_id,
+            account_id,
             plan.response.subscription_id,
             customer_plan_id,
         )
@@ -249,7 +249,7 @@ impl DatabaseRepository {
                 activate_customer_plan(
                     &mut transaction,
                     &wallet,
-                    workspace_id,
+                    account_id,
                     customer_plan_id,
                     plan,
                     anchor_at,
@@ -263,7 +263,7 @@ impl DatabaseRepository {
         };
         complete_reservations(
             &mut transaction,
-            workspace_id,
+            account_id,
             idempotency_key,
             &request.transaction_id,
             customer_plan_id,
@@ -283,13 +283,13 @@ impl DatabaseRepository {
 
     pub async fn find_customer_plan(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         customer_plan_id: Uuid,
     ) -> ApiResult<CustomerPlanResponse> {
         let row = sqlx::query(
             "SELECT * FROM customer_plans WHERE customer_id=$1 AND customer_plan_id=$2",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(customer_plan_id)
         .fetch_optional(&self.pool())
         .await?

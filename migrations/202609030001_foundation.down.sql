@@ -4,4 +4,4 @@ DROP TABLE idempotency_records;
 DROP TABLE outbox_events;
 DROP TABLE integration_inbox_quarantine;
 DROP TABLE integration_inbox;
-DROP TABLE workspace_projections;
+DROP TABLE account_projections;

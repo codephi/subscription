@@ -1,5 +1,5 @@
-CREATE TABLE workspace_billing_configs (
-  workspace_id uuid PRIMARY KEY REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+CREATE TABLE account_billing_configs (
+  account_id uuid PRIMARY KEY REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   direct_credit_enabled boolean NOT NULL DEFAULT true,
   recurring_credit_enabled boolean NOT NULL DEFAULT true,
   version bigint NOT NULL DEFAULT 1 CHECK (version >= 1),
@@ -7,8 +7,8 @@ CREATE TABLE workspace_billing_configs (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TRIGGER trg_workspace_billing_configs_updated_at
-BEFORE UPDATE ON workspace_billing_configs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_account_billing_configs_updated_at
+BEFORE UPDATE ON account_billing_configs FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE direct_credits (
   direct_credit_id uuid PRIMARY KEY,
@@ -103,6 +103,6 @@ CREATE TRIGGER trg_wallet_transaction_references_append_only
 BEFORE UPDATE OR DELETE ON wallet_transaction_references
 FOR EACH ROW EXECUTE FUNCTION reject_credit_history_mutation();
 
-INSERT INTO workspace_billing_configs (workspace_id)
-SELECT workspace_id FROM workspace_projections
+INSERT INTO account_billing_configs (account_id)
+SELECT account_id FROM account_projections
 ON CONFLICT DO NOTHING;

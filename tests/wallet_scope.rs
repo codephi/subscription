@@ -14,7 +14,7 @@ async fn scope_removal_and_reactivation_preserve_identity_pending_and_statement(
     let fixture = setup_usage(10, 1, 10).await;
     usage::record_usage(
         &fixture.repository,
-        fixture.workspace_id,
+        fixture.account_id,
         "pending-scope",
         usage_request(&fixture, "pending-scope", 6),
     )
@@ -63,7 +63,7 @@ async fn change_scope(fixture: &UsageFixture, status: CatalogStatus) {
     .unwrap();
     fixture
         .repository
-        .reconcile_wallets(fixture.workspace_id, Some("test:scope-change"))
+        .reconcile_wallets(fixture.account_id, Some("test:scope-change"))
         .await
         .unwrap();
 }

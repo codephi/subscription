@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub(super) struct OnDemandCreditGrant<'a> {
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub on_demand_plan_id: Option<Uuid>,
     pub plan_version_id: Uuid,
     pub granted_credit_units: i64,
@@ -34,14 +34,14 @@ pub(super) async fn grant_on_demand_credit(
     let entry_id = insert_credit_entry(
         transaction,
         wallet,
-        grant.workspace_id,
+        grant.account_id,
         grant.transaction_id,
         credit_units,
         balance_after.value(),
     )
     .await?;
     update_balance(transaction, wallet.wallet_id, balance_after.value()).await?;
-    let lot_id = insert_credit_lot(transaction, grant.workspace_id, entry_id, credit_units).await?;
+    let lot_id = insert_credit_lot(transaction, grant.account_id, entry_id, credit_units).await?;
     insert_references(
         transaction,
         entry_id,
@@ -52,7 +52,7 @@ pub(super) async fn grant_on_demand_credit(
     .await?;
     crate::repositories::credit_writes::insert_credit_outbox(
         transaction,
-        grant.workspace_id,
+        grant.account_id,
         wallet.wallet_id,
         wallet.next_sequence,
         entry_id,
@@ -92,7 +92,7 @@ fn validate_credit_snapshot(offer_id: Uuid, actual: i64, expected: i64) -> ApiRe
 async fn insert_credit_entry(
     transaction: &mut Transaction<'_, Postgres>,
     wallet: &LockedWallet,
-    workspace_id: Uuid,
+    account_id: Uuid,
     transaction_id: &str,
     credit_units: i64,
     balance_after: i64,
@@ -106,7 +106,7 @@ async fn insert_credit_entry(
     )
     .bind(entry_id)
     .bind(wallet.wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(wallet.next_sequence)
     .bind(credit_units)
     .bind(wallet.balance.value())
@@ -135,7 +135,7 @@ async fn update_balance(
 
 async fn insert_credit_lot(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     entry_id: Uuid,
     credit_units: i64,
 ) -> ApiResult<Uuid> {
@@ -145,7 +145,7 @@ async fn insert_credit_lot(
          original_credit_units,remaining_credit_units) VALUES ($1,$2,$3,'ON_DEMAND',$4,$4)",
     )
     .bind(lot_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(entry_id)
     .bind(credit_units)
     .execute(&mut **transaction)

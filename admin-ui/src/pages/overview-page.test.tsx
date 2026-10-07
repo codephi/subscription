@@ -18,7 +18,7 @@ vi.mock("@/api/billing-api", () => ({
 
 afterEach(() => vi.clearAllMocks());
 
-it("shows operational counters and a path to workspaces", async () => {
+it("shows operational counters and a path to accounts", async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -32,6 +32,6 @@ it("shows operational counters and a path to workspaces", async () => {
   expect(await screen.findByText("Cobranças pendentes")).toBeTruthy();
   expect(screen.getByText("Pagamentos não conciliados")).toBeTruthy();
   expect(
-    screen.getByRole("link", { name: /Abrir workspaces/ }).getAttribute("href"),
-  ).toBe("/workspaces");
+    screen.getByRole("link", { name: /Abrir accounts/ }).getAttribute("href"),
+  ).toBe("/accounts");
 });

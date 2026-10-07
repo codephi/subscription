@@ -34,7 +34,7 @@ CREATE TABLE external_refund_observations (
   external_refund_observation_id uuid PRIMARY KEY,
   billing_connection_id uuid NOT NULL
     REFERENCES billing_connections(billing_connection_id) ON DELETE RESTRICT,
-  workspace_id uuid NOT NULL REFERENCES workspace_projections(workspace_id) ON DELETE RESTRICT,
+  account_id uuid NOT NULL REFERENCES account_projections(account_id) ON DELETE RESTRICT,
   provider text NOT NULL,
   provider_event_id text NOT NULL,
   provider_payment_id text NOT NULL,

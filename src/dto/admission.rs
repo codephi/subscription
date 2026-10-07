@@ -39,7 +39,7 @@ pub struct AdmissionPolicyResponse {
 #[serde(deny_unknown_fields)]
 pub struct AdmissionEvidenceRequest {
     pub event_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub policy_version_id: Uuid,
     pub sequence: i64,
     pub verified_facts: Vec<AdmissionFact>,

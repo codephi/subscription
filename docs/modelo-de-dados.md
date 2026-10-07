@@ -20,13 +20,13 @@ erDiagram
     }
 ```
 
-### Workspace, integração e auditoria
+### Account, integração e auditoria
 
 ```mermaid
 erDiagram
     integration_inbox ||--o| integration_inbox_quarantine : quarentena
-    workspace_projections {
-        uuid workspace_id PK
+    account_projections {
+        uuid account_id PK
     }
     integration_inbox {
         uuid event_id PK
@@ -38,11 +38,11 @@ erDiagram
         uuid event_id PK
     }
     idempotency_records {
-        uuid workspace_id PK
+        uuid account_id PK
         text idempotency_key PK
     }
     transaction_reservations {
-        uuid workspace_id PK
+        uuid account_id PK
         text transaction_id PK
     }
     audit_events {
@@ -50,7 +50,7 @@ erDiagram
     }
 ```
 
-`integration_inbox_quarantine.event_id` referencia o evento recebido. `outbox_events`, `idempotency_records`, `transaction_reservations` e `audit_events` não têm FK para o workspace: o escopo é identificado pelo UUID recebido de Accounts. `workspace_projections.last_event_id` também não é FK para a inbox; é a identidade do último evento aplicado.
+`integration_inbox_quarantine.event_id` referencia o evento recebido. `outbox_events`, `idempotency_records`, `transaction_reservations` e `audit_events` não têm FK para o account: o escopo é identificado pelo UUID recebido de Accounts. `account_projections.last_event_id` também não é FK para a inbox; é a identidade do último evento aplicado.
 
 ### Catálogo e preços
 
@@ -135,13 +135,13 @@ erDiagram
     }
 ```
 
-`wallets.parent_customer_wallet_id` é autorreferência e deve apontar para a carteira do mesmo cliente do tipo `CUSTOMER`; a regra é validada por trigger. `wallets.customer_id` e `wallet_provisioning.customer_id` são identificadores externos de cliente/workspace, sem FK local. `item_wallets.pending_price_version_id` referencia `price_versions`; `last_usage_event_id` referencia `usage_events` (mostrado também no diagrama de consumo).
+`wallets.parent_customer_wallet_id` é autorreferência e deve apontar para a carteira do mesmo cliente do tipo `CUSTOMER`; a regra é validada por trigger. `wallets.customer_id` e `wallet_provisioning.customer_id` são identificadores externos de cliente/account, sem FK local. `item_wallets.pending_price_version_id` referencia `price_versions`; `last_usage_event_id` referencia `usage_events` (mostrado também no diagrama de consumo).
 
 ### Créditos e razão da carteira
 
 ```mermaid
 erDiagram
-    workspace_projections ||--o| workspace_billing_configs : configura
+    account_projections ||--o| account_billing_configs : configura
     customer_wallets ||--o{ customer_wallet_entries : lancamentos
     customer_wallet_entries ||--o| credit_lots : origem
     customer_wallet_entries ||--o{ wallet_transaction_references : referencias
@@ -180,8 +180,8 @@ erDiagram
     direct_credits {
         uuid direct_credit_id PK
     }
-    workspace_billing_configs {
-        uuid workspace_id PK
+    account_billing_configs {
+        uuid account_id PK
     }
 ```
 
@@ -210,7 +210,7 @@ erDiagram
     customer_plan_cycles ||--o| subscription_calendar_jobs : agenda
     subscription_admission_policies ||--o{ subscription_plan_versions : politica_publicada
     subscription_admission_policies ||--o{ subscription_admission_evidence : valida
-    workspace_projections ||--o{ subscription_admission_evidence : evidencia
+    account_projections ||--o{ subscription_admission_evidence : evidencia
     customer_plans ||--o{ subscription_admission_decisions : decisao
     customer_plan_transitions o|--o{ subscription_admission_decisions : transicao_avaliada
     subscription_plan_versions ||--o{ subscription_admission_decisions : plano_avaliado
@@ -269,7 +269,7 @@ erDiagram
     }
     subscription_admission_evidence {
         uuid event_id PK
-        uuid workspace_id FK
+        uuid account_id FK
         uuid policy_version_id FK
     }
     subscription_admission_decisions {
@@ -281,7 +281,7 @@ erDiagram
     }
 ```
 
-`customer_plans.customer_id` e `active_customer_plan_slots.customer_id` identificam o workspace/cliente fornecido por Accounts; não há FK para `workspace_projections`. O slot ativo materializa no máximo um plano vigente por cliente e assinatura e é mantido por trigger para planos `ACTIVE`/`ACTIVE_PAID` com renovação `CURRENT`. A agenda também é materializada por trigger a partir de ciclos ativos de planos gratuitos. `subscription_plan_versions` é uma versão publicada e imutável; o vínculo com política de admissão é opcional e permitido quando a admissão exige aprovação.
+`customer_plans.customer_id` e `active_customer_plan_slots.customer_id` identificam o account/cliente fornecido por Accounts; não há FK para `account_projections`. O slot ativo materializa no máximo um plano vigente por cliente e assinatura e é mantido por trigger para planos `ACTIVE`/`ACTIVE_PAID` com renovação `CURRENT`. A agenda também é materializada por trigger a partir de ciclos ativos de planos gratuitos. `subscription_plan_versions` é uma versão publicada e imutável; o vínculo com política de admissão é opcional e permitido quando a admissão exige aprovação.
 
 ### Medição de uso
 
@@ -355,7 +355,7 @@ erDiagram
 
 ```mermaid
 erDiagram
-    workspace_projections ||--o{ billing_connections : conecta
+    account_projections ||--o{ billing_connections : conecta
     billing_connections ||--o{ payment_method_bindings : tokeniza
     customer_plans o|--o{ payment_method_bindings : plano_associado
     payment_method_bindings ||--o{ collection_requests : metodo
@@ -369,29 +369,29 @@ erDiagram
     collection_requests ||--o| billing_credit_grant_references : pedido_concedido
     billing_payments ||--o| billing_credit_grant_references : pagamento_confirmado
     billing_connections ||--o{ unmatched_payment_cases : origem
-    workspace_projections ||--o{ unmatched_payment_cases : workspace
+    account_projections ||--o{ unmatched_payment_cases : account
     customer_plans o|--o{ unmatched_payment_cases : candidato
     unmatched_payment_cases ||--o{ unmatched_payment_case_events : historico
     collection_requests ||--o| billing_plan_upgrade_contexts : upgrade
     subscription_plan_versions ||--o{ billing_plan_upgrade_contexts : plano_anterior
     billing_connections ||--o{ external_refund_observations : observa
-    workspace_projections ||--o{ external_refund_observations : workspace
-    workspace_projections {
-        uuid workspace_id PK
+    account_projections ||--o{ external_refund_observations : account
+    account_projections {
+        uuid account_id PK
     }
     billing_connections {
         uuid billing_connection_id PK
-        uuid workspace_id FK
+        uuid account_id FK
     }
     payment_method_bindings {
         uuid payment_method_binding_id PK
         uuid billing_connection_id FK
-        uuid workspace_id FK
+        uuid account_id FK
         uuid customer_plan_id FK
     }
     collection_requests {
         uuid collection_request_id PK
-        uuid workspace_id FK
+        uuid account_id FK
         uuid customer_plan_id FK
         uuid plan_version_id FK
         uuid on_demand_plan_id FK
@@ -417,7 +417,7 @@ erDiagram
     }
     unmatched_payment_cases {
         uuid unmatched_payment_case_id PK
-        uuid workspace_id FK
+        uuid account_id FK
         uuid billing_connection_id FK
         uuid candidate_customer_plan_id FK
     }
@@ -432,15 +432,15 @@ erDiagram
     external_refund_observations {
         uuid external_refund_observation_id PK
         uuid billing_connection_id FK
-        uuid workspace_id FK
+        uuid account_id FK
     }
 ```
 
-As FKs compostas de Billing preservam o escopo: uma conexão pertence ao mesmo workspace da forma de pagamento; plano, binding, cobrança e caso não conciliado precisam pertencer ao mesmo cliente/workspace. `billing_webhook_inbox` é uma inbox idempotente do provedor, sem FK para pagamento; a associação é resolvida durante o processamento por IDs e metadados do evento. `billing_credit_grant_references` registra, no máximo uma vez, a relação entre lançamento, pedido de cobrança e pagamento que concedeu créditos.
+As FKs compostas de Billing preservam o escopo: uma conexão pertence ao mesmo account da forma de pagamento; plano, binding, cobrança e caso não conciliado precisam pertencer ao mesmo cliente/account. `billing_webhook_inbox` é uma inbox idempotente do provedor, sem FK para pagamento; a associação é resolvida durante o processamento por IDs e metadados do evento. `billing_credit_grant_references` registra, no máximo uma vez, a relação entre lançamento, pedido de cobrança e pagamento que concedeu créditos.
 
 ## Convenções e limites do modelo
 
-- `workspace_id` e `customer_id` representam a identidade do workspace/cliente mantida por Accounts. Quando não há FK para `workspace_projections`, essa ausência é intencional: a API consome a identidade e os eventos de Accounts sem replicar a tabela proprietária de clientes.
+- `account_id` e `customer_id` representam a identidade do account/cliente mantida por Accounts. Quando não há FK para `account_projections`, essa ausência é intencional: a API consome a identidade e os eventos de Accounts sem replicar a tabela proprietária de clientes.
 - Relações desenhadas como linhas nos diagramas correspondem a FKs, salvo relações descritas explicitamente como conceituais. Campos como `aggregate_id`, `resource_id`, `actor_reference`, IDs dentro de `payload` e IDs de cliente sem FK são referências polimórficas ou externas, não relações garantidas pelo banco.
 - Tabelas de razão, decisões de admissão, eventos de ciclo de vida e observações de provedor preservam histórico append-only por triggers. Catálogos publicados também têm proteção de imutabilidade.
 - Para conferir a definição física exata e a evolução de cada campo, consulte os arquivos `migrations/*.up.sql` em ordem cronológica.

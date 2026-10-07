@@ -1,15 +1,15 @@
 import { api, unwrapResponse } from "./client";
 
-/** Page audit evidence; e.g. `listAuditEvents(undefined, workspaceId)`. */
+/** Page audit evidence; e.g. `listAuditEvents(undefined, accountId)`. */
 export async function listAuditEvents(
   cursor?: string,
-  workspaceId?: string,
+  accountId?: string,
   action?: string,
 ) {
   return unwrapResponse(
     await api.GET("/v1/admin/audit-events", {
       params: {
-        query: { cursor, workspace_id: workspaceId, action, limit: 20 },
+        query: { cursor, account_id: accountId, action, limit: 20 },
       },
     }),
   );
@@ -18,13 +18,13 @@ export async function listAuditEvents(
 /** Page Accounts integration inbox metadata; e.g. `listIntegrationInbox()`. */
 export async function listIntegrationInbox(
   cursor?: string,
-  workspaceId?: string,
+  accountId?: string,
   status?: string,
 ) {
   return unwrapResponse(
     await api.GET("/v1/admin/integration-inbox", {
       params: {
-        query: { cursor, workspace_id: workspaceId, status, limit: 20 },
+        query: { cursor, account_id: accountId, status, limit: 20 },
       },
     }),
   );

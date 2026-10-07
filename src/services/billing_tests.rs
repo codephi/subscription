@@ -210,7 +210,7 @@ fn customer_payment_method_binding_hides_provider_integration_details() {
         crate::dto::billing::PaymentMethodBindingResponse {
             payment_method_binding_id: uuid::Uuid::new_v4(),
             billing_connection_id: uuid::Uuid::new_v4(),
-            workspace_id: uuid::Uuid::new_v4(),
+            account_id: uuid::Uuid::new_v4(),
             customer_plan_id: Some(uuid::Uuid::new_v4()),
             payment_method: "CARD".to_string(),
             display_name: Some("Cartão •••• 4242".to_string()),

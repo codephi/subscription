@@ -2,31 +2,31 @@ use uuid::Uuid;
 
 use crate::{
     dto::admin_queries::{
-        AdminPageQuery, CreateWorkspaceRequest, CustomerPlanPageResponse, WorkspacePageResponse,
-        WorkspaceProjectionResponse,
+        AccountPageResponse, AccountProjectionResponse, AdminPageQuery, CreateAccountRequest,
+        CustomerPlanPageResponse,
     },
-    dto::events::WorkspaceEventResponse,
+    dto::events::AccountEventResponse,
     error::{ApiError, ApiResult},
     repositories::database::DatabaseRepository,
 };
 
-/// Create a workspace from the administrative panel; e.g. `create_workspace(repo, request).await`.
-pub async fn create_workspace(
+/// Create a account from the administrative panel; e.g. `create_account(repo, request).await`.
+pub async fn create_account(
     repository: &DatabaseRepository,
-    mut request: CreateWorkspaceRequest,
-) -> ApiResult<WorkspaceProjectionResponse> {
+    mut request: CreateAccountRequest,
+) -> ApiResult<AccountProjectionResponse> {
     request.actor_reference = request.actor_reference.trim().to_string();
-    validate_workspace_actor(&request.actor_reference)?;
-    let workspace = repository.create_workspace(&request).await?;
-    crate::services::billing_integrations::provision_workspace_defaults(
+    validate_account_actor(&request.actor_reference)?;
+    let account = repository.create_account(&request).await?;
+    crate::services::billing_integrations::provision_account_defaults(
         repository,
-        workspace.workspace_id,
+        account.account_id,
     )
     .await?;
-    Ok(workspace)
+    Ok(account)
 }
 
-fn validate_workspace_actor(actor_reference: &str) -> ApiResult<()> {
+fn validate_account_actor(actor_reference: &str) -> ApiResult<()> {
     if actor_reference.is_empty() || actor_reference.len() > 255 {
         return Err(ApiError::unprocessable(
             "invalid_actor_reference",
@@ -36,41 +36,41 @@ fn validate_workspace_actor(actor_reference: &str) -> ApiResult<()> {
     Ok(())
 }
 
-/// List workspace projections for administration; e.g. `list_workspaces(&repo, query).await`.
-pub async fn list_workspaces(
+/// List account projections for administration; e.g. `list_accounts(&repo, query).await`.
+pub async fn list_accounts(
     repository: &DatabaseRepository,
     query: AdminPageQuery,
-) -> ApiResult<WorkspacePageResponse> {
+) -> ApiResult<AccountPageResponse> {
     repository
-        .list_workspace_projections(query.cursor, page_limit(query.limit)?)
+        .list_account_projections(query.cursor, page_limit(query.limit)?)
         .await
 }
 
-/// Read one workspace projection; e.g. `get_workspace(&repo, id).await`.
-pub async fn get_workspace(
+/// Read one account projection; e.g. `get_account(&repo, id).await`.
+pub async fn get_account(
     repository: &DatabaseRepository,
     id: Uuid,
-) -> ApiResult<WorkspaceProjectionResponse> {
-    repository.find_workspace_projection(id).await
+) -> ApiResult<AccountProjectionResponse> {
+    repository.find_account_projection(id).await
 }
 
-/// Terminate a workspace from administration; e.g. `terminate_workspace(repo, id).await`.
-pub async fn terminate_workspace(
+/// Terminate a account from administration; e.g. `terminate_account(repo, id).await`.
+pub async fn terminate_account(
     repository: &DatabaseRepository,
     id: Uuid,
-) -> ApiResult<WorkspaceEventResponse> {
-    repository.terminate_workspace(id).await
+) -> ApiResult<AccountEventResponse> {
+    repository.terminate_account(id).await
 }
 
-/// List a workspace's customer plans; e.g. `list_customer_plans(&repo, id, query).await`.
+/// List a account's customer plans; e.g. `list_customer_plans(&repo, id, query).await`.
 pub async fn list_customer_plans(
     repository: &DatabaseRepository,
     id: Uuid,
     query: AdminPageQuery,
 ) -> ApiResult<CustomerPlanPageResponse> {
-    repository.find_workspace_projection(id).await?;
+    repository.find_account_projection(id).await?;
     repository
-        .list_workspace_customer_plans(id, query.cursor, page_limit(query.limit)?)
+        .list_account_customer_plans(id, query.cursor, page_limit(query.limit)?)
         .await
 }
 
@@ -87,7 +87,7 @@ fn page_limit(limit: Option<u16>) -> ApiResult<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{page_limit, validate_workspace_actor};
+    use super::{page_limit, validate_account_actor};
 
     #[test]
     fn admin_page_limit_is_bounded() {
@@ -98,9 +98,9 @@ mod tests {
     }
 
     #[test]
-    fn workspace_actor_reference_must_be_present_and_bounded() {
-        assert!(validate_workspace_actor("operator@example.com").is_ok());
-        assert!(validate_workspace_actor("").is_err());
-        assert!(validate_workspace_actor(&"x".repeat(256)).is_err());
+    fn account_actor_reference_must_be_present_and_bounded() {
+        assert!(validate_account_actor("operator@example.com").is_ok());
+        assert!(validate_account_actor("").is_err());
+        assert!(validate_account_actor(&"x".repeat(256)).is_err());
     }
 }

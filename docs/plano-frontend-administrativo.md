@@ -21,8 +21,8 @@ exige autenticação e autorização antes de ocorrer.
 | Fase                  | Entrega                                                                                                                     | Critério de aceite                                                                                     | Estado                                                                                                                              |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | 0 — Base              | Skill shadcn, frontend Vite, navegação, OpenAPI tipado, documentação                                                        | Frontend inicia e compila; tipos podem ser regenerados                                                 | Concluída                                                                                                                           |
-| 1 — Consultas         | Listagem/detalhe de projeções de workspace e listagem de planos por workspace, paginadas por cursor                         | Consulta sem SQL manual, sem dados de identidade inventados                                            | Concluída                                                                                                                           |
-| 2 — Painel de leitura | Contadores globais, abertura por UUID, estado do workspace, planos/ciclos, carteira, extrato e consumo por item sob demanda | Operador consegue explicar estado comercial, saldo e consumo; consultas têm carregamento, vazio e erro | Concluída                                                                                                                           |
+| 1 — Consultas         | Listagem/detalhe de projeções de account e listagem de planos por account, paginadas por cursor                         | Consulta sem SQL manual, sem dados de identidade inventados                                            | Concluída                                                                                                                           |
+| 2 — Painel de leitura | Contadores globais, abertura por UUID, estado do account, planos/ciclos, carteira, extrato e consumo por item sob demanda | Operador consegue explicar estado comercial, saldo e consumo; consultas têm carregamento, vazio e erro | Concluída                                                                                                                           |
 | 3 — Billing           | Listas e detalhes de cobranças, tentativas, pagamentos, webhooks, outbox e pagamentos não conciliados                       | Cada contador abre seus registros; IDs e horários permitem seguir o runbook                            | Concluída                                                                                                                           |
 | 4 — Catálogo          | Listas e formulários de produtos, itens, preços, assinaturas, planos, ofertas avulsas e políticas                           | Nova oferta publicada é conferível; versões publicadas aparecem imutáveis                              | Concluída                                                                                                                           |
 | 5 — Ações             | Cancelamento, transição, revogação, crédito direto, configuração, reconciliação e replay                                    | Repetições preservam idempotência; conflito mostra `existing_operation` quando presente                | Concluída                                                                                                                           |
@@ -30,11 +30,11 @@ exige autenticação e autorização antes de ocorrer.
 
 ## Contratos de consulta da primeira entrega
 
-- `GET /v1/admin/workspaces?cursor=<uuid>&limit=20`: IDs de workspace em ordem
+- `GET /v1/admin/accounts?cursor=<uuid>&limit=20`: IDs de account em ordem
   estável; `next_cursor` só existe quando há outra página. Limite permitido: 1–100.
-- `GET /v1/admin/workspaces/{workspace_id}`: projeção operacional mínima.
-- `GET /v1/admin/workspaces/{workspace_id}/customer-plans?cursor=<uuid>&limit=20`:
-  planos daquele workspace e seus ciclos ativos; workspace inexistente retorna 404.
+- `GET /v1/admin/accounts/{account_id}`: projeção operacional mínima.
+- `GET /v1/admin/accounts/{account_id}/customer-plans?cursor=<uuid>&limit=20`:
+  planos daquele account e seus ciclos ativos; account inexistente retorna 404.
 - O painel usa também os endpoints existentes de operações de Billing, wallets,
   provisionamento, extrato de créditos, medidor e extrato de uso.
 

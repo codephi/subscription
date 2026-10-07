@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, type Dashboard, type User } from "@/lib/api"
 import { AuthScreen } from "@/components/auth-screen"
 import { OnboardingScreen } from "@/components/onboarding-screen"
-import { WorkspaceDashboard } from "@/components/workspace-dashboard"
+import { AccountDashboard } from "@/components/account-dashboard"
 import { LoadingScreen } from "@/components/loading-screen"
 import { AppFrame } from "@/components/app-frame"
 
@@ -86,7 +86,7 @@ export default function App() {
     /></AppFrame>
   }
 
-  return <AppFrame><WorkspaceDashboard
+  return <AppFrame><AccountDashboard
     user={user}
     view={dashboard.data}
     loading={dashboard.isPending}

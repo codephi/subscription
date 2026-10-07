@@ -9,26 +9,26 @@ const HIERARCHY_READY: &str = include_str!("wallet_readiness.sql");
 
 pub(in crate::repositories) async fn hierarchy_is_ready<'a, E>(
     executor: E,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<bool>
 where
     E: Executor<'a, Database = Postgres>,
 {
     Ok(sqlx::query_scalar(HIERARCHY_READY)
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_one(executor)
         .await?)
 }
 
 pub(in crate::repositories) async fn ensure_hierarchy_ready<'a, E>(
     executor: E,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> ApiResult<()>
 where
     E: Executor<'a, Database = Postgres>,
 {
-    if hierarchy_is_ready(executor, workspace_id).await? {
+    if hierarchy_is_ready(executor, account_id).await? {
         return Ok(());
     }
-    Err(wallet_not_provisioned(workspace_id))
+    Err(wallet_not_provisioned(account_id))
 }

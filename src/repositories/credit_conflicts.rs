@@ -8,13 +8,13 @@ use crate::{
 
 pub(super) async fn attach_committed_operation(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     identifier: &str,
     by_key: bool,
     conflict: ApiError,
 ) -> ApiResult<ApiError> {
     let row = sqlx::query(include_str!("credit_conflicts.sql"))
-        .bind(workspace_id)
+        .bind(account_id)
         .bind(identifier)
         .bind(by_key)
         .fetch_optional(&mut **transaction)
@@ -22,15 +22,12 @@ pub(super) async fn attach_committed_operation(
     let Some(row) = row else {
         return Ok(conflict);
     };
-    Ok(conflict.with_existing_operation(conflict_reference(row, workspace_id)))
+    Ok(conflict.with_existing_operation(conflict_reference(row, account_id)))
 }
 
-fn conflict_reference(
-    row: sqlx::postgres::PgRow,
-    workspace_id: Uuid,
-) -> ExistingOperationReference {
+fn conflict_reference(row: sqlx::postgres::PgRow, account_id: Uuid) -> ExistingOperationReference {
     ExistingOperationReference {
-        workspace_id,
+        account_id,
         operation_kind: row.get("operation_kind"),
         resource_id: row.get("resource_id"),
         transaction_id: row.get("transaction_id"),

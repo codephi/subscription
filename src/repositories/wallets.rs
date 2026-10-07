@@ -10,7 +10,7 @@ pub(super) mod wallet_readiness;
 
 use crate::{
     dto::{
-        events::{DomainEventEnvelope, WorkspaceEventEnvelope},
+        events::{AccountEventEnvelope, DomainEventEnvelope},
         wallets::{WalletHierarchyResponse, WalletProvisioningResponse, WalletStatus},
     },
     error::{ApiError, ApiResult},
@@ -26,16 +26,16 @@ use crate::{
 impl DatabaseRepository {
     pub async fn reconcile_wallets(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
         actor_reference: Option<&str>,
     ) -> ApiResult<WalletProvisioningResponse> {
         let mut transaction = self.pool().begin().await?;
-        let workspace = lock_workspace(&mut transaction, workspace_id).await?;
+        let account = lock_account(&mut transaction, account_id).await?;
         let correlation_id = Uuid::new_v4();
         let response = wallet_failure::reconcile_attempt(
             &mut transaction,
-            workspace_id,
-            &workspace.status,
+            account_id,
+            &account.status,
             correlation_id,
             actor_reference,
         )
@@ -46,19 +46,19 @@ impl DatabaseRepository {
 
     pub async fn find_wallet_hierarchy(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
     ) -> ApiResult<WalletHierarchyResponse> {
-        let provisioning = self.find_wallet_provisioning(workspace_id).await?;
+        let provisioning = self.find_wallet_provisioning(account_id).await?;
         let customer_row = sqlx::query(
             "SELECT w.*,cw.balance_credit_units,cw.version,s.status FROM wallets w \
              JOIN customer_wallets cw ON cw.wallet_id=w.wallet_id \
              JOIN wallet_effective_states s ON s.wallet_id=w.wallet_id \
              WHERE w.customer_id=$1 AND w.wallet_type='CUSTOMER'",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| wallet_not_provisioned(workspace_id))?;
+        .ok_or_else(|| wallet_not_provisioned(account_id))?;
         let item_rows = sqlx::query(
             "SELECT w.*,iw.total_received_item_units,iw.total_converted_item_units, \
              iw.pending_item_units,iw.version,s.status FROM wallets w \
@@ -66,11 +66,11 @@ impl DatabaseRepository {
              JOIN wallet_effective_states s ON s.wallet_id=w.wallet_id \
              WHERE w.customer_id=$1 AND w.wallet_type='ITEM' ORDER BY w.item_id",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_all(&self.pool())
         .await?;
         Ok(WalletHierarchyResponse {
-            workspace_id,
+            account_id,
             scope_version: provisioning.scope_version,
             ready: provisioning.status == WalletStatus::Active,
             customer_wallet: customer_wallet_from_row(&customer_row)?,
@@ -83,19 +83,19 @@ impl DatabaseRepository {
 
     pub async fn find_wallet_provisioning(
         &self,
-        workspace_id: Uuid,
+        account_id: Uuid,
     ) -> ApiResult<WalletProvisioningResponse> {
         let row = sqlx::query(
             "SELECT p.* FROM wallet_provisioning p JOIN catalog_scope_current c \
              ON c.scope_version=p.scope_version WHERE p.customer_id=$1 AND c.singleton",
         )
-        .bind(workspace_id)
+        .bind(account_id)
         .fetch_optional(&self.pool())
         .await?
-        .ok_or_else(|| wallet_not_provisioned(workspace_id))?;
+        .ok_or_else(|| wallet_not_provisioned(account_id))?;
         let mut response = provisioning_from_row(&row)?;
         if response.status == WalletStatus::Active
-            && !wallet_readiness::hierarchy_is_ready(&self.pool(), workspace_id).await?
+            && !wallet_readiness::hierarchy_is_ready(&self.pool(), account_id).await?
         {
             response.status = WalletStatus::Provisioning;
             response.completed_at = None;
@@ -106,12 +106,12 @@ impl DatabaseRepository {
 
 pub(super) async fn provision_wallets_for_event(
     transaction: &mut Transaction<'_, Postgres>,
-    event: &WorkspaceEventEnvelope,
+    event: &AccountEventEnvelope,
     operational_status: &str,
 ) -> ApiResult<()> {
     synchronize_wallets(
         transaction,
-        event.workspace_id,
+        event.account_id,
         operational_status,
         event.correlation_id,
         Some(event.event_id),
@@ -121,48 +121,48 @@ pub(super) async fn provision_wallets_for_event(
     Ok(())
 }
 
-struct LockedWorkspace {
+struct LockedAccount {
     status: String,
 }
 
-async fn lock_workspace(
+async fn lock_account(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
-) -> ApiResult<LockedWorkspace> {
+    account_id: Uuid,
+) -> ApiResult<LockedAccount> {
     let row = sqlx::query(
-        "SELECT operational_status FROM workspace_projections WHERE workspace_id=$1 FOR UPDATE",
+        "SELECT operational_status FROM account_projections WHERE account_id=$1 FOR UPDATE",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or_else(|| {
         ApiError::not_found(
-            "workspace_not_found",
-            format!("workspace {workspace_id} does not exist"),
+            "account_not_found",
+            format!("account {account_id} does not exist"),
         )
     })?;
-    Ok(LockedWorkspace {
+    Ok(LockedAccount {
         status: row.get("operational_status"),
     })
 }
 
 async fn synchronize_wallets(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     operational_status: &str,
     correlation_id: Uuid,
     causation_id: Option<Uuid>,
     actor_reference: Option<&str>,
 ) -> ApiResult<WalletProvisioningResponse> {
     let (scope_version, item_ids) = load_current_scope(transaction).await?;
-    start_provisioning(transaction, workspace_id, scope_version, item_ids.len()).await?;
+    start_provisioning(transaction, account_id, scope_version, item_ids.len()).await?;
     let (customer_wallet_id, mut changed) =
-        ensure_customer_wallet(transaction, workspace_id, scope_version).await?;
-    ensure_billing_config(transaction, workspace_id).await?;
+        ensure_customer_wallet(transaction, account_id, scope_version).await?;
+    ensure_billing_config(transaction, account_id).await?;
     for item_id in &item_ids {
         changed |= ensure_item_wallet(
             transaction,
-            workspace_id,
+            account_id,
             customer_wallet_id,
             *item_id,
             scope_version,
@@ -172,29 +172,29 @@ async fn synchronize_wallets(
     let target = target_status(operational_status)?;
     changed |= synchronize_item_states(
         transaction,
-        workspace_id,
+        account_id,
         &item_ids,
         target,
         correlation_id,
         actor_reference,
     )
     .await?;
-    let materialized = count_materialized(transaction, workspace_id, &item_ids).await?;
+    let materialized = count_materialized(transaction, account_id, &item_ids).await?;
     if materialized != item_ids.len() as i64 {
-        return Err(wallet_not_provisioned(workspace_id));
+        return Err(wallet_not_provisioned(account_id));
     }
     changed |= append_lifecycle_if_changed(
         transaction,
         customer_wallet_id,
         target,
-        "workspace lifecycle and scope reconciliation",
+        "account lifecycle and scope reconciliation",
         correlation_id,
         actor_reference,
     )
     .await?;
     let response = finish_provisioning(
         transaction,
-        workspace_id,
+        account_id,
         scope_version,
         target,
         item_ids.len() as i64,
@@ -229,7 +229,7 @@ async fn load_current_scope(
 
 async fn start_provisioning(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     scope_version: Uuid,
     expected: usize,
 ) -> Result<(), sqlx::Error> {
@@ -239,7 +239,7 @@ async fn start_provisioning(
          ON CONFLICT (customer_id,scope_version) DO UPDATE SET status='PROVISIONING', \
          expected_item_wallets=EXCLUDED.expected_item_wallets,error_detail=NULL",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(scope_version)
     .bind(expected as i64)
     .execute(&mut **transaction)
@@ -249,7 +249,7 @@ async fn start_provisioning(
 
 async fn ensure_customer_wallet(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     scope_version: Uuid,
 ) -> ApiResult<(Uuid, bool)> {
     let wallet_id = Uuid::new_v4();
@@ -258,7 +258,7 @@ async fn ensure_customer_wallet(
          VALUES ($1,$2,'CUSTOMER',$3) ON CONFLICT DO NOTHING",
     )
     .bind(wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(scope_version)
     .execute(&mut **transaction)
     .await?
@@ -267,7 +267,7 @@ async fn ensure_customer_wallet(
     let actual_id: Uuid = sqlx::query_scalar(
         "SELECT wallet_id FROM wallets WHERE customer_id=$1 AND wallet_type='CUSTOMER'",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&mut **transaction)
     .await?;
     sqlx::query(
@@ -282,12 +282,12 @@ async fn ensure_customer_wallet(
 
 async fn ensure_billing_config(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO workspace_billing_configs (workspace_id) VALUES ($1) ON CONFLICT DO NOTHING",
+        "INSERT INTO account_billing_configs (account_id) VALUES ($1) ON CONFLICT DO NOTHING",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -295,7 +295,7 @@ async fn ensure_billing_config(
 
 async fn ensure_item_wallet(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     customer_wallet_id: Uuid,
     item_id: Uuid,
     scope_version: Uuid,
@@ -306,7 +306,7 @@ async fn ensure_item_wallet(
          provisioning_scope_version) VALUES ($1,$2,'ITEM',$3,$4,$5) ON CONFLICT DO NOTHING",
     )
     .bind(wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_wallet_id)
     .bind(item_id)
     .bind(scope_version)
@@ -317,7 +317,7 @@ async fn ensure_item_wallet(
     let actual_id: Uuid = sqlx::query_scalar(
         "SELECT wallet_id FROM wallets WHERE customer_id=$1 AND wallet_type='ITEM' AND item_id=$2",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(item_id)
     .fetch_one(&mut **transaction)
     .await?;
@@ -330,7 +330,7 @@ async fn ensure_item_wallet(
 
 async fn synchronize_item_states(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     expected_items: &[Uuid],
     target: WalletStatus,
     correlation_id: Uuid,
@@ -339,7 +339,7 @@ async fn synchronize_item_states(
     let rows = sqlx::query(
         "SELECT wallet_id,item_id FROM wallets WHERE customer_id=$1 AND wallet_type='ITEM' ORDER BY item_id",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_all(&mut **transaction)
     .await?;
     let mut changed = false;
@@ -354,7 +354,7 @@ async fn synchronize_item_states(
             transaction,
             row.get("wallet_id"),
             item_target,
-            "workspace lifecycle and catalog scope reconciliation",
+            "account lifecycle and catalog scope reconciliation",
             correlation_id,
             actor_reference,
         )
@@ -371,7 +371,7 @@ async fn append_lifecycle_if_changed(
     correlation_id: Uuid,
     actor_reference: Option<&str>,
 ) -> ApiResult<bool> {
-    // S9-020: the caller holds the workspace lock; disposable projections cannot
+    // S9-020: the caller holds the account lock; disposable projections cannot
     // determine event identity or overwrite the durable lifecycle during restore.
     let current = sqlx::query(
         "SELECT new_status AS status,sequence AS lifecycle_sequence FROM wallet_lifecycle_events \
@@ -413,14 +413,14 @@ async fn append_lifecycle_if_changed(
 
 async fn count_materialized(
     transaction: &mut Transaction<'_, Postgres>,
-    workspace_id: Uuid,
+    account_id: Uuid,
     item_ids: &[Uuid],
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT count(*) FROM wallets w JOIN item_wallets i USING(wallet_id) \
          WHERE w.customer_id=$1 AND w.wallet_type='ITEM' AND w.item_id=ANY($2)",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(item_ids)
     .fetch_one(&mut **transaction)
     .await
@@ -433,18 +433,18 @@ async fn emit_provisioning_events(
     causation_id: Option<Uuid>,
 ) -> ApiResult<()> {
     for event_type in [
-        "workspace_provisioning.started",
+        "account_provisioning.started",
         if response.status == WalletStatus::Error {
-            "workspace_provisioning.failed"
+            "account_provisioning.failed"
         } else {
-            "workspace_provisioning.completed"
+            "account_provisioning.completed"
         },
     ] {
         let sequence: i64 = sqlx::query_scalar(
             "SELECT COALESCE(max(aggregate_sequence),0)+1 FROM outbox_events \
              WHERE aggregate_type='wallet_provisioning' AND aggregate_id=$1",
         )
-        .bind(response.workspace_id)
+        .bind(response.account_id)
         .fetch_one(&mut **transaction)
         .await?;
         let event = DomainEventEnvelope {
@@ -452,10 +452,10 @@ async fn emit_provisioning_events(
             event_type: event_type.to_string(),
             schema_version: 1,
             aggregate_type: "wallet_provisioning".to_string(),
-            aggregate_id: response.workspace_id,
+            aggregate_id: response.account_id,
             sequence,
             occurred_at: Utc::now(),
-            workspace_id: response.workspace_id,
+            account_id: response.account_id,
             correlation_id,
             causation_id,
             payload: json!({
@@ -477,7 +477,7 @@ async fn insert_outbox_event(
 ) -> ApiResult<()> {
     sqlx::query(
         "INSERT INTO outbox_events (event_id,event_type,aggregate_type,aggregate_id, \
-         aggregate_sequence,workspace_id,correlation_id,causation_id,payload,occurred_at) \
+         aggregate_sequence,account_id,correlation_id,causation_id,payload,occurred_at) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(event.event_id)
@@ -485,7 +485,7 @@ async fn insert_outbox_event(
     .bind(&event.aggregate_type)
     .bind(event.aggregate_id)
     .bind(event.sequence)
-    .bind(event.workspace_id)
+    .bind(event.account_id)
     .bind(event.correlation_id)
     .bind(event.causation_id)
     .bind(serde_json::to_value(event).map_err(ApiError::serialization)?)

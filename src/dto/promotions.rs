@@ -14,8 +14,8 @@ pub struct CreateVoucherRequest {
     pub valid_from: Option<DateTime<Utc>>,
     pub valid_until: Option<DateTime<Utc>>,
     pub max_total_uses: Option<i64>,
-    #[serde(default = "default_workspace_limit")]
-    pub max_uses_per_workspace: Option<i64>,
+    #[serde(default = "default_account_limit")]
+    pub max_uses_per_account: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -31,11 +31,11 @@ pub struct CreateCouponRequest {
     pub valid_from: Option<DateTime<Utc>>,
     pub valid_until: Option<DateTime<Utc>>,
     pub max_total_uses: Option<i64>,
-    #[serde(default = "default_workspace_limit")]
-    pub max_uses_per_workspace: Option<i64>,
+    #[serde(default = "default_account_limit")]
+    pub max_uses_per_account: Option<i64>,
 }
 
-fn default_workspace_limit() -> Option<i64> {
+fn default_account_limit() -> Option<i64> {
     Some(1)
 }
 
@@ -44,14 +44,15 @@ mod tests {
     use super::CreateVoucherRequest;
 
     #[test]
-    fn missing_workspace_limit_defaults_to_one_but_null_means_unlimited() {
+    fn missing_account_limit_defaults_to_one_but_null_means_unlimited() {
         let base = r#"{"code":"WELCOME","name":"Welcome","credit_units":"5"}"#;
         let defaulted: CreateVoucherRequest = serde_json::from_str(base).unwrap();
         let unlimited: CreateVoucherRequest = serde_json::from_str(
-            r#"{"code":"WELCOME","name":"Welcome","credit_units":"5","max_uses_per_workspace":null}"#,
-        ).unwrap();
-        assert_eq!(defaulted.max_uses_per_workspace, Some(1));
-        assert_eq!(unlimited.max_uses_per_workspace, None);
+            r#"{"code":"WELCOME","name":"Welcome","credit_units":"5","max_uses_per_account":null}"#,
+        )
+        .unwrap();
+        assert_eq!(defaulted.max_uses_per_account, Some(1));
+        assert_eq!(unlimited.max_uses_per_account, None);
     }
 }
 
@@ -61,7 +62,7 @@ pub struct UpdatePromotionRequest {
     pub valid_from: Option<DateTime<Utc>>,
     pub valid_until: Option<DateTime<Utc>>,
     pub max_total_uses: Option<i64>,
-    pub max_uses_per_workspace: Option<i64>,
+    pub max_uses_per_account: Option<i64>,
     pub expected_version: i64,
     pub actor_reference: Option<String>,
 }
@@ -86,7 +87,7 @@ pub struct PromotionResponse {
     pub valid_from: Option<DateTime<Utc>>,
     pub valid_until: Option<DateTime<Utc>>,
     pub max_total_uses: Option<i64>,
-    pub max_uses_per_workspace: Option<i64>,
+    pub max_uses_per_account: Option<i64>,
     pub completed_uses: i64,
     pub reserved_uses: i64,
     pub availability: String,
@@ -133,7 +134,7 @@ pub struct RedeemVoucherRequest {
 pub struct VoucherRedemptionResponse {
     pub voucher_redemption_id: Uuid,
     pub voucher_id: Uuid,
-    pub workspace_id: Uuid,
+    pub account_id: Uuid,
     pub credit_units: CreditUnits,
     pub entry: crate::dto::credits::CustomerWalletEntryResponse,
     pub created_at: DateTime<Utc>,

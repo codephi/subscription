@@ -21,10 +21,10 @@ use subscription::{
             CatalogStatus, CreateItemRequest, CreatePriceVersionRequest, CreateProductRequest,
             UpdateItemRequest, UpdateProductRequest,
         },
-        events::WorkspaceEventEnvelope,
+        events::AccountEventEnvelope,
     },
     repositories::database::DatabaseRepository,
-    services::{catalog, workspace_events::process_workspace_event},
+    services::{account_events::process_account_event, catalog},
 };
 use tokio::sync::Mutex;
 use tower::ServiceExt;
@@ -35,16 +35,16 @@ use support::{response_bytes, response_json, setup_router_with_options};
 static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wallet_provisioning_converges_for_workspace_lifecycle() {
+async fn wallet_provisioning_converges_for_account_lifecycle() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let (router, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let product_id = create_billable_catalog(&repository, 10).await;
     create_entitlement_catalog(&repository).await;
-    let workspace_id = Uuid::new_v4();
+    let account_id = Uuid::new_v4();
 
-    apply_workspace_event(&repository, workspace_id, "workspace.created", 1).await;
-    let created = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    apply_account_event(&repository, account_id, "account.created", 1).await;
+    let created = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_eq!(created["ready"], false);
     assert_eq!(created["customer_wallet"]["status"], "PROVISIONING");
     assert_eq!(
@@ -56,26 +56,26 @@ async fn wallet_provisioning_converges_for_workspace_lifecycle() {
     );
     assert_parent_links(&created);
 
-    apply_workspace_event(&repository, workspace_id, "workspace.activated", 2).await;
-    let active = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    apply_account_event(&repository, account_id, "account.activated", 2).await;
+    let active = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_eq!(active["ready"], true);
     assert_all_states(&active, "ACTIVE");
     assert_eq!(active["customer_wallet"]["balance_credit_units"], "0");
     let original_wallet_ids = wallet_ids(&active);
 
-    apply_workspace_event(&repository, workspace_id, "workspace.blocked", 3).await;
-    let blocked = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    apply_account_event(&repository, account_id, "account.blocked", 3).await;
+    let blocked = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_all_states(&blocked, "DISABLED");
-    apply_workspace_event(&repository, workspace_id, "workspace.activated", 4).await;
-    let reactivated = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    apply_account_event(&repository, account_id, "account.activated", 4).await;
+    let reactivated = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_eq!(wallet_ids(&reactivated), original_wallet_ids);
     assert_all_states(&reactivated, "ACTIVE");
-    apply_workspace_event(&repository, workspace_id, "workspace.terminated", 5).await;
-    let terminated = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    apply_account_event(&repository, account_id, "account.terminated", 5).await;
+    let terminated = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_all_states(&terminated, "DISABLED");
 
-    assert_append_only_guards(&pool, workspace_id).await;
-    assert_provisioning_outbox(&pool, workspace_id).await;
+    assert_append_only_guards(&pool, account_id).await;
+    assert_provisioning_outbox(&pool, account_id).await;
     assert_wallet_swagger(&router).await;
     deactivate_product(&repository, product_id).await;
 }
@@ -86,14 +86,14 @@ async fn concurrent_provisioning_reuses_wallets() {
     let (_, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool.clone());
     let product_id = create_billable_catalog(&repository, 1).await;
-    let workspace_id = Uuid::new_v4();
-    let event = workspace_event(workspace_id, "workspace.created", 1);
+    let account_id = Uuid::new_v4();
+    let event = account_event(account_id, "account.created", 1);
     let first_repository = repository.clone();
     let second_repository = repository.clone();
 
     let (first, second) = tokio::join!(
-        process_workspace_event(&first_repository, event.clone()),
-        process_workspace_event(&second_repository, event)
+        process_account_event(&first_repository, event.clone()),
+        process_account_event(&second_repository, event)
     );
     assert!(first.is_ok());
     assert!(second.is_ok());
@@ -101,7 +101,7 @@ async fn concurrent_provisioning_reuses_wallets() {
         "SELECT count(*),count(*) FILTER (WHERE wallet_type='CUSTOMER'), \
          count(*) FILTER (WHERE wallet_type='ITEM') FROM wallets WHERE customer_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&pool)
     .await
     .expect("wallet counts");
@@ -110,7 +110,7 @@ async fn concurrent_provisioning_reuses_wallets() {
         "SELECT count(*) FROM wallet_lifecycle_events e JOIN wallets w ON w.wallet_id=e.wallet_id \
          WHERE w.customer_id=$1",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&pool)
     .await
     .expect("lifecycle count");
@@ -123,15 +123,15 @@ async fn customer_wallet_waits_for_complete_scope() {
     let _guard = TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let (router, pool) = setup_router_with_options(false, None).await;
     let repository = DatabaseRepository::new(pool);
-    let workspace_id = Uuid::new_v4();
-    apply_workspace_event(&repository, workspace_id, "workspace.created", 1).await;
-    apply_workspace_event(&repository, workspace_id, "workspace.activated", 2).await;
-    let initial = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    let account_id = Uuid::new_v4();
+    apply_account_event(&repository, account_id, "account.created", 1).await;
+    apply_account_event(&repository, account_id, "account.activated", 2).await;
+    let initial = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert!(initial["ready"].as_bool().expect("ready"));
 
     let product_id = create_billable_catalog(&repository, 1).await;
-    let partial_wallet_id = insert_partial_item_wallet(&repository, workspace_id).await;
-    let stale = get_response(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    let partial_wallet_id = insert_partial_item_wallet(&repository, account_id).await;
+    let stale = get_response(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_eq!(stale.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(
         response_json(stale).await["error"]["code"],
@@ -140,13 +140,13 @@ async fn customer_wallet_waits_for_complete_scope() {
 
     let reconcile = post_json(
         &router,
-        &format!("/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile"),
+        &format!("/v1/admin/accounts/{account_id}/wallet-provisioning/reconcile"),
     )
     .await;
     assert_eq!(reconcile["status"], "ACTIVE");
     assert_eq!(reconcile["expected_item_wallets"], 1);
     assert_eq!(reconcile["materialized_item_wallets"], 1);
-    let current = get_json(&router, &format!("/v1/workspaces/{workspace_id}/wallets")).await;
+    let current = get_json(&router, &format!("/v1/accounts/{account_id}/wallets")).await;
     assert_eq!(
         current["item_wallets"]
             .as_array()
@@ -161,7 +161,7 @@ async fn customer_wallet_waits_for_complete_scope() {
 
     let repeated = post_json(
         &router,
-        &format!("/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile"),
+        &format!("/v1/admin/accounts/{account_id}/wallet-provisioning/reconcile"),
     )
     .await;
     assert_eq!(repeated["scope_version"], reconcile["scope_version"]);
@@ -287,12 +287,12 @@ async fn deactivate_product(repository: &DatabaseRepository, product_id: Uuid) {
     .expect("deactivate product");
 }
 
-async fn insert_partial_item_wallet(repository: &DatabaseRepository, workspace_id: Uuid) -> Uuid {
+async fn insert_partial_item_wallet(repository: &DatabaseRepository, account_id: Uuid) -> Uuid {
     let pool = repository.pool();
     let customer_wallet_id: Uuid = sqlx::query_scalar(
         "SELECT wallet_id FROM wallets WHERE customer_id=$1 AND wallet_type='CUSTOMER'",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(&pool)
     .await
     .expect("customer wallet");
@@ -309,7 +309,7 @@ async fn insert_partial_item_wallet(repository: &DatabaseRepository, workspace_i
          provisioning_scope_version) VALUES ($1,$2,'ITEM',$3,$4,$5)",
     )
     .bind(wallet_id)
-    .bind(workspace_id)
+    .bind(account_id)
     .bind(customer_wallet_id)
     .bind(item_id)
     .bind(scope_version)
@@ -319,28 +319,25 @@ async fn insert_partial_item_wallet(repository: &DatabaseRepository, workspace_i
     wallet_id
 }
 
-async fn apply_workspace_event(
+async fn apply_account_event(
     repository: &DatabaseRepository,
-    workspace_id: Uuid,
+    account_id: Uuid,
     event_type: &str,
     sequence: i64,
 ) {
-    process_workspace_event(
-        repository,
-        workspace_event(workspace_id, event_type, sequence),
-    )
-    .await
-    .expect("apply workspace event");
+    process_account_event(repository, account_event(account_id, event_type, sequence))
+        .await
+        .expect("apply account event");
 }
 
-fn workspace_event(workspace_id: Uuid, event_type: &str, sequence: i64) -> WorkspaceEventEnvelope {
+fn account_event(account_id: Uuid, event_type: &str, sequence: i64) -> AccountEventEnvelope {
     serde_json::from_value(json!({
         "event_id":Uuid::new_v4(),"event_type":event_type,"schema_version":1,
-        "aggregate_id":workspace_id,"sequence":sequence,"occurred_at":"2026-09-03T12:00:00Z",
-        "workspace_id":workspace_id,"correlation_id":Uuid::new_v4(),"causation_id":null,
-        "payload":{"workspace_id":workspace_id}
+        "aggregate_id":account_id,"sequence":sequence,"occurred_at":"2026-09-03T12:00:00Z",
+        "account_id":account_id,"correlation_id":Uuid::new_v4(),"causation_id":null,
+        "payload":{"account_id":account_id}
     }))
-    .expect("workspace event")
+    .expect("account event")
 }
 
 fn product_request(usage_model: &str) -> CreateProductRequest {
@@ -404,10 +401,10 @@ fn wallet_ids(hierarchy: &Value) -> Vec<String> {
     ids
 }
 
-async fn assert_append_only_guards(pool: &PgPool, workspace_id: Uuid) {
+async fn assert_append_only_guards(pool: &PgPool, account_id: Uuid) {
     let wallet_id: Uuid =
         sqlx::query_scalar("SELECT wallet_id FROM wallets WHERE customer_id=$1 LIMIT 1")
-            .bind(workspace_id)
+            .bind(account_id)
             .fetch_one(pool)
             .await
             .expect("wallet id");
@@ -428,12 +425,12 @@ async fn assert_append_only_guards(pool: &PgPool, workspace_id: Uuid) {
     );
 }
 
-async fn assert_provisioning_outbox(pool: &PgPool, workspace_id: Uuid) {
+async fn assert_provisioning_outbox(pool: &PgPool, account_id: Uuid) {
     let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_events WHERE workspace_id=$1 \
-         AND event_type LIKE 'workspace_provisioning.%'",
+        "SELECT count(*) FROM outbox_events WHERE account_id=$1 \
+         AND event_type LIKE 'account_provisioning.%'",
     )
-    .bind(workspace_id)
+    .bind(account_id)
     .fetch_one(pool)
     .await
     .expect("provisioning outbox count");
@@ -443,10 +440,10 @@ async fn assert_provisioning_outbox(pool: &PgPool, workspace_id: Uuid) {
 async fn assert_wallet_swagger(router: &Router) {
     let openapi = get_json(router, "/openapi.json").await;
     assert!(openapi["paths"]
-        .get("/v1/workspaces/{workspace_id}/wallets")
+        .get("/v1/accounts/{account_id}/wallets")
         .is_some());
     assert!(openapi["paths"]
-        .get("/v1/admin/workspaces/{workspace_id}/wallet-provisioning/reconcile")
+        .get("/v1/admin/accounts/{account_id}/wallet-provisioning/reconcile")
         .is_some());
     assert!(openapi["components"]["schemas"]
         .get("WalletHierarchyResponse")
