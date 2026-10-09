@@ -40,6 +40,25 @@ pub struct CreateCheckoutRequest {
     pub topup_credits: Option<i64>,
     pub payment_method_binding_id: Option<Uuid>,
     pub target_plan_version_id: Option<Uuid>,
+    #[serde(default)]
+    pub save_payment_method: bool,
+    pub payment_method_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct PaymentMethodSetupRequest {
+    pub card_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ConfirmPaymentMethodRequest {
+    pub payment_method_setup_id: Uuid,
+    pub card_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct RenamePaymentMethodRequest {
+    pub display_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -101,6 +101,11 @@ pub struct CreatePaymentMethodBindingRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct RenamePaymentMethodRequest {
+    pub display_name: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreatePaymentMethodFromCardRequest {
     pub customer_plan_id: Uuid,
     pub cardholder_name: String,
@@ -156,6 +161,8 @@ pub struct CreatePaymentMethodSetupSessionRequest {
     pub customer_plan_id: Uuid,
     pub success_url: String,
     pub cancel_url: String,
+    #[serde(default)]
+    pub card_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]

@@ -20,6 +20,10 @@ pub struct HostedPaymentReceipt {
     pub payment_method_id: String,
     pub amount_minor: i64,
     pub currency: String,
+    pub saved_for_future: bool,
+    pub subscription_id: Option<String>,
+    pub period_start: Option<i64>,
+    pub period_end: Option<i64>,
 }
 
 pub struct StripeConnector {
@@ -120,11 +124,12 @@ impl StripeConnector {
         session_id: &str,
         expected_customer: &str,
         expected_client_reference: &str,
+        expected_mode: &str,
     ) -> Result<HostedPaymentReceipt, BillingConnectorError> {
         let response = self
             .client
             .get(format!(
-                "{}/v1/checkout/sessions/{session_id}?expand%5B%5D=payment_intent.payment_method",
+                "{}/v1/checkout/sessions/{session_id}?expand%5B%5D=payment_intent.payment_method&expand%5B%5D=subscription.latest_invoice.payment_intent.payment_method",
                 self.api_base
             ))
             .basic_auth(&self.secret_key, Some(""))
@@ -140,13 +145,16 @@ impl StripeConnector {
             || body.get("customer").and_then(Value::as_str) != Some(expected_customer)
             || body.get("client_reference_id").and_then(Value::as_str)
                 != Some(expected_client_reference)
-            || body.get("mode").and_then(Value::as_str) != Some("payment")
+            || body.get("mode").and_then(Value::as_str) != Some(expected_mode)
             || body.get("payment_status").and_then(Value::as_str) != Some("paid")
         {
             return Err(invalid_response("checkout_session", &body.to_string()));
         }
+        let subscription = body.get("subscription");
+        let invoice = subscription.and_then(|item| item.get("latest_invoice"));
         let intent = body
             .get("payment_intent")
+            .or_else(|| invoice.and_then(|item| item.get("payment_intent")))
             .ok_or_else(|| invalid_response("payment_intent", &body.to_string()))?;
         let intent_id = intent
             .get("id")
@@ -174,6 +182,20 @@ impl StripeConnector {
                 .and_then(Value::as_i64)
                 .ok_or_else(|| invalid_response("amount_total", &body.to_string()))?,
             currency: required_string(&body, "currency")?.to_ascii_uppercase(),
+            saved_for_future: intent
+                .pointer("/payment_method/allow_redisplay")
+                .and_then(Value::as_str)
+                == Some("always"),
+            subscription_id: subscription
+                .and_then(|item| item.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            period_start: invoice
+                .and_then(|item| item.pointer("/lines/data/0/period/start"))
+                .and_then(Value::as_i64),
+            period_end: invoice
+                .and_then(|item| item.pointer("/lines/data/0/period/end"))
+                .and_then(Value::as_i64),
         })
     }
 
@@ -524,8 +546,13 @@ impl BillingConnector for StripeConnector {
         command: &'a HostedPaymentSessionCommand,
     ) -> HostedPaymentSessionFuture<'a> {
         Box::pin(async move {
-            let fields = vec![
-                ("mode", "payment".to_string()),
+            let mode = if command.is_subscription {
+                "subscription"
+            } else {
+                "payment"
+            };
+            let mut fields = vec![
+                ("mode", mode.to_string()),
                 ("customer", command.customer_reference.clone()),
                 ("client_reference_id", command.client_reference_id.clone()),
                 ("success_url", command.success_url.clone()),
@@ -546,14 +573,34 @@ impl BillingConnector for StripeConnector {
                     "Créditos".to_string(),
                 ),
                 (
-                    "payment_intent_data[setup_future_usage]",
-                    "off_session".to_string(),
-                ),
-                (
                     "metadata[collection_request_id]",
                     command.collection_request_id.clone(),
                 ),
+                (
+                    "metadata[customer_plan_id]",
+                    command.customer_plan_id.clone(),
+                ),
             ];
+            if command.is_subscription {
+                fields.push((
+                    "line_items[0][price_data][recurring][interval]",
+                    "month".to_string(),
+                ));
+                fields.push((
+                    "subscription_data[metadata][collection_request_id]",
+                    command.collection_request_id.clone(),
+                ));
+                fields.push((
+                    "subscription_data[metadata][customer_plan_id]",
+                    command.customer_plan_id.clone(),
+                ));
+            }
+            if command.allow_payment_method_save {
+                fields.push((
+                    "saved_payment_method_options[payment_method_save]",
+                    "enabled".to_string(),
+                ));
+            }
             let value = self
                 .post_form(
                     "/v1/checkout/sessions",

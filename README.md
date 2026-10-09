@@ -130,6 +130,16 @@ normalized collection state machine. Stripe is the first adapter. Collection att
 are persisted before external I/O, use a stable provider idempotency key, and
 preserve uncertain outcomes without an automatic retry.
 
+Hosted Checkout sessions now support one-time credit purchases, provider-managed
+monthly subscriptions, and independent payment-method setup. Tasklab receives only
+an opaque redirect URL and neutral Subscription endpoints; it never receives card
+data or gateway credentials. Saving a card on a purchase is explicit consent and
+can include an optional display name. Subscription webhooks remain authoritative
+for payment confirmation and credit grants. Stripe-managed subscriptions are
+excluded from the local paid-renewal dispatcher; paid invoices create idempotent
+local cycle records. The Tasklab demo provisions a R$ 1.00 monthly plan granting
+10 credits per confirmed cycle for testing recurrence.
+
 Scheduled collections are not dispatched before `scheduled_at`. Outbox delivery
 preserves aggregate sequence across leases, retries and dead letters: a dead-lettered
 predecessor blocks later sequences until it is replayed and successfully delivered.

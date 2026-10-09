@@ -26,6 +26,10 @@ pub struct CreateCheckoutRequest {
     pub transaction_id: String,
     pub coupon_code: Option<String>,
     pub payment_method_binding_id: Option<Uuid>,
+    #[serde(default)]
+    pub save_payment_method: bool,
+    #[serde(default)]
+    pub payment_method_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -105,6 +109,8 @@ mod tests {
             transaction_id: "operation-1".to_string(),
             coupon_code: None,
             payment_method_binding_id: None,
+            save_payment_method: false,
+            payment_method_name: None,
         };
         assert_eq!(
             checkout_request_hash(&checkout),

@@ -179,6 +179,8 @@ async fn full_discount_completes_initial_checkout_without_a_payment_request() {
         transaction_id: "free-checkout-1".into(),
         coupon_code: Some("FREE100".into()),
         payment_method_binding_id: None,
+        save_payment_method: false,
+        payment_method_name: None,
     };
     let checkout = billing_checkout::create(
         &repository,
@@ -306,6 +308,8 @@ async fn paid_coupon_checkout_reserves_capacity_and_terminal_failure_releases_it
             transaction_id: "paid-coupon-checkout-tx".into(),
             coupon_code: Some("HALFOFF".into()),
             payment_method_binding_id: Some(binding.payment_method_binding_id),
+            save_payment_method: false,
+            payment_method_name: None,
         },
     )
     .await

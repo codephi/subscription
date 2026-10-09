@@ -1,4 +1,4 @@
-use chrono::Datelike;
+use chrono::{DateTime, Datelike, Utc};
 
 use crate::{
     dto::billing::{
@@ -131,6 +131,7 @@ pub async fn create_payment_method_setup_session(
         .ensure_customer_plan_account(account_id, request.customer_plan_id)
         .await?;
     validate_setup_return_urls(&request.success_url, &request.cancel_url)?;
+    let display_name = validate_payment_method_display_name(request.card_name.as_deref())?;
     let payment_method_setup_id = uuid::Uuid::new_v4();
     let success_url = setup_success_return_url(&request.success_url, payment_method_setup_id)?;
     let connector = crate::repositories::stripe::StripeConnector::new(
@@ -156,6 +157,7 @@ pub async fn create_payment_method_setup_session(
             connection_id,
             request.customer_plan_id,
             &session.provider_setup_id,
+            display_name,
         )
         .await?;
     Ok(PaymentMethodSetupSessionResponse {
@@ -346,7 +348,8 @@ pub async fn create_payment_method_binding(
             ),
         ));
     }
-    let display_name = validate_payment_method_display_name(request.card_name.as_deref())?;
+    let display_name = validate_payment_method_display_name(request.card_name.as_deref())?
+        .or(setup.display_name.as_deref());
     repository
         .create_verified_payment_method_binding_with_name(
             account_id,
@@ -688,6 +691,18 @@ pub async fn list_payment_method_bindings(
     repository.list_payment_method_bindings(account_id).await
 }
 
+pub async fn rename_payment_method_binding(
+    repository: &DatabaseRepository,
+    account_id: uuid::Uuid,
+    binding_id: uuid::Uuid,
+    display_name: Option<&str>,
+) -> ApiResult<PaymentMethodBindingResponse> {
+    let display_name = validate_payment_method_display_name(display_name)?;
+    repository
+        .rename_payment_method_binding(account_id, binding_id, display_name)
+        .await
+}
+
 pub async fn remove_payment_method_binding(
     repository: &DatabaseRepository,
     account_id: uuid::Uuid,
@@ -847,6 +862,16 @@ pub async fn apply_confirmed_webhook(
     let period_end = cycle_end(anchor_at, recurrence, cycle_ordinal)?;
     repository
         .apply_payment_confirmation(webhook, period_end)
+        .await
+}
+
+pub async fn apply_provider_confirmed_webhook(
+    repository: &DatabaseRepository,
+    webhook: &ConfirmedBillingWebhook,
+    period_end: DateTime<Utc>,
+) -> ApiResult<ConfirmationOutcome> {
+    repository
+        .apply_payment_confirmation(webhook, Some(period_end))
         .await
 }
 

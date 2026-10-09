@@ -172,6 +172,7 @@ pub struct CheckoutRecord {
     pub collection_request_id: Option<Uuid>,
     pub coupon_code: Option<String>,
     pub payment_method_binding_id: Option<Uuid>,
+    pub save_payment_method: bool,
     pub completed_without_payment: bool,
     pub base_amount_minor: Option<i64>,
     pub discount_amount_minor: i64,
@@ -183,6 +184,15 @@ pub struct CheckoutRecord {
 }
 
 impl DatabaseRepository {
+    pub async fn checkout_id_for_collection(&self, collection_id: Uuid) -> ApiResult<Option<Uuid>> {
+        Ok(sqlx::query_scalar(
+            "SELECT checkout_id FROM billing_checkouts WHERE collection_request_id=$1",
+        )
+        .bind(collection_id)
+        .fetch_optional(&self.pool())
+        .await?)
+    }
+
     pub async fn recoverable_hosted_checkout(
         &self,
         checkout_id: Uuid,
@@ -232,14 +242,17 @@ impl DatabaseRepository {
         provider_session_id: &str,
         provider_payment_id: &str,
         payment_method_id: &str,
+        save_payment_method: bool,
         amount_minor: i64,
         currency: &str,
     ) -> ApiResult<HostedCheckoutConfirmation> {
         let mut transaction = self.pool().begin().await?;
         let row = sqlx::query(
             "SELECT hs.collection_request_id,hs.provider_session_id,hs.payment_method_binding_id, \
-             cr.account_id,cr.amount_minor,cr.currency FROM billing_hosted_payment_sessions hs \
+             cr.account_id,cr.amount_minor,cr.currency,c.save_payment_method,c.checkout_kind \
+             FROM billing_hosted_payment_sessions hs \
              JOIN collection_requests cr ON cr.collection_request_id=hs.collection_request_id \
+             JOIN billing_checkouts c ON c.checkout_id=hs.checkout_id \
              WHERE hs.checkout_id=$1 FOR UPDATE OF hs,cr",
         )
         .bind(checkout_id)
@@ -259,11 +272,19 @@ impl DatabaseRepository {
             || stored_currency != currency
             || provider_payment_id.is_empty()
             || payment_method_id.is_empty()
+            || (save_payment_method
+                && !row.get::<bool, _>("save_payment_method")
+                && row.get::<String, _>("checkout_kind") != "INITIAL")
         {
             return Err(ApiError::conflict("hosted_payment_snapshot_mismatch", format!("hosted session {provider_session_id} does not match checkout {checkout_id} snapshot")));
         }
-        sqlx::query("UPDATE payment_method_bindings SET provider_payment_method_reference=$2,status='ACTIVE' WHERE payment_method_binding_id=$1 AND status IN ('ACTIVE','PENDING')")
-            .bind(row.get::<Uuid, _>("payment_method_binding_id")).bind(payment_method_id).execute(&mut *transaction).await?;
+        if save_payment_method {
+            sqlx::query("UPDATE payment_method_bindings SET provider_payment_method_reference=$2,status='ACTIVE' WHERE payment_method_binding_id=$1 AND status IN ('ACTIVE','PENDING')")
+                .bind(row.get::<Uuid, _>("payment_method_binding_id")).bind(payment_method_id).execute(&mut *transaction).await?;
+        } else {
+            sqlx::query("UPDATE payment_method_bindings SET status='DETACHED' WHERE payment_method_binding_id=$1 AND status IN ('ACTIVE','PENDING')")
+                .bind(row.get::<Uuid, _>("payment_method_binding_id")).execute(&mut *transaction).await?;
+        }
         sqlx::query("UPDATE billing_payments SET provider_payment_id=$2 WHERE collection_request_id=$1 AND state='PENDING'")
             .bind(row.get::<Uuid, _>("collection_request_id")).bind(provider_payment_id).execute(&mut *transaction).await?;
         sqlx::query("UPDATE billing_hosted_payment_sessions SET status='COMPLETED' WHERE checkout_id=$1 AND status IN ('OPEN','COMPLETED')")
@@ -330,6 +351,23 @@ impl DatabaseRepository {
         .await?;
         transaction.commit().await?;
         Ok(binding_id)
+    }
+
+    pub async fn name_hosted_checkout_payment_method(
+        &self,
+        checkout_id: Uuid,
+        display_name: Option<&str>,
+    ) -> ApiResult<()> {
+        sqlx::query(
+            "UPDATE payment_method_bindings pmb SET display_name=$2 FROM billing_checkouts c \
+             WHERE c.checkout_id=$1 AND c.payment_method_binding_id=pmb.payment_method_binding_id \
+             AND c.save_payment_method=true AND pmb.status='ACTIVE'",
+        )
+        .bind(checkout_id)
+        .bind(display_name)
+        .execute(&self.pool())
+        .await?;
+        Ok(())
     }
 
     pub async fn mark_hosted_collection_pending(
@@ -930,9 +968,9 @@ async fn insert_checkout(
 ) -> ApiResult<CheckoutRecord> {
     let row = sqlx::query(
         "INSERT INTO billing_checkouts (checkout_id,account_id,customer_plan_id,checkout_kind, \
-         on_demand_plan_id,target_plan_version_id,transaction_id,idempotency_key,request_sha256,coupon_code,payment_method_binding_id, \
+             on_demand_plan_id,target_plan_version_id,transaction_id,idempotency_key,request_sha256,coupon_code,payment_method_binding_id,save_payment_method, \
          credit_quantity,success_url,cancel_url) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *",
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *",
     )
     .bind(Uuid::new_v4())
     .bind(account_id)
@@ -945,6 +983,7 @@ async fn insert_checkout(
     .bind(request_hash)
     .bind(request.coupon_code.as_deref())
     .bind(request.payment_method_binding_id)
+    .bind(request.save_payment_method)
     .bind(request.quantity.unwrap_or(1))
     .bind(request.success_url.as_deref())
     .bind(request.cancel_url.as_deref())
@@ -1001,6 +1040,7 @@ fn checkout_from_row(row: &sqlx::postgres::PgRow) -> CheckoutRecord {
         collection_request_id: row.get("collection_request_id"),
         coupon_code: row.get("coupon_code"),
         payment_method_binding_id: row.get("payment_method_binding_id"),
+        save_payment_method: row.get("save_payment_method"),
         completed_without_payment: row.get("completed_without_payment"),
         base_amount_minor: row.get("base_amount_minor"),
         discount_amount_minor: row.get("discount_amount_minor"),

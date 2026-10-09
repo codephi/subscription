@@ -24,3 +24,5 @@ pub mod stripe_webhooks;
 pub mod subscription_calendar;
 pub mod usage;
 pub mod wallets;
+
+pub mod stripe_provider_webhooks;

@@ -119,6 +119,8 @@ pub async fn create_checkout(
     topup_credits: Option<i64>,
     payment_method_binding_id: Option<Uuid>,
     target_plan_version_id: Option<Uuid>,
+    save_payment_method: bool,
+    payment_method_name: Option<String>,
     transaction: String,
     request_origin: Option<&str>,
 ) -> Result<CheckoutResponse, AppError> {
@@ -178,19 +180,19 @@ pub async fn create_checkout(
     let (success_url, cancel_url) = checkout_return_urls(&state.app_public_url, request_origin)?;
     let request = match kind {
         CheckoutKind::Initial => {
-            json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"success_url":success_url,"cancel_url":cancel_url})
+            json!({"checkout_kind":"INITIAL","customer_plan_id":plan_id,"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"save_payment_method":false,"success_url":success_url,"cancel_url":cancel_url})
         }
         CheckoutKind::OnDemand => {
             let topup_plan = setting(&state.pool, "topup_unit_plan_id")
                 .await?
                 .ok_or_else(catalog_missing)?;
-            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"quantity":topup_credits.unwrap_or(1),"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"success_url":success_url,"cancel_url":cancel_url})
+            json!({"checkout_kind":"ON_DEMAND","customer_plan_id":plan_id,"on_demand_plan_id":topup_plan,"quantity":topup_credits.unwrap_or(1),"transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,"save_payment_method":save_payment_method,"payment_method_name":payment_method_name,"success_url":success_url,"cancel_url":cancel_url})
         }
         CheckoutKind::PlanUpgrade => json!({
             "checkout_kind":"PLAN_UPGRADE", "customer_plan_id":plan_id,
             "target_plan_version_id":target_plan_version_id.ok_or_else(|| AppError::Invalid("informe o plano de destino".into()))?,
             "transaction_id":transaction,"payment_method_binding_id":payment_method_binding_id,
-            "success_url":success_url,"cancel_url":cancel_url
+            "success_url":success_url,"cancel_url":cancel_url,"save_payment_method":false
         }),
     };
     let body = state
@@ -219,7 +221,7 @@ pub async fn create_checkout(
     Ok(response)
 }
 
-fn checkout_return_urls(
+pub fn checkout_return_urls(
     public_app_url: &str,
     request_origin: Option<&str>,
 ) -> Result<(String, String), AppError> {
@@ -572,12 +574,15 @@ pub async fn dashboard_catalog(state: &AppState) -> Result<Value, AppError> {
 }
 
 async fn commercial_plan_catalog(pool: &SqlitePool) -> Result<Vec<Value>, AppError> {
-    let mut plans = Vec::with_capacity(3);
+    let mut plans = Vec::with_capacity(4);
     for (credits, amount) in [(100_i64, 2_000_i64), (200, 4_000), (400, 6_000)] {
         let plan_version_id = setting(pool, &format!("paid_plan_{credits}_id"))
             .await?
             .ok_or_else(catalog_missing)?;
         plans.push(json!({"plan_version_id":plan_version_id,"price_amount_minor":amount,"credit_units":credits}));
+    }
+    if let Some(plan_version_id) = setting(pool, "recurrence_test_plan_id").await? {
+        plans.push(json!({"plan_version_id":plan_version_id,"price_amount_minor":100,"credit_units":10,"name":"Tasklab — teste de recorrência"}));
     }
     Ok(plans)
 }

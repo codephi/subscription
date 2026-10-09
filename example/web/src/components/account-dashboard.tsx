@@ -2,6 +2,7 @@ import { History, LogOut, Play, Plus, Sparkles, WalletCards, Zap } from "lucide-
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -12,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { Dashboard, User } from "@/lib/api"
+import { PaymentMethodsCard } from "@/components/payment-methods-card"
 
 type CheckoutView = { checkout_id: string; status: string; amount_minor?: number | null; redirect_url?: string | null }
 type PaidPlan = { plan_version_id: string; price_amount_minor: number; credit_units: number }
@@ -34,6 +36,14 @@ type AccountDashboardProps = {
   checkoutBusy: boolean
   topupCredits: number
   setTopupCredits: (credits: number) => void
+  savePaymentMethod: boolean
+  setSavePaymentMethod: (save: boolean) => void
+  paymentMethodName: string
+  setPaymentMethodName: (name: string) => void
+  paymentMethodsBusy: boolean
+  onAddPaymentMethod: (name?: string) => void
+  onRenamePaymentMethod: (id: string, name?: string) => void
+  onRemovePaymentMethod: (id: string) => void
   executionBusy: boolean
   onSignOut: () => void
   onCheckout: (credits: number) => void
@@ -83,6 +93,7 @@ export function AccountDashboard(props: AccountDashboardProps) {
       <aside className="dashboard-aside">
         <PlanCard user={user} plans={view?.catalog.plans ?? []} currentPlanVersionId={view?.customer_plan?.plan_version_id} busy={props.checkoutBusy} onCheckout={() => props.onCheckout(props.topupCredits)} onUpgrade={props.onUpgrade} onCancel={props.onCancelPlan} cancelBusy={props.cancelBusy} onRegularize={props.onRegularize} regularizeBusy={props.regularizeBusy} canRegularize={view?.customer_plan?.commercial_status === "PAST_DUE"} topupCredits={props.topupCredits} />
         <CheckoutCard {...props} />
+        <PaymentMethodsCard methods={view?.payment_methods ?? []} busy={props.paymentMethodsBusy} onAdd={props.onAddPaymentMethod} onRename={props.onRenamePaymentMethod} onRemove={props.onRemovePaymentMethod} />
         <LedgerCard view={view} loading={loading} />
       </aside>
     </div>
@@ -219,6 +230,14 @@ function CheckoutCard(props: AccountDashboardProps) {
         <Input id="topup-credits" type="number" min={1} max={10000} step={1} value={props.topupCredits} onChange={(event) => props.setTopupCredits(Number(event.target.value))} disabled={props.checkoutBusy || pending} />
         <p className="text-sm text-muted-foreground">R$ 1,00 por crédito. O Subscription valida quantidade e valor.</p>
       </Field>
+      <Field orientation="horizontal" className="items-center">
+        <Checkbox id="save-payment-method" checked={props.savePaymentMethod} onCheckedChange={props.setSavePaymentMethod} disabled={props.checkoutBusy || pending} />
+        <FieldLabel htmlFor="save-payment-method">Salvar este cartão para próximas compras</FieldLabel>
+      </Field>
+      {props.savePaymentMethod && <Field>
+        <FieldLabel htmlFor="payment-method-name">Apelido do cartão (opcional)</FieldLabel>
+        <Input id="payment-method-name" maxLength={50} value={props.paymentMethodName} onChange={(event) => props.setPaymentMethodName(event.target.value)} placeholder="Ex.: Cartão pessoal" disabled={props.checkoutBusy || pending} />
+      </Field>}
       {props.checkoutBusy && <Alert role="status" aria-live="polite">
         <Spinner />
         <AlertTitle>Preparando sua {prepaid ? "recarga" : "assinatura"}</AlertTitle>

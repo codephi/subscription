@@ -15,7 +15,8 @@ use crate::{
         CreatePaymentMethodBindingRequest, CreatePaymentMethodFromCardRequest,
         CreatePaymentMethodFromCardResponse, CreatePaymentMethodSetupSessionRequest,
         CreateRenewalRegularizationRequest, CustomerPaymentMethodBindingResponse,
-        PaymentMethodSetupSessionResponse, UnmatchedPaymentCaseResponse,
+        PaymentMethodSetupSessionResponse, RenamePaymentMethodRequest,
+        UnmatchedPaymentCaseResponse,
     },
     error::{ApiError, ApiResult, ErrorResponse},
     services::billing,
@@ -35,6 +36,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_payment_method_binding))
         .routes(routes!(list_payment_method_bindings))
         .routes(routes!(remove_payment_method_binding))
+        .routes(routes!(rename_payment_method_binding))
         .routes(routes!(create_on_demand_purchase))
         .routes(routes!(create_initial_collection))
         .routes(routes!(get_collection_request))
@@ -301,6 +303,24 @@ async fn list_payment_method_bindings(
 ) -> ApiResult<Json<Vec<CustomerPaymentMethodBindingResponse>>> {
     let bindings = billing::list_payment_method_bindings(&state.database(), account_id).await?;
     Ok(Json(bindings.into_iter().map(Into::into).collect()))
+}
+
+#[utoipa::path(patch, path = "/v1/accounts/{account_id}/payment-method-bindings/{binding_id}", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("binding_id" = Uuid, Path)), request_body = RenamePaymentMethodRequest,
+    responses((status = 200, body = CustomerPaymentMethodBindingResponse), (status = 404, body = ErrorResponse)))]
+async fn rename_payment_method_binding(
+    State(state): State<AppState>,
+    Path((account_id, binding_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<RenamePaymentMethodRequest>,
+) -> ApiResult<Json<CustomerPaymentMethodBindingResponse>> {
+    let binding = billing::rename_payment_method_binding(
+        &state.database(),
+        account_id,
+        binding_id,
+        request.display_name.as_deref(),
+    )
+    .await?;
+    Ok(Json(binding.into()))
 }
 
 #[utoipa::path(delete, path = "/v1/accounts/{account_id}/payment-method-bindings/{binding_id}", tag = "Billing",

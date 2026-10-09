@@ -27,6 +27,7 @@ pub struct BillingConnectorConfiguration {
 pub struct RegisteredPaymentMethodSetup {
     pub billing_connection_id: Uuid,
     pub provider_setup_id: String,
+    pub display_name: Option<String>,
 }
 
 pub struct PaymentMethodBindingRemoval {
@@ -35,6 +36,32 @@ pub struct PaymentMethodBindingRemoval {
 }
 
 impl DatabaseRepository {
+    pub async fn rename_payment_method_binding(
+        &self,
+        account_id: Uuid,
+        binding_id: Uuid,
+        display_name: Option<&str>,
+    ) -> ApiResult<PaymentMethodBindingResponse> {
+        let row = sqlx::query(
+            "UPDATE payment_method_bindings SET display_name=$3 WHERE account_id=$1 \
+             AND payment_method_binding_id=$2 AND status='ACTIVE' RETURNING *",
+        )
+        .bind(account_id)
+        .bind(binding_id)
+        .bind(display_name)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "payment_method_not_found",
+                format!(
+                    "active payment method {binding_id} does not exist in account {account_id}"
+                ),
+            )
+        })?;
+        Ok(binding_from_row(&row))
+    }
+
     pub async fn active_stripe_billing_connection(&self, account_id: Uuid) -> ApiResult<Uuid> {
         let ids: Vec<Uuid> = sqlx::query_scalar(
             "SELECT billing_connection_id FROM billing_connections \
@@ -64,17 +91,19 @@ impl DatabaseRepository {
         connection_id: Uuid,
         customer_plan_id: Uuid,
         provider_setup_id: &str,
+        display_name: Option<&str>,
     ) -> ApiResult<()> {
         sqlx::query(
             "INSERT INTO payment_method_setup_sessions \
-             (payment_method_setup_id,provider_setup_id,billing_connection_id,account_id,customer_plan_id) \
-             VALUES ($1,$2,$3,$4,$5)",
+             (payment_method_setup_id,provider_setup_id,billing_connection_id,account_id,customer_plan_id,display_name) \
+             VALUES ($1,$2,$3,$4,$5,$6)",
         )
         .bind(payment_method_setup_id)
         .bind(provider_setup_id)
         .bind(connection_id)
         .bind(account_id)
         .bind(customer_plan_id)
+        .bind(display_name)
         .execute(&self.pool())
         .await?;
         Ok(())
@@ -87,7 +116,7 @@ impl DatabaseRepository {
         payment_method_setup_id: Uuid,
     ) -> ApiResult<RegisteredPaymentMethodSetup> {
         let row = sqlx::query(
-            "SELECT billing_connection_id,provider_setup_id FROM payment_method_setup_sessions \
+            "SELECT billing_connection_id,provider_setup_id,display_name FROM payment_method_setup_sessions \
              WHERE account_id=$1 AND customer_plan_id=$2 AND payment_method_setup_id=$3",
         )
         .bind(account_id)
@@ -102,6 +131,7 @@ impl DatabaseRepository {
         Ok(RegisteredPaymentMethodSetup {
             billing_connection_id: row.get("billing_connection_id"),
             provider_setup_id: row.get("provider_setup_id"),
+            display_name: row.get("display_name"),
         })
     }
 

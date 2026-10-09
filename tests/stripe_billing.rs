@@ -255,6 +255,7 @@ async fn payment_setup_reference_resolves_inside_subscription_without_client_int
             connection.billing_connection_id,
             fixture.customer_plan_id,
             "cs_test_provider_session",
+            None,
         )
         .await
         .unwrap();
@@ -758,6 +759,9 @@ async fn hosted_payment_collects_and_saves_the_card_in_the_same_checkout() {
             cancel_url: "https://client.example/cancel".into(),
             expires_at: 1_900_000_000,
             provider_idempotency_key: "checkout:checkout_test:hosted-session:v2".into(),
+            allow_payment_method_save: true,
+            is_subscription: false,
+            customer_plan_id: "plan_test".into(),
         })
         .await
         .unwrap();
@@ -765,7 +769,7 @@ async fn hosted_payment_collects_and_saves_the_card_in_the_same_checkout() {
     assert_eq!(session.provider_session_id, "cs_test_pay");
     assert!(request.contains("mode=payment"));
     assert!(request.contains("line_items%5B0%5D%5Bprice_data%5D%5Bunit_amount%5D=2500"));
-    assert!(request.contains("payment_intent_data%5Bsetup_future_usage%5D=off_session"));
+    assert!(request.contains("saved_payment_method_options%5Bpayment_method_save%5D=enabled"));
     assert!(request.contains("metadata%5Bcollection_request_id%5D=collection_test"));
     assert!(
         request.contains("session_id%3D{CHECKOUT_SESSION_ID}"),
@@ -776,21 +780,56 @@ async fn hosted_payment_collects_and_saves_the_card_in_the_same_checkout() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hosted_subscription_uses_monthly_stripe_billing_and_plan_metadata() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"cs_test_subscription","url":"https://checkout.stripe.com/c/pay/cs_test_subscription"}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
+    connector
+        .create_hosted_payment_session(&HostedPaymentSessionCommand {
+            customer_reference: "cus_test".into(),
+            client_reference_id: "checkout_test".into(),
+            collection_request_id: "collection_test".into(),
+            amount_minor: 100,
+            currency: "BRL".into(),
+            success_url: "https://client.example/done?session_id={CHECKOUT_SESSION_ID}".into(),
+            cancel_url: "https://client.example/cancel".into(),
+            expires_at: 1_900_000_000,
+            provider_idempotency_key: "checkout:checkout_test:hosted-session:v2".into(),
+            allow_payment_method_save: false,
+            is_subscription: true,
+            customer_plan_id: "plan_test".into(),
+        })
+        .await
+        .unwrap();
+    let request = server.finish().await;
+    assert!(request.contains("mode=subscription"));
+    assert!(
+        request.contains("line_items%5B0%5D%5Bprice_data%5D%5Brecurring%5D%5Binterval%5D=month"),
+        "Stripe Checkout should receive recurring month terms: {request}"
+    );
+    assert!(request.contains("subscription_data%5Bmetadata%5D%5Bcustomer_plan_id%5D=plan_test"));
+    assert!(!request.contains("saved_payment_method_options"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hosted_payment_retrieval_requires_paid_session_and_saved_method() {
     let server = FakeStripeServer::responding_with(
-        r#"{"id":"cs_test_pay","customer":"cus_test","client_reference_id":"checkout_test","mode":"payment","payment_status":"paid","amount_total":2500,"currency":"brl","payment_intent":{"id":"pi_test_pay","status":"succeeded","payment_method":{"id":"pm_saved_test"}}}"#,
+        r#"{"id":"cs_test_pay","customer":"cus_test","client_reference_id":"checkout_test","mode":"payment","payment_status":"paid","amount_total":2500,"currency":"brl","payment_intent":{"id":"pi_test_pay","status":"succeeded","payment_method":{"id":"pm_saved_test","allow_redisplay":"always"}}}"#,
     ).await;
     let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
     let receipt = connector
-        .retrieve_hosted_payment("cs_test_pay", "cus_test", "checkout_test")
+        .retrieve_hosted_payment("cs_test_pay", "cus_test", "checkout_test", "payment")
         .await
         .unwrap();
     let request = server.finish().await;
     assert!(request.starts_with(
-        "GET /v1/checkout/sessions/cs_test_pay?expand%5B%5D=payment_intent.payment_method HTTP/1.1"
+        "GET /v1/checkout/sessions/cs_test_pay?expand%5B%5D=payment_intent.payment_method&expand%5B%5D=subscription.latest_invoice.payment_intent.payment_method HTTP/1.1"
     ));
     assert_eq!(receipt.payment_intent_id, "pi_test_pay");
     assert_eq!(receipt.payment_method_id, "pm_saved_test");
+    assert!(receipt.saved_for_future);
     assert_eq!(
         (receipt.amount_minor, receipt.currency.as_str()),
         (2_500, "BRL")

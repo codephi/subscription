@@ -11,7 +11,6 @@ use crate::{
         billing_confirmation::{ConfirmationResult, ConfirmedBillingWebhook},
         billing_status_webhooks::PaymentStatusWebhookResult,
         database::DatabaseRepository,
-        stripe::StripeConnector,
     },
     services::billing,
 };
@@ -39,7 +38,9 @@ struct StripeEventData {
 #[derive(Deserialize)]
 struct StripePaymentIntent {
     id: String,
+    #[serde(default)]
     amount: i64,
+    #[serde(default)]
     currency: String,
     #[serde(default)]
     customer: Option<String>,
@@ -47,6 +48,12 @@ struct StripePaymentIntent {
     amount_refunded: Option<i64>,
     #[serde(default)]
     payment_intent: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    current_period_start: Option<i64>,
+    #[serde(default)]
+    current_period_end: Option<i64>,
     #[serde(default)]
     metadata: StripeMetadata,
 }
@@ -91,8 +98,30 @@ pub async fn process_stripe_webhook(
     if event_value.get("type").and_then(serde_json::Value::as_str)
         == Some("checkout.session.completed")
     {
-        return process_hosted_checkout_webhook(repository, connection_id, event_value, payload)
-            .await;
+        return super::stripe_provider_webhooks::process_hosted_checkout_webhook(
+            repository,
+            connection_id,
+            event_value,
+            payload,
+        )
+        .await;
+    }
+    if event_value.get("type").and_then(serde_json::Value::as_str) == Some("invoice.paid") {
+        return super::stripe_provider_webhooks::process_paid_invoice(
+            repository,
+            connection_id,
+            event_value,
+            payload,
+        )
+        .await;
+    }
+    if event_value.get("type").and_then(serde_json::Value::as_str) == Some("invoice.payment_failed")
+    {
+        let subscription_id = json_string(&event_value, "/data/object/subscription")?;
+        repository
+            .mark_provider_subscription_status(&subscription_id, "PAST_DUE", None, None)
+            .await?;
+        return Ok(webhook_result("APPLIED"));
     }
     let event: StripeEvent = serde_json::from_value(event_value).map_err(ApiError::invalid_json)?;
     if event.event_type == "charge.refunded" {
@@ -118,6 +147,31 @@ pub async fn process_stripe_webhook(
         return Ok(BillingWebhookResponse {
             result: if inserted { "OBSERVED" } else { "DUPLICATE" }.to_string(),
         });
+    }
+    if event.event_type == "customer.subscription.updated"
+        || event.event_type == "customer.subscription.deleted"
+    {
+        let status = if event.event_type.ends_with("deleted") {
+            "CANCELED"
+        } else {
+            match event.data.object.status.as_deref() {
+                Some("past_due") => "PAST_DUE",
+                Some("unpaid") => "UNPAID",
+                Some("canceled") => "CANCELED",
+                _ => "ACTIVE",
+            }
+        };
+        repository
+            .mark_provider_subscription_status(
+                &event.data.object.id,
+                status,
+                super::stripe_provider_webhooks::stripe_time(
+                    event.data.object.current_period_start,
+                ),
+                super::stripe_provider_webhooks::stripe_time(event.data.object.current_period_end),
+            )
+            .await?;
+        return Ok(webhook_result("APPLIED"));
     }
     let webhook = normalized_confirmation(event, payload)?;
     if webhook.event_type != "payment.confirmed" {
@@ -163,7 +217,13 @@ pub async fn process_shared_stripe_webhook(
         .get("type")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    if event_type != "checkout.session.completed" && !is_payment_event(event_type) {
+    if event_type != "checkout.session.completed"
+        && event_type != "invoice.paid"
+        && event_type != "invoice.payment_failed"
+        && event_type != "customer.subscription.updated"
+        && event_type != "customer.subscription.deleted"
+        && !is_payment_event(event_type)
+    {
         return Ok(webhook_result("IGNORED"));
     }
     let Some(collection_id) = event
@@ -171,6 +231,15 @@ pub async fn process_shared_stripe_webhook(
         .and_then(serde_json::Value::as_str)
         .and_then(|value| Uuid::parse_str(value).ok())
     else {
+        if event_type == "invoice.paid" || event_type == "invoice.payment_failed" {
+            return super::stripe_provider_webhooks::process_stripe_webhook_for_invoice_scope(
+                repository,
+                signature,
+                payload,
+                shared_secret,
+            )
+            .await;
+        }
         return Ok(webhook_result("IGNORED"));
     };
     let Some(scope) = find_webhook_scope(repository, collection_id).await? else {
@@ -183,104 +252,7 @@ pub async fn process_shared_stripe_webhook(
     process_stripe_webhook(repository, scope.billing_connection_id, signature, payload).await
 }
 
-async fn process_hosted_checkout_webhook(
-    repository: &DatabaseRepository,
-    connection_id: Uuid,
-    event: serde_json::Value,
-    payload: &[u8],
-) -> ApiResult<BillingWebhookResponse> {
-    let event_id = json_string(&event, "/id")?;
-    let session = event.pointer("/data/object").ok_or_else(|| {
-        ApiError::unprocessable(
-            "stripe_checkout_session_missing",
-            "checkout.session.completed has no session object",
-        )
-    })?;
-    if session
-        .get("payment_status")
-        .and_then(serde_json::Value::as_str)
-        != Some("paid")
-    {
-        return Ok(webhook_result("IGNORED"));
-    }
-    let session_id = json_string(session, "/id")?;
-    let checkout_ref = json_string(session, "/client_reference_id")?;
-    let checkout_id = Uuid::parse_str(&checkout_ref).map_err(|error| {
-        ApiError::unprocessable(
-            "invalid_hosted_checkout_reference",
-            format!("checkout reference {checkout_ref:?} must be a UUID: {error}"),
-        )
-    })?;
-    let customer_id = json_string(session, "/customer")?;
-    let checkout = repository.checkout(checkout_id, None).await?;
-    let integration = repository
-        .integration_secrets(checkout.account_id, connection_id)
-        .await?;
-    let managed = integration.secret_reference.starts_with("v1:");
-    let api_secret = billing::resolve_connection_secret(
-        repository,
-        checkout.account_id,
-        connection_id,
-        "stripe_api",
-        &integration.secret_reference,
-        managed,
-    )?;
-    let connected_account = integration
-        .external_account_reference
-        .starts_with("acct_")
-        .then_some(integration.external_account_reference);
-    let receipt = StripeConnector::new(api_secret, connected_account)
-        .retrieve_hosted_payment(&session_id, &customer_id, &checkout_id.to_string())
-        .await
-        .map_err(|error| {
-            ApiError::external("stripe_hosted_payment_retrieval_failed", error.to_string())
-        })?;
-    let snapshot = repository
-        .confirm_hosted_payment(
-            checkout_id,
-            &session_id,
-            &receipt.payment_intent_id,
-            &receipt.payment_method_id,
-            receipt.amount_minor,
-            &receipt.currency,
-        )
-        .await?;
-    let created = event
-        .get("created")
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or_default();
-    let occurred_at = Utc.timestamp_opt(created, 0).single().ok_or_else(|| {
-        ApiError::unprocessable(
-            "invalid_stripe_event_time",
-            format!("Stripe event {event_id} has invalid created value {created}"),
-        )
-    })?;
-    let webhook = ConfirmedBillingWebhook {
-        provider: "STRIPE".to_string(),
-        provider_event_id: event_id,
-        event_type: "payment.confirmed".to_string(),
-        payload_sha256: sha256_hex(payload),
-        collection_request_id: snapshot.collection_request_id,
-        provider_payment_id: receipt.payment_intent_id,
-        amount_minor: snapshot.amount_minor,
-        currency: snapshot.currency,
-        occurred_at,
-    };
-    match billing::apply_confirmed_webhook(repository, &webhook).await {
-        Ok(outcome) => Ok(webhook_result(match outcome.result {
-            ConfirmationResult::Applied => "APPLIED",
-            ConfirmationResult::Duplicate => "DUPLICATE",
-            ConfirmationResult::Rejected => "REJECTED",
-        })),
-        Err(error) if error.code() == "collection_request_not_found" => {
-            billing::record_unmatched_payment(repository, connection_id, &webhook).await?;
-            Ok(webhook_result("UNMATCHED"))
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn json_string(value: &serde_json::Value, path: &str) -> ApiResult<String> {
+pub(super) fn json_string(value: &serde_json::Value, path: &str) -> ApiResult<String> {
     value
         .pointer(path)
         .and_then(serde_json::Value::as_str)
@@ -341,7 +313,7 @@ fn is_payment_event(event_type: &str) -> bool {
     )
 }
 
-fn webhook_result(result: &str) -> BillingWebhookResponse {
+pub(super) fn webhook_result(result: &str) -> BillingWebhookResponse {
     BillingWebhookResponse {
         result: result.to_string(),
     }
@@ -456,7 +428,7 @@ fn decode_hex(value: &str) -> Result<Vec<u8>, ()> {
         .collect()
 }
 
-fn sha256_hex(payload: &[u8]) -> String {
+pub(super) fn sha256_hex(payload: &[u8]) -> String {
     Sha256::digest(payload)
         .iter()
         .map(|byte| format!("{byte:02x}"))

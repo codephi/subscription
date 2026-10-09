@@ -54,6 +54,18 @@ pub async fn setup_catalog(state: &AppState) -> Result<()> {
         }))).await?;
         save_setting(&state.pool, &key, &plan.to_string()).await?;
     }
+    let recurrence_test_plan = stored_id_or(
+        &state.pool,
+        "recurrence_test_plan_id",
+        create_plan(&state.subscription, subscription, json!({
+            "name":"Tasklab — teste de recorrência", "commercial_model":"PAID",
+            "price_amount_minor":100, "currency":"BRL", "recurrence":"MONTHLY",
+            "admission_policy":"OPEN", "accepted_payment_methods":["CARD"],
+            "granted_credit_units":"10", "product_ids":[product_id]
+        })),
+    ).await?;
+    save_setting(&state.pool, "recurrence_test_plan_id", &recurrence_test_plan.to_string()).await?;
+    save_setting(&state.pool, "paid_plan_id", &recurrence_test_plan.to_string()).await?;
     let topup = stored_id_or(
         &state.pool,
         "topup_unit_plan_id",

@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use serde_json::{json, Value};
@@ -22,6 +22,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/dashboard", get(dashboard))
         .route("/api/checkouts", post(checkout))
         .route("/api/checkouts/{id}", get(checkout_status))
+        .route("/api/payment-methods", get(payment_methods))
+        .route("/api/payment-method-sessions", post(payment_method_session))
+        .route("/api/payment-method-bindings", post(confirm_payment_method))
+        .route("/api/payment-methods/{id}", patch(rename_payment_method).delete(remove_payment_method))
         .route("/api/executions", post(execute))
         .route("/api/history", get(history))
 }
@@ -134,6 +138,8 @@ async fn checkout(
         request.topup_credits,
         request.payment_method_binding_id,
         request.target_plan_version_id,
+        request.save_payment_method,
+        request.payment_method_name,
         transaction,
         headers
             .get(header::ORIGIN)
@@ -155,6 +161,68 @@ async fn checkout_status(
 ) -> Result<Json<CheckoutResponse>, AppError> {
     let user = auth::current_user(&state, &headers).await?;
     Ok(Json(services::refresh_checkout(&state, &user, id).await?))
+}
+
+async fn payment_methods(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    let body = state.subscription.get(&format!("/v1/accounts/{}/payment-method-bindings", user.account_id)).await?;
+    Ok(Json(body))
+}
+
+async fn payment_method_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<PaymentMethodSetupRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    let customer_plan_id = user.customer_plan_id.as_deref().ok_or_else(|| AppError::Conflict("ative um plano antes de cadastrar um cartão".into()))?;
+    let (success_url, cancel_url) = services::checkout_return_urls(&state.app_public_url, headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()))?;
+    let body = state.subscription.post::<Value>(
+        &format!("/v1/accounts/{}/payment-method-setup-sessions", user.account_id), None,
+        &json!({"customer_plan_id":customer_plan_id,"success_url":success_url,"cancel_url":cancel_url,"card_name":request.card_name}),
+    ).await?;
+    Ok(Json(body))
+}
+
+async fn confirm_payment_method(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ConfirmPaymentMethodRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    let customer_plan_id = user.customer_plan_id.as_deref().ok_or_else(|| AppError::Conflict("ative um plano antes de cadastrar um cartão".into()))?;
+    let body = state.subscription.post::<Value>(
+        &format!("/v1/accounts/{}/payment-method-bindings", user.account_id), None,
+        &json!({"customer_plan_id":customer_plan_id,"payment_method_setup_id":request.payment_method_setup_id,"card_name":request.card_name}),
+    ).await?;
+    Ok(Json(body))
+}
+
+async fn rename_payment_method(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(request): Json<RenamePaymentMethodRequest>,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    let body = state.subscription.patch::<Value>(
+        &format!("/v1/accounts/{}/payment-method-bindings/{id}", user.account_id),
+        &json!({"display_name":request.display_name}),
+    ).await?;
+    Ok(Json(body))
+}
+
+async fn remove_payment_method(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    state.subscription.delete(&format!("/v1/accounts/{}/payment-method-bindings/{id}", user.account_id)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn execute(
@@ -220,13 +288,14 @@ async fn dashboard(
             .ok(),
         None => None,
     };
+    let payment_methods = state.subscription.get(&format!("/v1/accounts/{}/payment-method-bindings", user.account_id)).await.unwrap_or_else(|_| json!([]));
     let checkouts=sqlx::query_as::<_,CheckoutRow>("SELECT checkout_id,checkout_kind,status,amount_minor,currency,granted_credit_units,transaction_id,created_at FROM checkouts WHERE user_id=? ORDER BY created_at DESC,checkout_id DESC LIMIT 20")
         .bind(&user.user_id).fetch_all(&state.pool).await?;
     let executions=sqlx::query_as::<_,ExecutionRow>("SELECT execution_id,task_name,result_text,credits_debited,status,created_at FROM executions WHERE user_id=? ORDER BY created_at DESC LIMIT 20")
         .bind(&user.user_id).fetch_all(&state.pool).await?;
     Ok(Json(
         json!({"account":auth::account_response(user)?,"catalog":catalog,"wallet_statement":wallet,
-        "eligibility":eligibility,"meter":meter,"item_statement":item_statement,"customer_plan":customer_plan,"checkouts":checkouts,"executions":executions}),
+        "eligibility":eligibility,"meter":meter,"item_statement":item_statement,"customer_plan":customer_plan,"payment_methods":payment_methods,"checkouts":checkouts,"executions":executions}),
     ))
 }
 

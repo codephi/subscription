@@ -24,6 +24,9 @@ export default function App() {
   const [checkoutAutoPollDone, setCheckoutAutoPollDone] = useState(false)
   const [checkoutRefreshBusy, setCheckoutRefreshBusy] = useState(false)
   const [topupCredits, setTopupCredits] = useState(10)
+  const [savePaymentMethod, setSavePaymentMethod] = useState(false)
+  const [paymentMethodName, setPaymentMethodName] = useState("")
+  const setupReturnProcessed = useRef<string | null>(null)
   const checkoutKey = useRef<CheckoutKey | null>(null)
   const executionTransaction = useRef<string | null>(null)
 
@@ -43,6 +46,14 @@ export default function App() {
     if (checkout?.status !== "PAID" || !user) return
     void api<User>("/me").then(setUser).then(() => queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] }))
   }, [checkout?.checkout_id, checkout?.status, queryClient, user?.username])
+  useEffect(() => {
+    const setupId = new URLSearchParams(window.location.search).get("payment_method_setup_id")
+    if (!user || !setupId || setupReturnProcessed.current === setupId) return
+    setupReturnProcessed.current = setupId
+    void api("/payment-method-bindings", { method: "POST", body: JSON.stringify({ payment_method_setup_id: setupId }) })
+      .then(() => { window.history.replaceState({}, "", window.location.pathname); return queryClient.invalidateQueries({ queryKey: ["dashboard", user.username] }) })
+      .catch(reportError(setError))
+  }, [queryClient, user?.username])
 
   const authMutation = useMutation({
     mutationFn: submitCredentials,
@@ -67,6 +78,21 @@ export default function App() {
   const regularizeMutation = useMutation({
     mutationFn: (transactionId: string) => api("/plan/regularize", { method: "POST", headers: { "idempotency-key": transactionId }, body: JSON.stringify({ transaction_id: transactionId }) }),
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["dashboard"] }); setError("") },
+    onError: reportError(setError),
+  })
+  const paymentMethodSetupMutation = useMutation({
+    mutationFn: (cardName?: string) => api<{ redirect_url: string }>("/payment-method-sessions", { method: "POST", body: JSON.stringify({ card_name: cardName }) }),
+    onSuccess: (result) => { window.location.assign(result.redirect_url) },
+    onError: reportError(setError),
+  })
+  const paymentMethodRenameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name?: string }) => api(`/payment-methods/${id}`, { method: "PATCH", body: JSON.stringify({ display_name: name }) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard", user?.username] }),
+    onError: reportError(setError),
+  })
+  const paymentMethodRemoveMutation = useMutation({
+    mutationFn: (id: string) => api(`/payment-methods/${id}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard", user?.username] }),
     onError: reportError(setError),
   })
   const executeMutation = useMutation({
@@ -99,6 +125,14 @@ export default function App() {
     onRefreshCheckout={() => refreshCheckout(checkout, user, setCheckout, checkoutKey, setCheckoutRefreshBusy, setError)}
     topupCredits={topupCredits}
     setTopupCredits={setTopupCredits}
+    savePaymentMethod={savePaymentMethod}
+    setSavePaymentMethod={setSavePaymentMethod}
+    paymentMethodName={paymentMethodName}
+    setPaymentMethodName={setPaymentMethodName}
+    paymentMethodsBusy={paymentMethodSetupMutation.isPending || paymentMethodRenameMutation.isPending || paymentMethodRemoveMutation.isPending}
+    onAddPaymentMethod={(name) => paymentMethodSetupMutation.mutate(name)}
+    onRenamePaymentMethod={(id, name) => paymentMethodRenameMutation.mutate({ id, name })}
+    onRemovePaymentMethod={(id) => paymentMethodRemoveMutation.mutate(id)}
     taskName={taskName}
     setTaskName={setTaskName}
     taskResult={taskResult}
@@ -106,7 +140,7 @@ export default function App() {
     checkoutBusy={checkoutMutation.isPending}
     executionBusy={executeMutation.isPending}
     onSignOut={() => signOut(user, queryClient, setUser, setCheckout, setError, checkoutKey, executionTransaction)}
-    onCheckout={(credits) => startCheckout("ON_DEMAND", user, credits, checkoutKey, checkoutMutation.mutate)}
+    onCheckout={(credits) => startCheckout("ON_DEMAND", user, credits, checkoutKey, checkoutMutation.mutate, undefined, savePaymentMethod, paymentMethodName)}
     onUpgrade={(planVersionId) => startCheckout("PLAN_UPGRADE", user, 1, checkoutKey, checkoutMutation.mutate, planVersionId)}
     onCancelPlan={() => cancelPlanMutation.mutate()}
     cancelBusy={cancelPlanMutation.isPending}
@@ -184,14 +218,14 @@ function clearFinishedCheckout(result: CheckoutView, user: User | null, key: Rea
   }
 }
 
-function startCheckout(kind: CheckoutKind, user: User, credits: number, key: React.MutableRefObject<CheckoutKey | null>, mutate: (input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string; target_plan_version_id?: string }) => void, targetPlanVersionId?: string) {
+function startCheckout(kind: CheckoutKind, user: User, credits: number, key: React.MutableRefObject<CheckoutKey | null>, mutate: (input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string; target_plan_version_id?: string; save_payment_method?: boolean; payment_method_name?: string }) => void, targetPlanVersionId?: string, saveFuture = false, paymentMethodName = "") {
   const scope = `${kind}_${kind === "ON_DEMAND" ? credits : targetPlanVersionId ?? "initial"}`
   if (key.current?.scope !== scope) {
     const storageKey = `tasklab_checkout_${user.username}_${scope}`
     key.current = { scope, value: sessionStorage.getItem(storageKey) ?? crypto.randomUUID() }
     sessionStorage.setItem(storageKey, key.current.value)
   }
-  mutate({ checkout_kind: kind, topup_credits: credits, idempotencyKey: key.current.value, target_plan_version_id: targetPlanVersionId })
+  mutate({ checkout_kind: kind, topup_credits: credits, idempotencyKey: key.current.value, target_plan_version_id: targetPlanVersionId, save_payment_method: saveFuture, payment_method_name: paymentMethodName.trim() || undefined })
 }
 
 async function refreshAccount(queryClient: ReturnType<typeof useQueryClient>, setUser: (user: User) => void) {
@@ -199,9 +233,9 @@ async function refreshAccount(queryClient: ReturnType<typeof useQueryClient>, se
   setUser(await api<User>("/me"))
 }
 
-function submitCheckout(input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string; target_plan_version_id?: string }) {
+function submitCheckout(input: { checkout_kind: CheckoutKind; topup_credits: number; idempotencyKey: string; target_plan_version_id?: string; save_payment_method?: boolean; payment_method_name?: string }) {
   const intent = input.checkout_kind === "ON_DEMAND"
-    ? { checkout_kind: input.checkout_kind, topup_credits: input.topup_credits }
+    ? { checkout_kind: input.checkout_kind, topup_credits: input.topup_credits, ...(input.save_payment_method ? { save_payment_method: true, payment_method_name: input.payment_method_name } : {}) }
     : input.checkout_kind === "PLAN_UPGRADE"
       ? { checkout_kind: input.checkout_kind, target_plan_version_id: input.target_plan_version_id }
       : { checkout_kind: input.checkout_kind }

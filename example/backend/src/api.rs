@@ -50,6 +50,10 @@ impl SubscriptionClient {
         .await
     }
 
+    pub async fn delete(&self, path: &str) -> Result<Value, AppError> {
+        self.send(Method::DELETE, path, None, None).await
+    }
+
     pub async fn put<T: Serialize>(&self, path: &str, body: &T) -> Result<Value, AppError> {
         self.send(
             Method::PUT,

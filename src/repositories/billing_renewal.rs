@@ -33,6 +33,8 @@ impl DatabaseRepository {
              WHERE cp.commercial_status='ACTIVE_PAID' AND cp.activation_status='ACTIVATED' \
                AND cp.renewal_status='CURRENT' AND p.commercial_model='PAID' AND p.revoked_at IS NULL \
                AND p.recurrence='MONTHLY' AND cy.current_period_end<=$1 \
+               AND NOT EXISTS (SELECT 1 FROM provider_managed_subscriptions pms \
+                 WHERE pms.customer_plan_id=cp.customer_plan_id AND pms.status='ACTIVE') \
                AND NOT EXISTS (SELECT 1 FROM collection_requests cr WHERE cr.customer_plan_id=cp.customer_plan_id \
                  AND cr.request_kind='RENEWAL' AND cr.transaction_id='renewal:'||cp.customer_plan_id::text||':'||cy.customer_plan_cycle_id::text) \
              ON CONFLICT DO NOTHING",

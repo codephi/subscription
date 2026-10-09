@@ -184,6 +184,21 @@ async fn process_claim_inner(
                 .finish_checkout(record.checkout_id, collection.collection_request_id)
                 .await?;
             if let Some(hosted) = hosted {
+                if request.save_payment_method {
+                    let name = request.payment_method_name.as_deref().map(str::trim);
+                    if name.is_some_and(|value| value.len() > 50) {
+                        return Err(ApiError::unprocessable(
+                            "invalid_card_display_name",
+                            "payment_method_name must be at most 50 characters",
+                        ));
+                    }
+                    repository
+                        .name_hosted_checkout_payment_method(
+                            record.checkout_id,
+                            name.filter(|value| !value.is_empty()),
+                        )
+                        .await?;
+                }
                 repository
                     .mark_hosted_collection_pending(
                         record.checkout_id,
@@ -300,6 +315,9 @@ async fn create_hosted_session(
                 "checkout:{}:hosted-session:v2",
                 checkout.checkout_id
             ),
+            allow_payment_method_save: request.save_payment_method,
+            is_subscription: request.checkout_kind == crate::dto::checkouts::CheckoutKind::Initial,
+            customer_plan_id: request.customer_plan_id.to_string(),
         })
         .await
         .map_err(stripe_error)?;
@@ -658,6 +676,8 @@ mod tests {
             transaction_id: "operation-1".to_string(),
             coupon_code: None,
             payment_method_binding_id: None,
+            save_payment_method: false,
+            payment_method_name: None,
         };
         assert!(validate_request(&request, "key-1").is_ok());
         request.on_demand_plan_id = Some(Uuid::new_v4());
@@ -702,6 +722,8 @@ mod tests {
             transaction_id: "operation-2".into(),
             coupon_code: None,
             payment_method_binding_id: None,
+            save_payment_method: false,
+            payment_method_name: None,
         };
         assert!(validate_return_urls(&request).is_ok());
         request.cancel_url = Some("http://client.example/cancel".into());

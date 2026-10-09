@@ -37,6 +37,27 @@ test("checkout asks Subscription for a hosted top-up and reports its confirmed s
   await expect(page.locator(".balance-value")).toHaveText("25")
 })
 
+test("checkout sends explicit saved-card consent and an optional card label", async ({ page }) => {
+  let checkoutBody: unknown
+  await page.route("**/api/me", (route) => route.fulfill({ status: 200, json: account() }))
+  await page.route("**/api/dashboard", (route) => route.fulfill({ status: 200, json: dashboard("10") }))
+  await page.route("**/api/checkouts", async (route) => {
+    checkoutBody = route.request().postDataJSON()
+    await route.fulfill({ status: 202, json: { checkout_id: "checkout-save", status: "PENDING" } })
+  })
+
+  await page.goto("/")
+  await page.getByRole("checkbox", { name: "Salvar este cartão para próximas compras" }).check()
+  await page.getByLabel("Apelido do cartão (opcional)").fill("Cartão pessoal")
+  await page.getByRole("button", { name: "Iniciar recarga" }).click()
+  await expect.poll(() => checkoutBody).toEqual({
+    checkout_kind: "ON_DEMAND",
+    topup_credits: 10,
+    save_payment_method: true,
+    payment_method_name: "Cartão pessoal",
+  })
+})
+
 test("newly registered account already has its trial and never collects card details", async ({ page }) => {
   let registered = false
   await page.route("**/api/me", (route) => registered

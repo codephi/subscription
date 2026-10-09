@@ -15,6 +15,7 @@ pub mod billing_investigation;
 pub mod billing_on_demand;
 pub mod billing_on_demand_confirmation;
 pub mod billing_operations;
+pub mod billing_provider_subscriptions;
 pub mod billing_regularization;
 mod billing_renewal;
 pub mod billing_status_webhooks;

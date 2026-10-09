@@ -66,6 +66,9 @@ pub struct HostedPaymentSessionCommand {
     pub cancel_url: String,
     pub expires_at: i64,
     pub provider_idempotency_key: String,
+    pub allow_payment_method_save: bool,
+    pub is_subscription: bool,
+    pub customer_plan_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
