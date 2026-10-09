@@ -100,7 +100,16 @@ pub(super) async fn process_hosted_checkout_webhook(
                 stripe_time(receipt.period_end),
             )
             .await?;
-        return Ok(webhook_result("OBSERVED"));
+        let period_end = stripe_time(receipt.period_end).ok_or_else(|| {
+            ApiError::unprocessable(
+                "stripe_invoice_period_missing",
+                format!("subscription checkout {session_id} has no paid period end"),
+            )
+        })?;
+        return apply_subscription_checkout_confirmation(
+            repository, &event, &snapshot, &receipt, period_end, payload,
+        )
+        .await;
     }
     if !receipt.saved_for_future {
         connector
@@ -157,15 +166,12 @@ pub(super) async fn process_paid_invoice(
             "invoice.paid has no invoice object",
         )
     })?;
-    let subscription_id = object
-        .pointer("/subscription")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            ApiError::unprocessable(
-                "stripe_invoice_subscription_missing",
-                "paid invoice has no subscription reference",
-            )
-        })?;
+    let subscription_id = stripe_invoice_subscription_id(object).ok_or_else(|| {
+        ApiError::unprocessable(
+            "stripe_invoice_subscription_missing",
+            "paid invoice has no subscription reference",
+        )
+    })?;
     if repository
         .provider_subscription_connection(subscription_id)
         .await?
@@ -174,16 +180,15 @@ pub(super) async fn process_paid_invoice(
         return Ok(webhook_result("IGNORED"));
     }
     let invoice_id = json_string(object, "/id")?;
-    let provider_payment_id = object
-        .pointer("/payment_intent")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            object
-                .pointer("/payments/data/0/payment/payment_intent")
-                .and_then(serde_json::Value::as_str)
-        })
+    let provider_payment_id = stripe_invoice_payment_intent(object)
         .unwrap_or(&invoice_id)
         .to_string();
+    if repository
+        .confirmed_provider_payment_exists(&provider_payment_id)
+        .await?
+    {
+        return Ok(webhook_result("DUPLICATE"));
+    }
     let amount = object
         .get("amount_paid")
         .and_then(serde_json::Value::as_i64)
@@ -199,16 +204,24 @@ pub(super) async fn process_paid_invoice(
             format!("Stripe invoice event has invalid created value {created}"),
         )
     })?;
-    let collection_id = repository
-        .create_provider_renewal_collection(
-            subscription_id,
-            &invoice_id,
-            &provider_payment_id,
-            amount,
-            &currency,
-            occurred_at,
-        )
-        .await?;
+    let collection_id = match repository
+        .provider_payment_collection_for_subscription(subscription_id, &provider_payment_id)
+        .await?
+    {
+        Some(collection_id) => collection_id,
+        None => {
+            repository
+                .create_provider_renewal_collection(
+                    subscription_id,
+                    &invoice_id,
+                    &provider_payment_id,
+                    amount,
+                    &currency,
+                    occurred_at,
+                )
+                .await?
+        }
+    };
     let period_end = object
         .pointer("/lines/data/0/period/end")
         .and_then(serde_json::Value::as_i64)
@@ -247,15 +260,18 @@ pub(super) async fn process_stripe_webhook_for_invoice_scope(
 ) -> ApiResult<BillingWebhookResponse> {
     let event: serde_json::Value =
         serde_json::from_slice(payload).map_err(ApiError::invalid_json)?;
-    let subscription_id = event
-        .pointer("/data/object/subscription")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            ApiError::unprocessable(
-                "stripe_invoice_subscription_missing",
-                "paid invoice has no subscription reference",
-            )
-        })?;
+    let invoice = event.pointer("/data/object").ok_or_else(|| {
+        ApiError::unprocessable(
+            "stripe_invoice_missing",
+            "invoice event has no invoice object",
+        )
+    })?;
+    let subscription_id = stripe_invoice_subscription_id(invoice).ok_or_else(|| {
+        ApiError::unprocessable(
+            "stripe_invoice_subscription_missing",
+            "paid invoice has no subscription reference",
+        )
+    })?;
     let Some(connection_id) = repository
         .provider_subscription_connection(subscription_id)
         .await?
@@ -284,4 +300,97 @@ pub(super) async fn process_stripe_webhook_for_invoice_scope(
 
 pub(super) fn stripe_time(timestamp: Option<i64>) -> Option<DateTime<Utc>> {
     timestamp.and_then(|value| Utc.timestamp_opt(value, 0).single())
+}
+
+pub(super) fn stripe_invoice_subscription_id(invoice: &serde_json::Value) -> Option<&str> {
+    let subscription = invoice
+        .pointer("/subscription")
+        .or_else(|| invoice.pointer("/parent/subscription_details/subscription"))?;
+    stripe_reference_id(subscription)
+}
+
+fn stripe_invoice_payment_intent(invoice: &serde_json::Value) -> Option<&str> {
+    let payment = invoice
+        .pointer("/payment_intent")
+        .or_else(|| invoice.pointer("/payments/data/0/payment/payment_intent"))?;
+    stripe_reference_id(payment)
+}
+
+fn stripe_reference_id(value: &serde_json::Value) -> Option<&str> {
+    value
+        .as_str()
+        .or_else(|| value.get("id").and_then(serde_json::Value::as_str))
+}
+
+async fn apply_subscription_checkout_confirmation(
+    repository: &DatabaseRepository,
+    event: &serde_json::Value,
+    snapshot: &crate::repositories::billing_checkouts::HostedCheckoutConfirmation,
+    receipt: &crate::repositories::stripe::HostedPaymentReceipt,
+    period_end: DateTime<Utc>,
+    payload: &[u8],
+) -> ApiResult<BillingWebhookResponse> {
+    let event_id = json_string(event, "/id")?;
+    let created = event
+        .get("created")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let occurred_at = Utc.timestamp_opt(created, 0).single().ok_or_else(|| {
+        ApiError::unprocessable(
+            "invalid_stripe_event_time",
+            format!("Stripe event {event_id} has invalid created value {created}"),
+        )
+    })?;
+    let webhook = ConfirmedBillingWebhook {
+        provider: "STRIPE".to_string(),
+        provider_event_id: event_id,
+        event_type: "payment.confirmed".to_string(),
+        payload_sha256: sha256_hex(payload),
+        collection_request_id: snapshot.collection_request_id,
+        provider_payment_id: receipt.payment_intent_id.clone(),
+        amount_minor: snapshot.amount_minor,
+        currency: snapshot.currency.clone(),
+        occurred_at,
+    };
+    let outcome =
+        billing::apply_provider_confirmed_webhook(repository, &webhook, period_end).await?;
+    Ok(webhook_result(match outcome.result {
+        ConfirmationResult::Applied => "APPLIED",
+        ConfirmationResult::Duplicate => "DUPLICATE",
+        ConfirmationResult::Rejected => "REJECTED",
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{stripe_invoice_payment_intent, stripe_invoice_subscription_id};
+
+    #[test]
+    fn invoice_references_support_legacy_and_parent_subscription_shapes() {
+        let legacy = json!({"subscription":"sub_legacy"});
+        let current = json!({"parent":{"subscription_details":{"subscription":"sub_current"}}});
+        let expanded = json!({"subscription":{"id":"sub_expanded"}});
+
+        assert_eq!(stripe_invoice_subscription_id(&legacy), Some("sub_legacy"));
+        assert_eq!(
+            stripe_invoice_subscription_id(&current),
+            Some("sub_current")
+        );
+        assert_eq!(
+            stripe_invoice_subscription_id(&expanded),
+            Some("sub_expanded")
+        );
+    }
+
+    #[test]
+    fn invoice_payment_intent_supports_string_and_expanded_references() {
+        let legacy = json!({"payment_intent":"pi_legacy"});
+        let current =
+            json!({"payments":{"data":[{"payment":{"payment_intent":{"id":"pi_current"}}}]}});
+
+        assert_eq!(stripe_invoice_payment_intent(&legacy), Some("pi_legacy"));
+        assert_eq!(stripe_invoice_payment_intent(&current), Some("pi_current"));
+    }
 }

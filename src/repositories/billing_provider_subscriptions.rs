@@ -50,6 +50,37 @@ impl DatabaseRepository {
         .await?)
     }
 
+    pub async fn confirmed_provider_payment_exists(
+        &self,
+        provider_payment_id: &str,
+    ) -> ApiResult<bool> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM billing_payments WHERE provider='STRIPE' \
+             AND provider_payment_id=$1 AND state='CONFIRMED')",
+        )
+        .bind(provider_payment_id)
+        .fetch_one(&self.pool())
+        .await?)
+    }
+
+    pub async fn provider_payment_collection_for_subscription(
+        &self,
+        provider_subscription_id: &str,
+        provider_payment_id: &str,
+    ) -> ApiResult<Option<Uuid>> {
+        Ok(sqlx::query_scalar(
+            "SELECT cr.collection_request_id FROM provider_managed_subscriptions pms \
+             JOIN collection_requests cr ON cr.customer_plan_id=pms.customer_plan_id \
+             JOIN billing_payments bp USING(collection_request_id) \
+             WHERE pms.provider='STRIPE' AND pms.provider_subscription_reference=$1 \
+             AND bp.provider='STRIPE' AND bp.provider_payment_id=$2 LIMIT 1",
+        )
+        .bind(provider_subscription_id)
+        .bind(provider_payment_id)
+        .fetch_optional(&self.pool())
+        .await?)
+    }
+
     pub async fn record_provider_subscription(
         &self,
         checkout_id: Uuid,

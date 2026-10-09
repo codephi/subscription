@@ -183,7 +183,9 @@ async fn schedule_provider_subscription_cancellation(
         configuration.managed,
     )?;
     let connected_account = (!configuration.managed
-        && configuration.external_account_reference.starts_with("acct_"))
+        && configuration
+            .external_account_reference
+            .starts_with("acct_"))
     .then(|| configuration.external_account_reference.clone());
     crate::repositories::stripe::StripeConnector::new(secret, connected_account)
         .schedule_subscription_cancellation(&subscription_id)

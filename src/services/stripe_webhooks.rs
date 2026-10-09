@@ -117,7 +117,21 @@ pub async fn process_stripe_webhook(
     }
     if event_value.get("type").and_then(serde_json::Value::as_str) == Some("invoice.payment_failed")
     {
-        let subscription_id = json_string(&event_value, "/data/object/subscription")?;
+        let invoice = event_value.pointer("/data/object").ok_or_else(|| {
+            ApiError::unprocessable(
+                "stripe_invoice_missing",
+                "failed invoice event has no invoice object",
+            )
+        })?;
+        let subscription_id = super::stripe_provider_webhooks::stripe_invoice_subscription_id(
+            invoice,
+        )
+        .ok_or_else(|| {
+            ApiError::unprocessable(
+                "stripe_invoice_subscription_missing",
+                "failed invoice has no subscription reference",
+            )
+        })?;
         repository
             .mark_provider_subscription_status(&subscription_id, "PAST_DUE", None, None)
             .await?;
