@@ -111,7 +111,7 @@ pub(super) async fn process_hosted_checkout_webhook(
         )
         .await;
     }
-    if !receipt.saved_for_future {
+    if !receipt.saved_for_future && should_detach_hosted_payment_method(&receipt, &customer_id)? {
         connector
             .detach_payment_method(&receipt.payment_method_id)
             .await
@@ -152,6 +152,25 @@ pub(super) async fn process_hosted_checkout_webhook(
         }
         Err(error) => Err(error),
     }
+}
+
+fn should_detach_hosted_payment_method(
+    receipt: &crate::repositories::stripe::HostedPaymentReceipt,
+    expected_customer_id: &str,
+) -> ApiResult<bool> {
+    let Some(attached_customer_id) = receipt.payment_method_customer_id.as_deref() else {
+        return Ok(false);
+    };
+    if attached_customer_id == expected_customer_id {
+        return Ok(true);
+    }
+    Err(ApiError::unprocessable(
+        "stripe_payment_method_customer_mismatch",
+        format!(
+            "payment method {} belongs to customer {}, expected {}",
+            receipt.payment_method_id, attached_customer_id, expected_customer_id
+        ),
+    ))
 }
 
 pub(super) async fn process_paid_invoice(
@@ -365,7 +384,11 @@ async fn apply_subscription_checkout_confirmation(
 mod tests {
     use serde_json::json;
 
-    use super::{stripe_invoice_payment_intent, stripe_invoice_subscription_id};
+    use super::{
+        should_detach_hosted_payment_method, stripe_invoice_payment_intent,
+        stripe_invoice_subscription_id,
+    };
+    use crate::repositories::stripe::HostedPaymentReceipt;
 
     #[test]
     fn invoice_references_support_legacy_and_parent_subscription_shapes() {
@@ -392,5 +415,34 @@ mod tests {
 
         assert_eq!(stripe_invoice_payment_intent(&legacy), Some("pi_legacy"));
         assert_eq!(stripe_invoice_payment_intent(&current), Some("pi_current"));
+    }
+
+    #[test]
+    fn unattached_checkout_payment_method_needs_no_cleanup() {
+        let receipt = hosted_receipt(None);
+
+        assert!(!should_detach_hosted_payment_method(&receipt, "cus_expected").unwrap());
+    }
+
+    #[test]
+    fn payment_method_attached_to_checkout_customer_is_cleaned_up() {
+        let receipt = hosted_receipt(Some("cus_expected"));
+
+        assert!(should_detach_hosted_payment_method(&receipt, "cus_expected").unwrap());
+    }
+
+    fn hosted_receipt(customer_id: Option<&str>) -> HostedPaymentReceipt {
+        HostedPaymentReceipt {
+            payment_intent_id: "pi_checkout".into(),
+            payment_method_id: "pm_checkout".into(),
+            payment_method_customer_id: customer_id.map(str::to_owned),
+            amount_minor: 100,
+            currency: "BRL".into(),
+            saved_for_future: false,
+            subscription_id: None,
+            period_start: None,
+            period_end: None,
+            card: None,
+        }
     }
 }

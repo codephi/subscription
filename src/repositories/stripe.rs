@@ -27,6 +27,7 @@ pub struct PreparedStripePaymentMethod {
 pub struct HostedPaymentReceipt {
     pub payment_intent_id: String,
     pub payment_method_id: String,
+    pub payment_method_customer_id: Option<String>,
     pub amount_minor: i64,
     pub currency: String,
     pub saved_for_future: bool,
@@ -236,6 +237,7 @@ impl StripeConnector {
             .ok_or_else(|| {
                 invalid_response("payment_intent.payment_method.id", &intent.to_string())
             })?;
+        let method = intent.get("payment_method");
         if intent.get("status").and_then(Value::as_str) != Some("succeeded") {
             return Err(invalid_response(
                 "payment_intent.status",
@@ -245,6 +247,9 @@ impl StripeConnector {
         Ok(HostedPaymentReceipt {
             payment_intent_id: intent_id.to_string(),
             payment_method_id: method_id.to_string(),
+            payment_method_customer_id: method
+                .and_then(|value| value.get("customer"))
+                .and_then(stripe_reference_id),
             amount_minor: body
                 .get("amount_total")
                 .and_then(Value::as_i64)
@@ -752,6 +757,13 @@ fn required_string(value: &Value, field: &str) -> Result<String, BillingConnecto
         .ok_or_else(|| invalid_response(field, &value.to_string()))
 }
 
+fn stripe_reference_id(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .or_else(|| value.get("id").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
 fn invalid_response(field: &str, value: &str) -> BillingConnectorError {
     BillingConnectorError {
         code: "stripe_invalid_response".to_string(),
@@ -786,5 +798,25 @@ fn api_error(status: u16, body: &Value) -> BillingConnectorError {
         message: message.to_string(),
         retryable,
         outcome_uncertain: retryable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::stripe_reference_id;
+
+    #[test]
+    fn stripe_reference_id_reads_string_and_expanded_customer_references() {
+        assert_eq!(
+            stripe_reference_id(&json!("cus_123")),
+            Some("cus_123".into())
+        );
+        assert_eq!(
+            stripe_reference_id(&json!({"id":"cus_456"})),
+            Some("cus_456".into())
+        );
+        assert_eq!(stripe_reference_id(&json!(null)), None);
     }
 }
