@@ -82,9 +82,10 @@ pub(super) async fn process_hosted_checkout_webhook(
             &session_id,
             &receipt.payment_intent_id,
             &receipt.payment_method_id,
-            receipt.saved_for_future,
+            receipt.saved_for_future || receipt.subscription_id.is_some(),
             receipt.amount_minor,
             &receipt.currency,
+            receipt.card.as_ref(),
         )
         .await?;
     let recurring = receipt.subscription_id.is_some();

@@ -62,6 +62,36 @@ impl DatabaseRepository {
         Ok(binding_from_row(&row))
     }
 
+    pub async fn update_payment_method_card_summary(
+        &self,
+        account_id: Uuid,
+        binding_id: Uuid,
+        card: &crate::repositories::stripe::StripeCardSummary,
+    ) -> ApiResult<PaymentMethodBindingResponse> {
+        let row = sqlx::query(
+            "UPDATE payment_method_bindings SET card_brand=$3,card_last_four=$4, \
+             card_exp_month=$5,card_exp_year=$6 WHERE account_id=$1 \
+             AND payment_method_binding_id=$2 AND status='ACTIVE' RETURNING *",
+        )
+        .bind(account_id)
+        .bind(binding_id)
+        .bind(&card.brand)
+        .bind(&card.last_four)
+        .bind(i16::try_from(card.exp_month).ok())
+        .bind(i16::try_from(card.exp_year).ok())
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| {
+            ApiError::not_found(
+                "payment_method_not_found",
+                format!(
+                    "active payment method {binding_id} does not exist in account {account_id}"
+                ),
+            )
+        })?;
+        Ok(binding_from_row(&row))
+    }
+
     pub async fn active_stripe_billing_connection(&self, account_id: Uuid) -> ApiResult<Uuid> {
         let ids: Vec<Uuid> = sqlx::query_scalar(
             "SELECT billing_connection_id FROM billing_connections \
@@ -478,6 +508,10 @@ fn binding_from_row(row: &sqlx::postgres::PgRow) -> PaymentMethodBindingResponse
         customer_plan_id: row.get("customer_plan_id"),
         payment_method: row.get("payment_method"),
         display_name: row.get("display_name"),
+        card_brand: row.get("card_brand"),
+        card_last_four: row.get::<Option<String>, _>("card_last_four"),
+        card_exp_month: row.get("card_exp_month"),
+        card_exp_year: row.get("card_exp_year"),
         status: row.get("status"),
         created_at: row.get("created_at"),
     }

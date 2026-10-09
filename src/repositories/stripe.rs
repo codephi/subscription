@@ -8,10 +8,19 @@ use crate::repositories::billing_connector::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StripeCardSummary {
+    pub brand: String,
+    pub last_four: String,
+    pub exp_month: i32,
+    pub exp_year: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedStripePaymentMethod {
     pub setup_intent_id: String,
     pub payment_method_id: String,
     pub customer_id: String,
+    pub card: Option<StripeCardSummary>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,6 +33,7 @@ pub struct HostedPaymentReceipt {
     pub subscription_id: Option<String>,
     pub period_start: Option<i64>,
     pub period_end: Option<i64>,
+    pub card: Option<StripeCardSummary>,
 }
 
 pub struct StripeConnector {
@@ -196,6 +206,7 @@ impl StripeConnector {
             period_end: invoice
                 .and_then(|item| item.pointer("/lines/data/0/period/end"))
                 .and_then(Value::as_i64),
+            card: payment_method_card(intent.get("payment_method")),
         })
     }
 
@@ -209,7 +220,7 @@ impl StripeConnector {
         let mut request = self
             .client
             .get(format!(
-                "{}/v1/checkout/sessions/{checkout_session_id}?expand%5B%5D=setup_intent",
+                "{}/v1/checkout/sessions/{checkout_session_id}?expand%5B%5D=setup_intent.payment_method",
                 self.api_base
             ))
             .basic_auth(&self.secret_key, Some(""));
@@ -360,6 +371,7 @@ impl StripeConnector {
             setup_intent_id: setup_intent_id.to_string(),
             payment_method_id: payment_method_id.to_string(),
             customer_id: returned_customer.to_string(),
+            card: None,
         })
     }
 
@@ -461,7 +473,14 @@ fn prepared_payment_method(
     {
         return Err(invalid_response("SetupIntent", &value.to_string()));
     }
-    let payment_method_id = required_string(value, "payment_method")?;
+    let payment_method = value
+        .get("payment_method")
+        .ok_or_else(|| invalid_response("SetupIntent.payment_method", &value.to_string()))?;
+    let payment_method_id = payment_method
+        .as_str()
+        .or_else(|| payment_method.get("id").and_then(Value::as_str))
+        .ok_or_else(|| invalid_response("SetupIntent.payment_method", &payment_method.to_string()))?
+        .to_string();
     if !payment_method_id.starts_with("pm_") {
         return Err(invalid_response(
             "SetupIntent.payment_method",
@@ -472,6 +491,27 @@ fn prepared_payment_method(
         setup_intent_id: required_string(value, "id")?,
         payment_method_id,
         customer_id,
+        card: payment_method_card(Some(payment_method)),
+    })
+}
+
+fn payment_method_card(value: Option<&Value>) -> Option<StripeCardSummary> {
+    let card = value?.get("card")?;
+    let brand = card.get("brand")?.as_str()?;
+    let last_four = card.get("last4")?.as_str()?;
+    let exp_month = i32::try_from(card.get("exp_month")?.as_i64()?).ok()?;
+    let exp_year = i32::try_from(card.get("exp_year")?.as_i64()?).ok()?;
+    if brand.is_empty()
+        || last_four.len() != 4
+        || !last_four.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(StripeCardSummary {
+        brand: brand.to_string(),
+        last_four: last_four.to_string(),
+        exp_month,
+        exp_year,
     })
 }
 

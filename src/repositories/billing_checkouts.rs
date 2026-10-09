@@ -245,6 +245,7 @@ impl DatabaseRepository {
         save_payment_method: bool,
         amount_minor: i64,
         currency: &str,
+        card: Option<&crate::repositories::stripe::StripeCardSummary>,
     ) -> ApiResult<HostedCheckoutConfirmation> {
         let mut transaction = self.pool().begin().await?;
         let row = sqlx::query(
@@ -279,8 +280,12 @@ impl DatabaseRepository {
             return Err(ApiError::conflict("hosted_payment_snapshot_mismatch", format!("hosted session {provider_session_id} does not match checkout {checkout_id} snapshot")));
         }
         if save_payment_method {
-            sqlx::query("UPDATE payment_method_bindings SET provider_payment_method_reference=$2,status='ACTIVE' WHERE payment_method_binding_id=$1 AND status IN ('ACTIVE','PENDING')")
-                .bind(row.get::<Uuid, _>("payment_method_binding_id")).bind(payment_method_id).execute(&mut *transaction).await?;
+            sqlx::query("UPDATE payment_method_bindings SET provider_payment_method_reference=$2,status='ACTIVE',card_brand=$3,card_last_four=$4,card_exp_month=$5,card_exp_year=$6 WHERE payment_method_binding_id=$1 AND status IN ('ACTIVE','PENDING')")
+                .bind(row.get::<Uuid, _>("payment_method_binding_id")).bind(payment_method_id)
+                .bind(card.map(|value| value.brand.as_str())).bind(card.map(|value| value.last_four.as_str()))
+                .bind(card.and_then(|value| i16::try_from(value.exp_month).ok()))
+                .bind(card.and_then(|value| i16::try_from(value.exp_year).ok()))
+                .execute(&mut *transaction).await?;
         } else {
             sqlx::query("UPDATE payment_method_bindings SET status='DETACHED' WHERE payment_method_binding_id=$1 AND status IN ('ACTIVE','PENDING')")
                 .bind(row.get::<Uuid, _>("payment_method_binding_id")).execute(&mut *transaction).await?;

@@ -816,7 +816,7 @@ async fn hosted_subscription_uses_monthly_stripe_billing_and_plan_metadata() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hosted_payment_retrieval_requires_paid_session_and_saved_method() {
     let server = FakeStripeServer::responding_with(
-        r#"{"id":"cs_test_pay","customer":"cus_test","client_reference_id":"checkout_test","mode":"payment","payment_status":"paid","amount_total":2500,"currency":"brl","payment_intent":{"id":"pi_test_pay","status":"succeeded","payment_method":{"id":"pm_saved_test","allow_redisplay":"always"}}}"#,
+        r#"{"id":"cs_test_pay","customer":"cus_test","client_reference_id":"checkout_test","mode":"payment","payment_status":"paid","amount_total":2500,"currency":"brl","payment_intent":{"id":"pi_test_pay","status":"succeeded","payment_method":{"id":"pm_saved_test","allow_redisplay":"always","card":{"brand":"visa","last4":"4242","exp_month":12,"exp_year":2030}}}}"#,
     ).await;
     let connector = StripeConnector::with_api_base("sk_test".into(), None, server.api_base());
     let receipt = connector
@@ -830,6 +830,12 @@ async fn hosted_payment_retrieval_requires_paid_session_and_saved_method() {
     assert_eq!(receipt.payment_intent_id, "pi_test_pay");
     assert_eq!(receipt.payment_method_id, "pm_saved_test");
     assert!(receipt.saved_for_future);
+    let card = receipt.card.expect("Stripe card summary");
+    assert_eq!(
+        (card.brand.as_str(), card.last_four.as_str()),
+        ("visa", "4242")
+    );
+    assert_eq!((card.exp_month, card.exp_year), (12, 2030));
     assert_eq!(
         (receipt.amount_minor, receipt.currency.as_str()),
         (2_500, "BRL")
@@ -904,8 +910,9 @@ async fn stripe_setup_verification_reads_provider_state_and_requires_off_session
         .await
         .unwrap();
     let request = server.finish().await;
-    assert!(request
-        .starts_with("GET /v1/checkout/sessions/cs_test_verified?expand%5B%5D=setup_intent "));
+    assert!(request.starts_with(
+        "GET /v1/checkout/sessions/cs_test_verified?expand%5B%5D=setup_intent.payment_method "
+    ));
     assert_eq!(payment_method.customer_id, "cus_verified");
     assert_eq!(payment_method.payment_method_id, "pm_verified");
 

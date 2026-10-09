@@ -214,6 +214,10 @@ fn customer_payment_method_binding_hides_provider_integration_details() {
             customer_plan_id: Some(uuid::Uuid::new_v4()),
             payment_method: "CARD".to_string(),
             display_name: Some("Cartão •••• 4242".to_string()),
+            card_brand: Some("visa".to_string()),
+            card_last_four: Some("4242".to_string()),
+            card_exp_month: Some(12),
+            card_exp_year: Some(2030),
             status: "ACTIVE".to_string(),
             created_at: chrono::Utc::now(),
         }

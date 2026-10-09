@@ -131,6 +131,10 @@ pub struct PaymentMethodBindingResponse {
     pub customer_plan_id: Option<Uuid>,
     pub payment_method: String,
     pub display_name: Option<String>,
+    pub card_brand: Option<String>,
+    pub card_last_four: Option<String>,
+    pub card_exp_month: Option<i16>,
+    pub card_exp_year: Option<i16>,
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
@@ -140,6 +144,10 @@ pub struct CustomerPaymentMethodBindingResponse {
     pub payment_method_binding_id: Uuid,
     pub payment_method: String,
     pub display_name: Option<String>,
+    pub card_brand: Option<String>,
+    pub card_last_four: Option<String>,
+    pub card_exp_month: Option<i16>,
+    pub card_exp_year: Option<i16>,
     pub status: String,
     pub created_at: DateTime<Utc>,
 }
@@ -150,6 +158,10 @@ impl From<PaymentMethodBindingResponse> for CustomerPaymentMethodBindingResponse
             payment_method_binding_id: binding.payment_method_binding_id,
             payment_method: binding.payment_method,
             display_name: binding.display_name,
+            card_brand: binding.card_brand,
+            card_last_four: binding.card_last_four,
+            card_exp_month: binding.card_exp_month,
+            card_exp_year: binding.card_exp_year,
             status: binding.status,
             created_at: binding.created_at,
         }

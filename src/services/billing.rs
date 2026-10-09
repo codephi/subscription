@@ -350,7 +350,7 @@ pub async fn create_payment_method_binding(
     }
     let display_name = validate_payment_method_display_name(request.card_name.as_deref())?
         .or(setup.display_name.as_deref());
-    repository
+    let binding = repository
         .create_verified_payment_method_binding_with_name(
             account_id,
             connection_id,
@@ -358,7 +358,13 @@ pub async fn create_payment_method_binding(
             &prepared.payment_method_id,
             display_name,
         )
-        .await
+        .await?;
+    if let Some(card) = prepared.card.as_ref() {
+        return repository
+            .update_payment_method_card_summary(account_id, binding.payment_method_binding_id, card)
+            .await;
+    }
+    Ok(binding)
 }
 
 pub async fn create_payment_method_from_card(

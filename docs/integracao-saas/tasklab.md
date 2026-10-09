@@ -181,7 +181,8 @@ ambiente configurado, sem alternância de fluxo na TaskLab.
 - `/v1/accounts/{account_id}/items/{item_id}/item-wallet/statement?limit=50`:
   histórico do medidor;
 - `/v1/accounts/{account_id}/payment-method-bindings`: cartões tokenizados
-  salvos para a conta;
+  salvos para a conta, com apelido, bandeira, quatro últimos dígitos e
+  validade quando o provedor devolve esses metadados;
 - SQLite local: últimas 20 referências de checkout e últimas 20 execuções.
 
 Elegibilidade e medidor podem ser omitidos da resposta agregada se a consulta

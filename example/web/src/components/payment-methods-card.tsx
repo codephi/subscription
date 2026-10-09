@@ -31,7 +31,12 @@ export function PaymentMethodsCard({ methods, busy, onAdd, onRename, onRemove }:
           <Button size="sm" disabled={busy} onClick={() => { onRename(method.payment_method_binding_id, editName || undefined); setEditing(null) }}>Salvar</Button>
           <Button size="sm" variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
         </> : <>
-          <span className="min-w-0 flex-1 truncate text-sm">{method.display_name || "Cartão salvo"}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {method.display_name || "Cartão salvo"}
+            {method.card_brand && ` · ${method.card_brand}`}
+            {method.card_last_four && ` •••• ${method.card_last_four}`}
+            {method.card_exp_month && method.card_exp_year && <span className="ml-2 text-muted-foreground">Válido até {String(method.card_exp_month).padStart(2, "0")}/{method.card_exp_year}</span>}
+          </span>
           <Button size="icon" variant="ghost" aria-label="Renomear cartão" disabled={busy} onClick={() => { setEditing(method.payment_method_binding_id); setEditName(method.display_name ?? "") }}><Pencil /></Button>
           <Button size="icon" variant="ghost" aria-label="Remover cartão" disabled={busy} onClick={() => onRemove(method.payment_method_binding_id)}><Trash2 /></Button>
         </>}
