@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/checkouts/{id}", get(checkout_status))
         .route("/api/payment-methods", get(payment_methods))
         .route("/api/payment-method-sessions", post(payment_method_session))
+        .route("/api/subscription-payment-method-session", post(subscription_payment_method_session))
         .route("/api/payment-method-bindings", post(confirm_payment_method))
         .route("/api/payment-methods/{id}", patch(rename_payment_method).delete(remove_payment_method))
         .route("/api/executions", post(execute))
@@ -183,6 +184,21 @@ async fn payment_method_session(
     let body = state.subscription.post::<Value>(
         &format!("/v1/accounts/{}/payment-method-setup-sessions", user.account_id), None,
         &json!({"customer_plan_id":customer_plan_id,"success_url":success_url,"cancel_url":cancel_url,"card_name":request.card_name}),
+    ).await?;
+    Ok(Json(body))
+}
+
+async fn subscription_payment_method_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let user = auth::current_user(&state, &headers).await?;
+    let customer_plan_id = user.customer_plan_id.as_deref().ok_or_else(|| AppError::Conflict("ative um plano antes de atualizar o cartão de renovação".into()))?;
+    let customer_plan_id = Uuid::parse_str(customer_plan_id).map_err(|error| AppError::Internal(error.into()))?;
+    let (return_url, _) = services::checkout_return_urls(&state.app_public_url, headers.get(header::ORIGIN).and_then(|value| value.to_str().ok()))?;
+    let body = state.subscription.post::<Value>(
+        &format!("/v1/accounts/{}/customer-plans/{customer_plan_id}/payment-method-management-sessions", user.account_id), None,
+        &json!({"return_url":return_url}),
     ).await?;
     Ok(Json(body))
 }

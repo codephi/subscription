@@ -8,7 +8,7 @@ use crate::{
         CreatePaymentMethodFromCardRequest, CreatePaymentMethodFromCardResponse,
         CreatePaymentMethodSetupSessionRequest, CreateRenewalRegularizationRequest,
         PaymentMethodBindingResponse, PaymentMethodSetupSessionResponse,
-        UnmatchedPaymentCaseResponse,
+        SubscriptionPaymentMethodSessionResponse, UnmatchedPaymentCaseResponse,
     },
     error::{ApiError, ApiResult},
     repositories::{
@@ -188,6 +188,69 @@ pub async fn create_account_payment_method_setup_session(
         }
     };
     create_payment_method_setup_session(repository, account_id, connection_id, request).await
+}
+
+pub async fn create_subscription_payment_method_session(
+    repository: &DatabaseRepository,
+    account_id: uuid::Uuid,
+    customer_plan_id: uuid::Uuid,
+    return_url: &str,
+) -> ApiResult<SubscriptionPaymentMethodSessionResponse> {
+    repository
+        .ensure_customer_plan_account(account_id, customer_plan_id)
+        .await?;
+    validate_setup_return_urls(return_url, return_url)?;
+    let (connection_id, customer_reference) = repository
+        .provider_subscription_payment_details(account_id, customer_plan_id)
+        .await?;
+    let configuration = repository
+        .billing_connector_configuration(connection_id)
+        .await?;
+    validate_portal_connection(account_id, connection_id, &configuration)?;
+    let connector = payment_method_portal_connector(repository, account_id, &configuration)?;
+    let redirect_url = connector
+        .create_billing_portal_session(&customer_reference, return_url)
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))?;
+    Ok(SubscriptionPaymentMethodSessionResponse { redirect_url })
+}
+
+fn validate_portal_connection(
+    account_id: uuid::Uuid,
+    connection_id: uuid::Uuid,
+    configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
+) -> ApiResult<()> {
+    if configuration.account_id == account_id
+        && configuration.provider == "STRIPE"
+        && configuration.status == "ACTIVE"
+    {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "billing_connection_not_usable",
+        format!("billing connection {connection_id} must be an ACTIVE STRIPE connection"),
+    ))
+}
+
+fn payment_method_portal_connector(
+    repository: &DatabaseRepository,
+    account_id: uuid::Uuid,
+    configuration: &crate::repositories::billing_connections::BillingConnectorConfiguration,
+) -> ApiResult<crate::repositories::stripe::StripeConnector> {
+    let secret = resolve_connection_secret(
+        repository,
+        account_id,
+        configuration.billing_connection_id,
+        "stripe_api",
+        &configuration.secret_reference,
+        configuration.managed,
+    )?;
+    Ok(crate::repositories::stripe::StripeConnector::new(
+        secret,
+        (!configuration.managed)
+            .then(|| stripe_account(&configuration.external_account_reference))
+            .flatten(),
+    ))
 }
 
 pub(crate) fn resolve_connection_secret(

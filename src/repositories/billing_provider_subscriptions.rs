@@ -8,6 +8,35 @@ use crate::{
 };
 
 impl DatabaseRepository {
+    pub async fn provider_subscription_payment_details(
+        &self,
+        account_id: Uuid,
+        customer_plan_id: Uuid,
+    ) -> ApiResult<(Uuid, String)> {
+        let row = sqlx::query("SELECT billing_connection_id,provider_customer_reference FROM provider_managed_subscriptions WHERE account_id=$1 AND customer_plan_id=$2 AND provider='STRIPE' AND status IN ('ACTIVE','PAST_DUE')")
+            .bind(account_id).bind(customer_plan_id).fetch_optional(&self.pool()).await?
+            .ok_or_else(|| ApiError::not_found("provider_subscription_not_found", format!("active Stripe subscription for customer plan {customer_plan_id} does not exist in account {account_id}")))?;
+        Ok((
+            row.get("billing_connection_id"),
+            row.get("provider_customer_reference"),
+        ))
+    }
+
+    pub async fn provider_subscription_reference(
+        &self,
+        account_id: Uuid,
+        customer_plan_id: Uuid,
+    ) -> ApiResult<Option<(Uuid, String)>> {
+        let row = sqlx::query("SELECT billing_connection_id,provider_subscription_reference FROM provider_managed_subscriptions WHERE account_id=$1 AND customer_plan_id=$2 AND provider='STRIPE' AND status IN ('INCOMPLETE','ACTIVE','PAST_DUE','UNPAID')")
+            .bind(account_id).bind(customer_plan_id).fetch_optional(&self.pool()).await?;
+        Ok(row.map(|row| {
+            (
+                row.get("billing_connection_id"),
+                row.get("provider_subscription_reference"),
+            )
+        }))
+    }
+
     pub async fn provider_subscription_connection(
         &self,
         provider_subscription_id: &str,

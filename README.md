@@ -139,6 +139,9 @@ for payment confirmation and credit grants. Stripe-managed subscriptions are
 excluded from the local paid-renewal dispatcher; paid invoices create idempotent
 local cycle records. The Tasklab demo provisions a R$ 1.00 monthly plan granting
 10 credits per confirmed cycle for testing recurrence.
+Tasklab can also open a hosted Stripe Customer Portal session through a neutral
+Subscription contract to change the renewal card. Subscription cancellation
+schedules the Stripe subscription to end at the current period boundary.
 
 Scheduled collections are not dispatched before `scheduled_at`. Outbox delivery
 preserves aggregate sequence across leases, retries and dead letters: a dead-lettered

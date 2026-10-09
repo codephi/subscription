@@ -14,8 +14,9 @@ use crate::{
         CreateInitialCollectionRequest, CreateOnDemandPurchaseRequest,
         CreatePaymentMethodBindingRequest, CreatePaymentMethodFromCardRequest,
         CreatePaymentMethodFromCardResponse, CreatePaymentMethodSetupSessionRequest,
-        CreateRenewalRegularizationRequest, CustomerPaymentMethodBindingResponse,
-        PaymentMethodSetupSessionResponse, RenamePaymentMethodRequest,
+        CreateRenewalRegularizationRequest, CreateSubscriptionPaymentMethodSessionRequest,
+        CustomerPaymentMethodBindingResponse, PaymentMethodSetupSessionResponse,
+        RenamePaymentMethodRequest, SubscriptionPaymentMethodSessionResponse,
         UnmatchedPaymentCaseResponse,
     },
     error::{ApiError, ApiResult, ErrorResponse},
@@ -31,6 +32,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_billing_capabilities))
         .routes(routes!(create_payment_method_setup_session))
         .routes(routes!(create_account_payment_method_setup_session))
+        .routes(routes!(create_subscription_payment_method_session))
         .routes(routes!(create_payment_method_from_card))
         .routes(routes!(receive_shared_stripe_webhook))
         .routes(routes!(create_payment_method_binding))
@@ -220,6 +222,24 @@ async fn create_account_payment_method_setup_session(
         sandbox_config.as_ref(),
         account_id,
         &request,
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[utoipa::path(post, path = "/v1/accounts/{account_id}/customer-plans/{customer_plan_id}/payment-method-management-sessions", tag = "Billing",
+    params(("account_id" = Uuid, Path), ("customer_plan_id" = Uuid, Path)), request_body = CreateSubscriptionPaymentMethodSessionRequest,
+    responses((status = 201, body = SubscriptionPaymentMethodSessionResponse), (status = 404, body = ErrorResponse)))]
+async fn create_subscription_payment_method_session(
+    State(state): State<AppState>,
+    Path((account_id, customer_plan_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<CreateSubscriptionPaymentMethodSessionRequest>,
+) -> ApiResult<(StatusCode, Json<SubscriptionPaymentMethodSessionResponse>)> {
+    let response = billing::create_subscription_payment_method_session(
+        &state.database(),
+        account_id,
+        customer_plan_id,
+        &request.return_url,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(response)))

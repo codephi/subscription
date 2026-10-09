@@ -679,6 +679,50 @@ async fn stripe_detach_sends_payment_method_and_connected_account() {
     assert!(request.contains("idempotency-key: subscription:payment-method-detach:pm_remove_test"));
 }
 
+#[tokio::test]
+async fn stripe_billing_portal_session_is_hosted_and_scoped_to_connected_account() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"bps_test","url":"https://billing.stripe.com/session/test"}"#,
+    )
+    .await;
+    let connector = StripeConnector::with_api_base(
+        "sk_test_portal".into(),
+        Some("acct_connected_portal".into()),
+        server.api_base(),
+    );
+
+    let url = connector
+        .create_billing_portal_session("cus_test_portal", "https://tasklab.example/account")
+        .await
+        .unwrap();
+    let request = server.finish().await.to_ascii_lowercase();
+
+    assert_eq!(url, "https://billing.stripe.com/session/test");
+    assert!(request.starts_with("post /v1/billing_portal/sessions http/1.1"));
+    assert!(request.contains("stripe-account: acct_connected_portal"));
+    assert!(request.contains("customer=cus_test_portal"));
+    assert!(request.contains("return_url=https%3a%2f%2ftasklab.example%2faccount"));
+}
+
+#[tokio::test]
+async fn stripe_subscription_cancellation_is_scheduled_at_period_end() {
+    let server = FakeStripeServer::responding_with(
+        r#"{"id":"sub_test_cancel","cancel_at_period_end":true}"#,
+    )
+    .await;
+    let connector =
+        StripeConnector::with_api_base("sk_test_cancel".into(), None, server.api_base());
+
+    connector
+        .schedule_subscription_cancellation("sub_test_cancel")
+        .await
+        .unwrap();
+    let request = server.finish().await;
+
+    assert!(request.starts_with("POST /v1/subscriptions/sub_test_cancel HTTP/1.1"));
+    assert!(request.contains("cancel_at_period_end=true"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stripe_payment_intent_uses_stable_idempotency_and_domain_metadata() {
     let server =

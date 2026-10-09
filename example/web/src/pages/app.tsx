@@ -85,6 +85,11 @@ export default function App() {
     onSuccess: (result) => { window.location.assign(result.redirect_url) },
     onError: reportError(setError),
   })
+  const subscriptionPaymentMethodMutation = useMutation({
+    mutationFn: () => api<{ redirect_url: string }>("/subscription-payment-method-session", { method: "POST" }),
+    onSuccess: (result) => { window.location.assign(result.redirect_url) },
+    onError: reportError(setError),
+  })
   const paymentMethodRenameMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name?: string }) => api(`/payment-methods/${id}`, { method: "PATCH", body: JSON.stringify({ display_name: name }) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard", user?.username] }),
@@ -130,6 +135,8 @@ export default function App() {
     paymentMethodName={paymentMethodName}
     setPaymentMethodName={setPaymentMethodName}
     paymentMethodsBusy={paymentMethodSetupMutation.isPending || paymentMethodRenameMutation.isPending || paymentMethodRemoveMutation.isPending}
+    subscriptionPaymentMethodBusy={subscriptionPaymentMethodMutation.isPending}
+    onManageSubscriptionPaymentMethod={() => subscriptionPaymentMethodMutation.mutate()}
     onAddPaymentMethod={(name) => paymentMethodSetupMutation.mutate(name)}
     onRenamePaymentMethod={(id, name) => paymentMethodRenameMutation.mutate({ id, name })}
     onRemovePaymentMethod={(id) => paymentMethodRemoveMutation.mutate(id)}

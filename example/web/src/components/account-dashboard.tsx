@@ -41,6 +41,8 @@ type AccountDashboardProps = {
   paymentMethodName: string
   setPaymentMethodName: (name: string) => void
   paymentMethodsBusy: boolean
+  subscriptionPaymentMethodBusy: boolean
+  onManageSubscriptionPaymentMethod: () => void
   onAddPaymentMethod: (name?: string) => void
   onRenamePaymentMethod: (id: string, name?: string) => void
   onRemovePaymentMethod: (id: string) => void
@@ -93,7 +95,7 @@ export function AccountDashboard(props: AccountDashboardProps) {
       <aside className="dashboard-aside">
         <PlanCard user={user} plans={view?.catalog.plans ?? []} currentPlanVersionId={view?.customer_plan?.plan_version_id} busy={props.checkoutBusy} onCheckout={() => props.onCheckout(props.topupCredits)} onUpgrade={props.onUpgrade} onCancel={props.onCancelPlan} cancelBusy={props.cancelBusy} onRegularize={props.onRegularize} regularizeBusy={props.regularizeBusy} canRegularize={view?.customer_plan?.commercial_status === "PAST_DUE"} topupCredits={props.topupCredits} />
         <CheckoutCard {...props} />
-        <PaymentMethodsCard methods={view?.payment_methods ?? []} busy={props.paymentMethodsBusy} onAdd={props.onAddPaymentMethod} onRename={props.onRenamePaymentMethod} onRemove={props.onRemovePaymentMethod} />
+        <PaymentMethodsCard methods={view?.payment_methods ?? []} busy={props.paymentMethodsBusy} subscriptionBusy={props.subscriptionPaymentMethodBusy} onManageSubscription={props.onManageSubscriptionPaymentMethod} onAdd={props.onAddPaymentMethod} onRename={props.onRenamePaymentMethod} onRemove={props.onRemovePaymentMethod} />
         <LedgerCard view={view} loading={loading} />
       </aside>
     </div>

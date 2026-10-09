@@ -154,9 +154,41 @@ pub async fn cancel_customer_plan(
     account_id: Uuid,
     customer_plan_id: Uuid,
 ) -> ApiResult<CustomerPlanResponse> {
+    schedule_provider_subscription_cancellation(repository, account_id, customer_plan_id).await?;
     repository
         .cancel_customer_plan(account_id, customer_plan_id)
         .await
+}
+
+async fn schedule_provider_subscription_cancellation(
+    repository: &DatabaseRepository,
+    account_id: Uuid,
+    customer_plan_id: Uuid,
+) -> ApiResult<()> {
+    let Some((connection_id, subscription_id)) = repository
+        .provider_subscription_reference(account_id, customer_plan_id)
+        .await?
+    else {
+        return Ok(());
+    };
+    let configuration = repository
+        .billing_connector_configuration(connection_id)
+        .await?;
+    let secret = crate::services::billing::resolve_connection_secret(
+        repository,
+        account_id,
+        connection_id,
+        "stripe_api",
+        &configuration.secret_reference,
+        configuration.managed,
+    )?;
+    let connected_account = (!configuration.managed
+        && configuration.external_account_reference.starts_with("acct_"))
+    .then(|| configuration.external_account_reference.clone());
+    crate::repositories::stripe::StripeConnector::new(secret, connected_account)
+        .schedule_subscription_cancellation(&subscription_id)
+        .await
+        .map_err(|error| ApiError::external("billing_connector_error", error.to_string()))
 }
 
 pub async fn revoke_customer_plan(

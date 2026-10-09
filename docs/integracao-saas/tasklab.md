@@ -196,6 +196,13 @@ Subscription. A Subscription valida o account, desanexa o método na Stripe e
 marca o vínculo como `DETACHED`, preservando o histórico de cobranças. A remoção
 é idempotente para vínculos já desanexados.
 
+Para trocar o cartão usado na renovação, TaskLab solicita
+`POST /v1/accounts/{account_id}/customer-plans/{customer_plan_id}/payment-method-management-sessions`
+com `return_url`. Subscription cria uma sessão hospedada do Customer Portal e
+retorna `redirect_url`; TaskLab apenas redireciona o navegador. O cancelamento
+de um plano Stripe também agenda o encerramento da assinatura no Stripe ao fim
+do período atual antes de marcar o plano local para não renovar.
+
 ## Execução de tarefa e débito de uso
 
 O navegador gera e mantém um `transaction_id` em `sessionStorage` até receber

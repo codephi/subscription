@@ -100,6 +100,64 @@ impl StripeConnector {
         Ok(())
     }
 
+    pub async fn create_billing_portal_session(
+        &self,
+        customer_id: &str,
+        return_url: &str,
+    ) -> Result<String, BillingConnectorError> {
+        let mut request = self
+            .client
+            .post(format!("{}/v1/billing_portal/sessions", self.api_base))
+            .basic_auth(&self.secret_key, Some(""))
+            .form(&[("customer", customer_id), ("return_url", return_url)]);
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        let url = required_string(&body, "url")?;
+        if !url.starts_with("https://billing.stripe.com/") {
+            return Err(invalid_response("billing_portal.url", &url));
+        }
+        Ok(url)
+    }
+
+    pub async fn schedule_subscription_cancellation(
+        &self,
+        subscription_id: &str,
+    ) -> Result<(), BillingConnectorError> {
+        let mut request = self
+            .client
+            .post(format!(
+                "{}/v1/subscriptions/{subscription_id}",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""))
+            .form(&[("cancel_at_period_end", "true")]);
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        if body.get("id").and_then(Value::as_str) != Some(subscription_id)
+            || body.get("cancel_at_period_end").and_then(Value::as_bool) != Some(true)
+        {
+            return Err(invalid_response(
+                "subscription.cancel_at_period_end",
+                &body.to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn retrieve_setup_intent(
         &self,
         setup_intent_id: &str,

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { CreditCard, Pencil, Plus, Trash2 } from "lucide-react"
+import { CreditCard, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -9,12 +9,14 @@ import type { PaymentMethod } from "@/lib/api"
 type Props = {
   methods: PaymentMethod[]
   busy: boolean
+  subscriptionBusy: boolean
+  onManageSubscription: () => void
   onAdd: (name?: string) => void
   onRename: (id: string, name?: string) => void
   onRemove: (id: string) => void
 }
 
-export function PaymentMethodsCard({ methods, busy, onAdd, onRename, onRemove }: Props) {
+export function PaymentMethodsCard({ methods, busy, subscriptionBusy, onManageSubscription, onAdd, onRename, onRemove }: Props) {
   const [newName, setNewName] = useState("")
   const [editing, setEditing] = useState<string | null>(null)
   const [editName, setEditName] = useState("")
@@ -47,7 +49,10 @@ export function PaymentMethodsCard({ methods, busy, onAdd, onRename, onRemove }:
       </Field>
     </CardContent>
     <CardFooter>
-      <Button className="w-full" variant="outline" disabled={busy} onClick={() => onAdd(newName.trim() || undefined)}><Plus data-icon="inline-start" />Cadastrar cartão</Button>
+      <div className="flex w-full flex-col gap-2">
+        <Button className="w-full" variant="outline" disabled={busy} onClick={() => onAdd(newName.trim() || undefined)}><Plus data-icon="inline-start" />Cadastrar cartão</Button>
+        <Button className="w-full" variant="outline" disabled={subscriptionBusy} onClick={onManageSubscription}><RefreshCw data-icon="inline-start" />Atualizar cartão da assinatura</Button>
+      </div>
     </CardFooter>
   </Card>
 }

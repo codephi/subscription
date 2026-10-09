@@ -106,6 +106,16 @@ pub struct RenamePaymentMethodRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, ToSchema)]
+pub struct CreateSubscriptionPaymentMethodSessionRequest {
+    pub return_url: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct SubscriptionPaymentMethodSessionResponse {
+    pub redirect_url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct CreatePaymentMethodFromCardRequest {
     pub customer_plan_id: Uuid,
     pub cardholder_name: String,
