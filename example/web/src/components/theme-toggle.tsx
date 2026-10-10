@@ -3,8 +3,10 @@ import { Button } from "@/components/ui/button"
 import { useThemeStore } from "@/store/theme-store"
 
 export function ThemeToggle() {
-  const theme = useThemeStore((state) => state.theme)
-  const toggleTheme = useThemeStore((state) => state.toggleTheme)
+  const preference = useThemeStore((state) => state.preference)
+  const systemTheme = useThemeStore((state) => state.systemTheme)
+  const setPreference = useThemeStore((state) => state.setPreference)
+  const theme = preference === "system" ? systemTheme : preference
   const dark = theme === "dark"
 
   const label = dark ? "Ativar tema claro" : "Ativar tema escuro"
@@ -15,7 +17,7 @@ export function ThemeToggle() {
     variant="outline"
     size="icon-sm"
     className="fixed right-4 top-4 z-50 rounded-full bg-background shadow-sm"
-    onClick={toggleTheme}
+    onClick={() => setPreference(dark ? "light" : "dark")}
   >
     {dark ? <Sun /> : <Moon />}
   </Button>

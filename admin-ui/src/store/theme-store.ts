@@ -24,15 +24,6 @@ function readSystemTheme(): ColorTheme {
     : "light";
 }
 
-function savePreference(preference: ColorTheme): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(themeStorageKey, preference);
-  } catch {
-    /* Keep the in-memory choice when browser storage is unavailable. */
-  }
-}
-
 interface ThemeState {
   preference: ThemePreference;
   systemTheme: ColorTheme;
@@ -44,7 +35,11 @@ export const useThemeStore = create<ThemeState>((set) => ({
   preference: readPreference(),
   systemTheme: readSystemTheme(),
   setPreference: (preference) => {
-    savePreference(preference);
+    try {
+      window.localStorage.setItem(themeStorageKey, preference);
+    } catch {
+      /* Keep the in-memory choice when browser storage is unavailable. */
+    }
     set({ preference });
   },
   setSystemTheme: (systemTheme) => set({ systemTheme }),

@@ -1,32 +1,42 @@
 import { create } from "zustand"
 
 export type ColorTheme = "light" | "dark"
+export type ThemePreference = ColorTheme | "system"
 
 const themeStorageKey = "tasklab-theme"
 
-function readTheme(): ColorTheme {
-  if (typeof window === "undefined") return "light"
+function readPreference(): ThemePreference {
+  if (typeof window === "undefined") return "system"
   try {
-    return window.localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light"
+    const preference = window.localStorage.getItem(themeStorageKey)
+    return preference === "dark" || preference === "light" ? preference : "system"
   } catch {
-    return "light"
+    return "system"
   }
 }
 
+function readSystemTheme(): ColorTheme {
+  if (typeof window === "undefined" || !window.matchMedia) return "light"
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+}
+
 interface ThemeState {
-  theme: ColorTheme
-  toggleTheme: () => void
+  preference: ThemePreference
+  systemTheme: ColorTheme
+  setPreference: (preference: ColorTheme) => void
+  setSystemTheme: (theme: ColorTheme) => void
 }
 
 export const useThemeStore = create<ThemeState>((set) => ({
-  theme: readTheme(),
-  toggleTheme: () => set((state) => {
-    const theme = state.theme === "dark" ? "light" : "dark"
+  preference: readPreference(),
+  systemTheme: readSystemTheme(),
+  setPreference: (preference) => {
     try {
-      window.localStorage.setItem(themeStorageKey, theme)
+      window.localStorage.setItem(themeStorageKey, preference)
     } catch {
       // Keep the in-memory choice when browser storage is unavailable.
     }
-    return { theme }
-  }),
+    set({ preference })
+  },
+  setSystemTheme: (systemTheme) => set({ systemTheme }),
 }))
