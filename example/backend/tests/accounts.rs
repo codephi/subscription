@@ -21,7 +21,11 @@ async fn seeded_admin_authenticates_and_registered_accounts_are_isolated() {
     let second = auth::register(&pool, "bob", "another-strong-password")
         .await
         .expect("second registration");
+    let unrestricted = auth::register(&pool, "é", "x")
+        .await
+        .expect("short non-ASCII credentials are accepted");
     assert_ne!(first.account_id, second.account_id);
+    assert_eq!(unrestricted.username, "é");
     assert_ne!(first.user_id, seeded.user_id);
     assert!(auth::authenticate(&pool, "alice", "wrong-password")
         .await

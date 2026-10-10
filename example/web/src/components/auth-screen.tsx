@@ -77,12 +77,11 @@ function CredentialsForm({ mode, busy, onSubmit }: { mode: AuthMode; busy: boole
     <FieldGroup>
       <Field>
         <FieldLabel htmlFor={`${mode}-username`}>Usuário</FieldLabel>
-        <Input id={`${mode}-username`} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required minLength={3} />
-        {mode === "register" && <FieldDescription>Use pelo menos 3 caracteres para identificar a conta.</FieldDescription>}
+        <Input id={`${mode}-username`} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
       </Field>
       <Field>
         <FieldLabel htmlFor={`${mode}-password`}>Senha</FieldLabel>
-        <Input id={`${mode}-password`} type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={4} />
+        <Input id={`${mode}-password`} type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} required />
       </Field>
     </FieldGroup>
     <Button className="w-full" type="submit" disabled={busy}>

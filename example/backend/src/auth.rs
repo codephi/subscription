@@ -29,7 +29,6 @@ pub async fn register(
     username: &str,
     password: &str,
 ) -> Result<AuthenticatedUser, AppError> {
-    validate_credentials(username, password)?;
     let user = new_user(username, password)?;
     insert_user(pool, &user).await?;
     load_by_id(pool, &user.user_id).await
@@ -167,19 +166,6 @@ fn verify_password(
         return Ok(user.clone());
     }
     Err(AppError::InvalidCredentials)
-}
-
-fn validate_credentials(username: &str, password: &str) -> Result<(), AppError> {
-    let valid_name = (3..=32).contains(&username.len())
-        && username
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character));
-    if valid_name && (8..=128).contains(&password.len()) {
-        return Ok(());
-    }
-    Err(AppError::Invalid(
-        "nome de usuário ou senha fora dos limites".to_string(),
-    ))
 }
 
 fn cookie_token(headers: &HeaderMap) -> Option<&str> {
