@@ -10,6 +10,12 @@ Leia também os fluxos operacionais de [créditos](credito.md) e
 [assinaturas](assinatura.md). Este documento registra o estado e as pendências
 conhecidas da integração descrita nesses guias.
 
+O exemplo TaskLab em `example/` já integra criação de conta, checkout de
+assinatura e recarga, configuração/listagem/remoção de cartão e cobrança de
+execução. Para esse exemplo, esses itens não são pendências de implementação;
+consulte o [guia TaskLab](tasklab.md). As pendências abaixo tratam do que um
+SaaS consumidor ainda precisa construir e das lacunas atuais da API/admin-ui.
+
 ## Decisões de arquitetura antes da implementação
 
 ### Identidade e limite de cobrança
@@ -19,7 +25,7 @@ conhecidas da integração descrita nesses guias.
 - Os accounts, pipelines e execuções internos continuam identificados no
   banco do SaaS. A Subscription API não oferece saldo ou limite separado por
   account interno; os itens da conta compartilham a `customer_wallet`.
-- O banco do SaaS deve relacionar pelo menos `account_id`, `account_id`,
+- O banco do SaaS deve relacionar pelo menos o `account_id`, o usuário interno,
   Stripe Customer (`cus_...`), conexão de Billing, `customer_plan_id`,
   referências de preço/oferta e IDs de operações de cobrança.
 - Somente o backend autenticado do SaaS deve chamar as rotas de negócio. O
@@ -29,21 +35,23 @@ conhecidas da integração descrita nesses guias.
 ### Quem controla a recorrência
 
 Escolha um único sistema como autoridade para gerar as cobranças recorrentes.
-Não habilite ao mesmo tempo a criação de cobranças recorrentes pela Stripe e
-pelo calendário interno da Subscription API.
+O fluxo implementado neste repositório usa a Subscription API para agendar
+renovações pagas mensais e a Stripe para processar cada cobrança. Não crie
+Stripe Subscriptions para os mesmos CustomerPlans.
 
-**Opção A — Stripe controla a assinatura de cobrança.** A Stripe gera faturas,
-tenta cobrar e emite eventos. A Subscription API continua sendo a autoridade
+**Opção A — Stripe controla a assinatura de cobrança (alternativa ainda não implementada).**
+A Stripe gera faturas, tenta cobrar e emite eventos. A Subscription API continua sendo a autoridade
 dos direitos e créditos do produto, e deve espelhar cada ciclo confirmado. O
 backend atual não cria Stripe Subscriptions nem processa eventos de ciclo de
 vida de assinatura/fatura; essa integração precisa ser desenvolvida.
 
-**Opção B — Subscription API controla os ciclos.** A API mantém
-`SubscriptionPlanVersion`, `CustomerPlan` e calendário, e cria uma
+**Opção B — Subscription API controla os ciclos (fluxo atual, mensal).** A API
+mantém `SubscriptionPlanVersion`, `CustomerPlan` e calendário, e cria uma
 `CollectionRequest` por renovação; a Stripe processa os `PaymentIntent`s. O
-backend atual não gera automaticamente a cobrança paga seguinte. É necessário
-implementar esse agendamento no Billing, sem delegar a geração de faturas à
-Stripe.
+dispatcher do Billing agenda a cobrança quando vence o ciclo, usa o cartão
+salvo e confirma o novo ciclo e a franquia pelo fluxo de confirmação persistido.
+O agendamento de renovação paga está limitado a planos `MONTHLY`; outras
+recorrências comerciais ainda precisam ser incluídas nesse fluxo.
 
 Em ambas as opções, pagamentos confirmados devem avançar no máximo um ciclo e
 conceder no máximo uma franquia por cobrança confirmada.
@@ -52,26 +60,29 @@ conceder no máximo uma franquia por cobrança confirmada.
 
 ### 1. Fluxo de cartão salvo
 
-Subscription cria uma Checkout Session hospedada em modo `setup`; TaskLab só
-redireciona o navegador e envia de volta o ID `cs_...`. Subscription recupera
-Checkout Session e SetupIntent na API Stripe, valida `succeeded`, `off_session`,
-Customer esperado e PaymentMethod associado antes de persistir o token. Uma
-repetição retorna o mesmo vínculo. PAN/CVC seguem do navegador diretamente à
-Stripe.
+**Implementado na API:** Subscription cria uma Checkout Session hospedada em
+modo `setup` ou confirma a sessão de pagamento hospedada, recupera os objetos
+na Stripe e valida Customer e PaymentMethod antes de persistir um vínculo
+tokenizado. A API permite listar e remover cartões salvos; uma repetição da
+confirmação não duplica o vínculo. O checkout hospedado de compra também pode
+salvar o cartão para uso futuro. Dados brutos do cartão não são persistidos pela
+Subscription.
 
-Ainda é necessário validar no ambiente Stripe de teste o ciclo com autenticação
-adicional e cobranças futuras; a autorização de setup não garante aprovação de
-cobranças subsequentes.
+**Pendente em uma integração SaaS própria:** redirecionar o navegador para a
+URL de checkout, confirmar o setup usando o ID da sessão retornado e guardar o
+ID do vínculo no backend. O exemplo TaskLab já implementa esse fluxo. Ainda é
+necessário validar em Stripe test mode o ciclo completo, incluindo autenticação
+adicional. Setup aprovado autoriza uso futuro, mas não garante aprovação das
+próximas cobranças.
 
-O Customer provisionado para a conexão também é enviado ao PaymentIntent
-off-session. Ainda faltam troca e remoção de cartão, método padrão, cartões
-expirados e notificação ao usuário; a TaskLab hoje lista e seleciona cartões,
-mas não oferece toda a gestão do ciclo de vida.
+As cobranças off-session usam o Customer e o vínculo de cartão associados à
+CollectionRequest. A API oferece remoção de cartão, mas ainda não oferece
+seleção de método padrão, tratamento de cartões expirados ou notificações ao
+cliente. A experiência para atualizar o cartão deve ser integrada no SaaS.
 
-Cobranças que retornam `requires_action` ainda precisam de uma ação segura no
-frontend para o cliente concluir autenticação adicional do PaymentIntent. O
-SetupIntent protege a autorização para uso futuro, mas não garante aprovação
-das próximas cobranças.
+Cobranças com `requires_action` são registradas e expostas como estado da
+operação; ainda falta uma experiência segura no SaaS para o cliente concluir a
+autenticação adicional do PaymentIntent e retomar a operação.
 
 ### 2. Tornar webhooks escaláveis e confiáveis
 
@@ -129,14 +140,16 @@ das próximas cobranças.
    pode criar Customer gerenciado e armazena segredos no cofre; se ainda estiver
    usando uma BillingConnection legada, conferir como o Customer é criado e
    associado antes de ativar cobranças.
-3. Depois de corrigir o cartão e webhooks, criar o CustomerPlan FREE pelo
-   backend e confirmar que está ativo. A admin-ui atualmente não cria essa
-   adesão.
-4. Criar no SaaS a tela de pacotes e checkout. O backend inicia uma compra
-   avulsa com chave de idempotência estável, guarda o `collection_request_id`
-   e mostra saldo somente depois de pagamento confirmado e crédito lançado.
-   A admin-ui consulta/investiga a cobrança, mas não realiza a compra pelo
-   cliente.
+3. Criar o CustomerPlan FREE pelo backend e confirmar que está ativo. A
+   admin-ui atualmente não cria essa adesão.
+4. Em um SaaS próprio, criar a tela de pacotes e checkout. A API já aceita
+   compras avulsas (`ON_DEMAND`) pela rota de compra ou pelo checkout genérico,
+   com cartão salvo
+   ou checkout hospedado Stripe. O backend do SaaS deve iniciar a compra com
+   chave de idempotência estável, guardar `checkout_id` e
+   `collection_request_id`, acompanhar o estado e mostrar o saldo somente após
+   confirmação e lançamento do crédito. A admin-ui investiga cobranças, mas não
+   realiza a compra pelo cliente.
 
 ### 6. Cobrar pipeline de forma consistente
 
@@ -190,25 +203,20 @@ das próximas cobranças.
    invoices, período vigente, próxima data, falha e correlação. A admin-ui hoje
    investiga Billing existente, mas não opera Stripe Subscriptions.
 
-## Trabalho adicional para Subscription API controlar a recorrência (Opção B)
+## Pendências para ampliar a recorrência pela Subscription API (Opção B)
 
-1. Implementar a geração da CollectionRequest `RENEWAL` na data correta do
-   ciclo pago, usando `subscription_calendar_jobs`/mecanismo de calendário
-   adequado para cobrar uma única vez mesmo após restart ou claims concorrentes.
-2. Garantir criação idempotente e transacional: uma renovação por CustomerPlan
-   e ciclo; respeitar cancelamento, transição, expiração e estado comercial;
-   não gerar cobrança para plano encerrado ou account bloqueado.
-3. Despachar a cobrança pelo cartão salvo e tratar resposta incerta sem criar
-   uma segunda cobrança. Preservar a chave idempotente de provedor e permitir
-   reconciliação da tentativa original.
-4. Confirmar ciclo e créditos apenas pelo webhook válido da cobrança persistida;
-   validar conexão, Customer, valor, moeda, plano e janela comercial. A mesma
-   cobrança só pode conceder um ciclo.
-5. Definir recuperação de falha: estado de atraso, prazo de tolerância,
+1. Ampliar o agendamento e a confirmação de renovações pagas para as
+   recorrências comerciais além de `MONTHLY`, mantendo uma única cobrança por
+   CustomerPlan e ciclo e respeitando cancelamento e estado comercial.
+2. Validar em Stripe test mode o fluxo completo de renovação, incluindo
+   reinício/concorrência do dispatcher, resposta incerta e webhook repetido.
+   A implementação já persiste tentativas com chave idempotente e confirma o
+   ciclo e os créditos pela cobrança registrada.
+3. Definir recuperação de falha: estado de atraso, prazo de tolerância,
    suspensão de entitlement, retentativa ou regularização manual, incluindo a
    experiência para autenticação adicional do cliente.
-6. Usar a rota de regularização existente para retomada manual e ampliar a
-   admin-ui para iniciar/acompanhar essa operação se operadores precisarem
+4. Integrar no SaaS a rota de regularização existente para retomada manual e
+   ampliar a admin-ui para iniciar/acompanhar essa operação se operadores precisarem
    executá-la pelo painel. Hoje o painel mostra a investigação, mas não inicia
    regularização nem conduz ação de cartão.
 
@@ -218,9 +226,9 @@ das próximas cobranças.
 | --- | --- |
 | Criar produtos, itens, preços, planos comerciais, ofertas avulsas e políticas; publicar preço e ativar produto. | Checkout e seleção de ofertas para clientes. |
 | Consultar accounts, plano, saldo, extrato, medidor e prontidão das wallets. | Cadastro/login e associação de usuário à conta no SaaS. |
-| Configurar e testar uma integração Stripe gerenciada, validar chave e criar Customer associado à conexão. | Automação escalável de destinos Stripe/webhooks e checkout para o cliente. |
+| Configurar e testar uma integração Stripe gerenciada, validar chave e criar Customer associado à conexão. | Automação escalável de destinos Stripe/webhooks. |
 | Conceder crédito manualmente e ajustar configuração de Billing. | Compra self-service de créditos e configuração self-service de cartão. |
-| Cancelar, transicionar ou revogar CustomerPlan; reconciliar wallets/uso. | Adesão de cliente, assinatura Stripe e geração de renovação automática. |
+| Cancelar, transicionar ou revogar CustomerPlan; reconciliar wallets/uso; agendar e cobrar renovações pagas mensais pela Subscription API. | Adesão self-service, recorrências pagas diferentes de mensal e gestão self-service de falhas/cartões. |
 | Investigar coleções, tentativas, pagamentos, webhooks e filas; replay operacional disponível para os casos expostos. | Experiência do cliente para autenticação adicional, falhas, troca de cartão e atualização de acesso. |
 
 O painel é operacional e não tem autenticação própria. Deve permanecer em rede
@@ -228,19 +236,20 @@ interna/VPN até que autenticação e autorização sejam implementadas.
 
 ## Sequência recomendada de entrega
 
-1. Escolher Opção A ou Opção B e registrar qual sistema é autoridade para
-   cobrança, estado da assinatura e calendário.
-2. Implementar e validar em Stripe test mode o fluxo de Customer, SetupIntent,
-   PaymentMethod e PaymentIntent; corrigir a criação do SetupIntent, validar
-   posse/estado do cartão e verificar que o Customer associado chega à cobrança.
+1. Manter a Subscription API como autoridade do ciclo e estado comercial, ou
+   planejar explicitamente a migração para Stripe Subscriptions sem executar
+   dois agendadores para o mesmo plano.
+2. Integrar o fluxo hospedado existente no SaaS e validar em Stripe test mode
+   Customer, SetupIntent, PaymentMethod e PaymentIntent; conferir a conclusão
+   de autenticação adicional e a cobrança futura.
 3. Implementar webhooks escaláveis, deduplicados e vinculados à cobrança e à
    conta persistidas.
 4. Integrar cadastro de conta, eventos assinados, provisionamento de wallet e
    adesão ao plano pelo backend do SaaS.
 5. Entregar primeiro o caminho pré-pago: compra confirmada, crédito lançado,
    registro de consumo antes de cada pipeline e reconciliação de execução.
-6. Implementar o modelo de recorrência escolhido, incluindo estados de falha,
-   cancelamento, mudança de plano e concessão idempotente de franquia.
+6. Validar renovações mensais e decidir a política de falhas; depois ampliar a
+   geração e confirmação de renovações para outras recorrências, se necessário.
 7. Verificar fluxos ponta a ponta em Stripe test mode, incluindo webhook
    repetido, resposta perdida, falha de pagamento, autenticação adicional,
    restart/concorrência do worker e nenhuma liberação antes da confirmação.
