@@ -1,0 +1,12 @@
+DROP TABLE credit_lot_allocations;
+DROP TABLE billing_blocks;
+DROP TABLE pricing_accumulators;
+DROP TABLE item_wallet_entries;
+DROP TABLE debits;
+DROP TABLE usage_events;
+ALTER TABLE item_wallets
+  DROP COLUMN last_usage_event_id,
+  DROP COLUMN pending_credit_units,
+  DROP COLUMN pending_unit_block_size,
+  DROP COLUMN pending_price_version_id,
+  DROP COLUMN total_converted_blocks;

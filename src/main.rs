@@ -5,6 +5,7 @@ use subscription::{
     libs::telemetry,
     repositories::database::DatabaseRepository,
     routes::create_router,
+    services::outbox::{self, WebhookDestination},
     state::AppState,
 };
 use tokio::net::TcpListener;
@@ -17,11 +18,32 @@ async fn main() -> Result<()> {
     let pool = init_pool(&config.database_url).await?;
 
     if let Err(error) = run_migrations(&pool).await {
-        tracing::error!("failed to run database migrations: {error}");
+        tracing::error!(error = %error, "failed to run database migrations");
         return Err(error);
     }
 
-    let state = AppState::new(DatabaseRepository::new(pool));
+    let repository = DatabaseRepository::new(pool).with_credential_vault()?;
+    tokio::spawn(subscription::services::subscription_calendar::run_scheduler(repository.clone()));
+    tokio::spawn(
+        subscription::services::billing_dispatcher::run_billing_dispatcher(repository.clone()),
+    );
+    let state = AppState::new(repository.clone())
+        .with_accounts_webhook_secret(config.accounts_webhook_secret.clone())
+        .with_public_api_base_url(config.public_api_base_url.clone())
+        .with_billing_checkout_config(
+            subscription::services::billing_checkout::BillingCheckoutConfig::from_environment()?,
+        );
+
+    if let Some(webhook) = &config.outbound_event_webhook {
+        tokio::spawn(outbox::run_dispatcher(
+            repository,
+            WebhookDestination {
+                url: webhook.url.clone(),
+                secret: webhook.secret.clone(),
+            },
+            std::time::Duration::from_secs(1),
+        ));
+    }
 
     let router = create_router(state, &config);
 

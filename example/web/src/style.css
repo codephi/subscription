@@ -1,0 +1,207 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+  --font-heading: var(--font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  font-family: "Geist Variable", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  color-scheme: light;
+  --background: oklch(0.985 0.008 150);
+  --foreground: oklch(0.2 0.025 155);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.025 155);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.025 155);
+  --primary: oklch(0.46 0.12 150);
+  --primary-foreground: oklch(0.99 0.004 150);
+  --secondary: oklch(0.945 0.025 150);
+  --secondary-foreground: oklch(0.29 0.05 150);
+  --muted: oklch(0.96 0.012 150);
+  --muted-foreground: oklch(0.51 0.025 155);
+  --accent: oklch(0.95 0.03 150);
+  --accent-foreground: oklch(0.29 0.05 150);
+  --destructive: oklch(0.56 0.22 27);
+  --border: oklch(0.91 0.015 150);
+  --input: oklch(0.91 0.015 150);
+  --ring: oklch(0.58 0.11 150);
+  --chart-1: oklch(0.61 0.13 150);
+  --chart-2: oklch(0.68 0.12 90);
+  --chart-3: oklch(0.56 0.12 190);
+  --chart-4: oklch(0.74 0.13 125);
+  --chart-5: oklch(0.48 0.1 165);
+  --radius: 0.9rem;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.17 0.02 155);
+  --foreground: oklch(0.96 0.01 150);
+  --card: oklch(0.21 0.022 155);
+  --card-foreground: oklch(0.96 0.01 150);
+  --popover: oklch(0.21 0.022 155);
+  --popover-foreground: oklch(0.96 0.01 150);
+  --primary: oklch(0.76 0.12 150);
+  --primary-foreground: oklch(0.2 0.03 155);
+  --secondary: oklch(0.29 0.03 155);
+  --secondary-foreground: oklch(0.94 0.015 150);
+  --muted: oklch(0.27 0.02 155);
+  --muted-foreground: oklch(0.72 0.025 155);
+  --accent: oklch(0.29 0.035 155);
+  --accent-foreground: oklch(0.94 0.015 150);
+  --destructive: oklch(0.7 0.18 22);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.68 0.09 150);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply min-h-screen min-w-80 bg-background text-foreground antialiased;
+    margin: 0;
+  }
+}
+
+.app-shell {
+  @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-7 px-4 py-6 sm:px-6 sm:py-9;
+}
+
+.auth-shell {
+  @apply grid min-h-screen place-items-center px-4 py-10;
+}
+
+.auth-card {
+  @apply w-full max-w-lg shadow-lg shadow-foreground/5;
+}
+
+.auth-form {
+  @apply mt-5 grid gap-5;
+}
+
+.brand-lockup {
+  @apply flex items-center gap-3 text-lg font-semibold tracking-tight;
+}
+
+.brand-mark {
+  @apply flex size-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground;
+}
+
+.eyebrow {
+  @apply text-xs font-semibold uppercase tracking-[0.18em] text-primary;
+}
+
+.app-header {
+  @apply flex items-center justify-between border-b pb-5;
+}
+
+.dashboard-heading {
+  @apply flex flex-col justify-between gap-5 sm:flex-row sm:items-end;
+}
+
+.dashboard-grid {
+  @apply grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(20rem,0.85fr)];
+}
+
+.dashboard-main,
+.dashboard-aside {
+  @apply grid content-start gap-5;
+}
+
+.balance-value {
+  @apply text-5xl tracking-tighter;
+}
+
+.metric-icon {
+  @apply flex size-12 items-center justify-center rounded-xl bg-secondary text-primary [&_svg]:size-6;
+}
+
+.connection-dot {
+  @apply size-2 rounded-full bg-primary;
+}
+
+.onboarding-shell {
+  @apply gap-8;
+}
+
+.onboarding-content {
+  @apply mx-auto grid w-full max-w-4xl gap-7;
+}
+
+.plan-options {
+  @apply grid gap-3 md:grid-cols-2;
+}
+
+.plan-option {
+  @apply grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-xl border p-4 transition-colors;
+}
+
+.plan-option[data-selected="true"] {
+  @apply border-primary bg-accent/50;
+}
+
+.plan-option-icon {
+  @apply text-primary [&_svg]:size-5;
+}
+
+.demo-card-fields {
+  @apply grid grid-cols-2 gap-4;
+}
+
+.demo-card-fields > [data-slot="field"]:first-child {
+  @apply col-span-2;
+}
+
+@media (max-width: 640px) {
+  .demo-card-fields {
+    @apply grid-cols-1;
+  }
+
+  .demo-card-fields > [data-slot="field"]:first-child {
+    @apply col-span-1;
+  }
+}
