@@ -1,6 +1,7 @@
 .PHONY: run monitoring setup test build
 
 run:
+	docker-compose up -d
 	@if [ ! -x admin-ui/node_modules/.bin/vite ]; then npm --prefix admin-ui install; fi
 	@if [ ! -d example/node_modules ]; then npm --prefix example install; fi
 	./example/node_modules/.bin/concurrently -k -n subscription,admin,tasklab,stripe-webhooks -c cyan,green,blue,yellow \
