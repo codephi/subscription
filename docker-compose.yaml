@@ -10,6 +10,21 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
 
+  pgadmin:
+    image: dpage/pgadmin4:9.18
+    depends_on:
+      - postgres
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+    ports:
+      - 8081:80
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+
   jaeger:
     image: jaegertracing/jaeger:latest
     ports:
@@ -26,6 +41,7 @@ services:
       - monitoring
 volumes:
   postgres_data:
+  pgadmin_data:
   jaeger_data:
 
 networks:

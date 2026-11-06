@@ -1,0 +1,7 @@
+DROP TABLE subscription_admission_decisions;
+DROP TABLE subscription_admission_evidence;
+DROP TRIGGER trg_admission_reference_immutable ON subscription_plan_versions;
+DROP FUNCTION protect_admission_policy_reference();
+ALTER TABLE subscription_plan_versions DROP CONSTRAINT admission_policy_reference_shape;
+ALTER TABLE subscription_plan_versions DROP COLUMN admission_policy_version_id;
+DROP TABLE subscription_admission_policies;

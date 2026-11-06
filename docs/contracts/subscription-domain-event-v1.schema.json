@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runvibe.dev/contracts/subscription-domain-event-v1.schema.json",
+  "title": "Subscription domain event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "aggregate_type",
+    "aggregate_id",
+    "sequence",
+    "occurred_at",
+    "account_id",
+    "correlation_id",
+    "payload"
+  ],
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "enum": ["account_provisioning.started", "account_provisioning.completed", "account_provisioning.failed"] } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["scope_version", "expected_item_wallets", "materialized_item_wallets", "status"],
+            "properties": {
+              "scope_version": { "type": "string", "format": "uuid" },
+              "expected_item_wallets": { "type": "integer", "minimum": 0 },
+              "materialized_item_wallets": { "type": "integer", "minimum": 0 },
+              "status": { "enum": ["PROVISIONING", "ACTIVE", "DISABLED", "ERROR"] },
+              "error_detail": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "account_provisioning.failed" } } },
+      "then": { "properties": { "payload": { "required": ["error_detail"], "properties": { "status": { "const": "ERROR" }, "error_detail": { "type": "string", "minLength": 1 } } } } }
+    }
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Versioned domain fact emitted after its corresponding transaction commits.",
+      "examples": [
+        "account_provisioning.started",
+        "account_provisioning.completed",
+        "account_provisioning.failed",
+        "credit.granted",
+        "customer_plan.activated",
+        "customer_plan.cycle_started",
+        "customer_plan.plan_changed",
+        "customer_plan.canceled",
+        "customer_plan.expired",
+        "customer_plan.revoked",
+        "credit.expired"
+      ]
+    },
+    "schema_version": { "const": 1 },
+    "aggregate_type": { "type": "string", "minLength": 1 },
+    "aggregate_id": { "type": "string", "format": "uuid" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "account_id": { "type": "string", "format": "uuid" },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "causation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": { "type": "object" }
+  }
+}

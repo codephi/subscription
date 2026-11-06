@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runvibe.dev/contracts/accounts-account-event-v1.schema.json",
+  "title": "Accounts account event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "aggregate_id",
+    "sequence",
+    "occurred_at",
+    "account_id",
+    "correlation_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": {
+      "enum": [
+        "account.created",
+        "account.activated",
+        "account.blocked",
+        "account.terminated"
+      ]
+    },
+    "schema_version": { "const": 1 },
+    "aggregate_id": { "type": "string", "format": "uuid" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "account_id": { "type": "string", "format": "uuid" },
+    "correlation_id": { "type": "string", "format": "uuid" },
+    "causation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_id"],
+      "properties": {
+        "account_id": { "type": "string", "format": "uuid" }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+DROP TRIGGER trg_subscription_plan_products_immutable ON subscription_plan_products;
+DROP FUNCTION protect_published_plan_products();
+CREATE TRIGGER trg_subscription_plan_products_immutable
+BEFORE UPDATE OR DELETE ON subscription_plan_products
+FOR EACH ROW EXECUTE FUNCTION reject_credit_history_mutation();
+DROP TRIGGER trg_active_customer_plan_slot_lifecycle ON customer_plans;
+DROP FUNCTION sync_active_customer_plan_slot();

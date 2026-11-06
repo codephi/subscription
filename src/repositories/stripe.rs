@@ -1,0 +1,822 @@
+use serde_json::Value;
+
+use crate::repositories::billing_connector::{
+    BillingCapabilities, BillingConnector, BillingConnectorError, BillingPaymentMethod,
+    CollectionCommand, ConnectorCollectionResult, ConnectorCollectionState, ConnectorFuture,
+    HostedPaymentSessionCommand, HostedPaymentSessionFuture, HostedPaymentSessionResult,
+    SetupSessionCommand, SetupSessionFuture, SetupSessionResult,
+};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StripeCardSummary {
+    pub brand: String,
+    pub last_four: String,
+    pub exp_month: i32,
+    pub exp_year: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedStripePaymentMethod {
+    pub setup_intent_id: String,
+    pub payment_method_id: String,
+    pub customer_id: String,
+    pub card: Option<StripeCardSummary>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostedPaymentReceipt {
+    pub payment_intent_id: String,
+    pub payment_method_id: String,
+    pub payment_method_customer_id: Option<String>,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub saved_for_future: bool,
+    pub subscription_id: Option<String>,
+    pub period_start: Option<i64>,
+    pub period_end: Option<i64>,
+    pub card: Option<StripeCardSummary>,
+}
+
+pub struct StripeConnector {
+    client: reqwest::Client,
+    secret_key: String,
+    api_base: String,
+    connected_account: Option<String>,
+}
+
+impl StripeConnector {
+    pub fn new(secret_key: String, connected_account: Option<String>) -> Self {
+        Self::with_api_base(secret_key, connected_account, "https://api.stripe.com")
+    }
+
+    pub fn with_api_base(
+        secret_key: String,
+        connected_account: Option<String>,
+        api_base: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            secret_key,
+            api_base: api_base.into(),
+            connected_account,
+        }
+    }
+
+    pub async fn identify_stripe_account(&self) -> Result<String, BillingConnectorError> {
+        let response = self
+            .client
+            .get(format!("{}/v1/account", self.api_base))
+            .basic_auth(&self.secret_key, Some(""))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        let stripe_account_id = required_string(&body, "id")?;
+        if !stripe_account_id.starts_with("acct_") {
+            return Err(invalid_response("id", &stripe_account_id));
+        }
+        Ok(stripe_account_id)
+    }
+
+    pub async fn validate_customer(&self, customer_id: &str) -> Result<(), BillingConnectorError> {
+        let response = self
+            .client
+            .get(format!("{}/v1/customers/{customer_id}", self.api_base))
+            .basic_auth(&self.secret_key, Some(""))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        if body.get("id").and_then(Value::as_str) != Some(customer_id) {
+            return Err(invalid_response("customer.id", &body.to_string()));
+        }
+        Ok(())
+    }
+
+    pub async fn create_billing_portal_session(
+        &self,
+        customer_id: &str,
+        return_url: &str,
+    ) -> Result<String, BillingConnectorError> {
+        let mut request = self
+            .client
+            .post(format!("{}/v1/billing_portal/sessions", self.api_base))
+            .basic_auth(&self.secret_key, Some(""))
+            .form(&[("customer", customer_id), ("return_url", return_url)]);
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        let url = required_string(&body, "url")?;
+        if !url.starts_with("https://billing.stripe.com/") {
+            return Err(invalid_response("billing_portal.url", &url));
+        }
+        Ok(url)
+    }
+
+    pub async fn schedule_subscription_cancellation(
+        &self,
+        subscription_id: &str,
+    ) -> Result<(), BillingConnectorError> {
+        let mut request = self
+            .client
+            .post(format!(
+                "{}/v1/subscriptions/{subscription_id}",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""))
+            .form(&[("cancel_at_period_end", "true")]);
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        if body.get("id").and_then(Value::as_str) != Some(subscription_id)
+            || body.get("cancel_at_period_end").and_then(Value::as_bool) != Some(true)
+        {
+            return Err(invalid_response(
+                "subscription.cancel_at_period_end",
+                &body.to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn retrieve_setup_intent(
+        &self,
+        setup_intent_id: &str,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let mut request = self
+            .client
+            .get(format!(
+                "{}/v1/setup_intents/{setup_intent_id}",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""));
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        let setup = prepared_payment_method(&body, "")?;
+        if setup.setup_intent_id != setup_intent_id
+            || body.get("usage").and_then(Value::as_str) != Some("off_session")
+        {
+            return Err(invalid_response("SetupIntent", &body.to_string()));
+        }
+        Ok(setup)
+    }
+
+    pub async fn retrieve_hosted_payment(
+        &self,
+        session_id: &str,
+        expected_customer: &str,
+        expected_client_reference: &str,
+        expected_mode: &str,
+    ) -> Result<HostedPaymentReceipt, BillingConnectorError> {
+        let response = self
+            .client
+            .get(format!(
+                "{}/v1/checkout/sessions/{session_id}?expand%5B%5D=payment_intent.payment_method&expand%5B%5D=subscription.latest_invoice.payment_intent.payment_method",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""))
+            .send()
+            .await
+            .map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        if body.get("id").and_then(Value::as_str) != Some(session_id)
+            || body.get("customer").and_then(Value::as_str) != Some(expected_customer)
+            || body.get("client_reference_id").and_then(Value::as_str)
+                != Some(expected_client_reference)
+            || body.get("mode").and_then(Value::as_str) != Some(expected_mode)
+            || body.get("payment_status").and_then(Value::as_str) != Some("paid")
+        {
+            return Err(invalid_response("checkout_session", &body.to_string()));
+        }
+        let subscription = body.get("subscription");
+        let invoice = subscription.and_then(|item| item.get("latest_invoice"));
+        let intent = body
+            .get("payment_intent")
+            .or_else(|| invoice.and_then(|item| item.get("payment_intent")))
+            .ok_or_else(|| invalid_response("payment_intent", &body.to_string()))?;
+        let intent_id = intent
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_response("payment_intent.id", &intent.to_string()))?;
+        let method_id = intent
+            .get("payment_method")
+            .and_then(Value::as_object)
+            .and_then(|method| method.get("id"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                invalid_response("payment_intent.payment_method.id", &intent.to_string())
+            })?;
+        let method = intent.get("payment_method");
+        if intent.get("status").and_then(Value::as_str) != Some("succeeded") {
+            return Err(invalid_response(
+                "payment_intent.status",
+                &intent.to_string(),
+            ));
+        }
+        Ok(HostedPaymentReceipt {
+            payment_intent_id: intent_id.to_string(),
+            payment_method_id: method_id.to_string(),
+            payment_method_customer_id: method
+                .and_then(|value| value.get("customer"))
+                .and_then(stripe_reference_id),
+            amount_minor: body
+                .get("amount_total")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| invalid_response("amount_total", &body.to_string()))?,
+            currency: required_string(&body, "currency")?.to_ascii_uppercase(),
+            saved_for_future: intent
+                .pointer("/payment_method/allow_redisplay")
+                .and_then(Value::as_str)
+                == Some("always"),
+            subscription_id: subscription
+                .and_then(|item| item.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            period_start: invoice
+                .and_then(|item| item.pointer("/lines/data/0/period/start"))
+                .and_then(Value::as_i64),
+            period_end: invoice
+                .and_then(|item| item.pointer("/lines/data/0/period/end"))
+                .and_then(Value::as_i64),
+            card: payment_method_card(intent.get("payment_method")),
+        })
+    }
+
+    pub async fn retrieve_checkout_setup_intent(
+        &self,
+        checkout_session_id: &str,
+        expected_customer: &str,
+        expected_client_reference: &str,
+        expected_connection_id: &str,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let mut request = self
+            .client
+            .get(format!(
+                "{}/v1/checkout/sessions/{checkout_session_id}?expand%5B%5D=setup_intent.payment_method",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""));
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if !status.is_success() {
+            return Err(api_error(status.as_u16(), &body));
+        }
+        validate_checkout_session(
+            &body,
+            checkout_session_id,
+            expected_customer,
+            expected_client_reference,
+            expected_connection_id,
+        )
+    }
+
+    pub async fn create_account_customer(
+        &self,
+        account_id: &str,
+        connection_id: &str,
+    ) -> Result<String, BillingConnectorError> {
+        let fields = vec![
+            ("name", format!("Account {account_id}")),
+            ("metadata[account_id]", account_id.to_string()),
+            ("metadata[billing_connection_id]", connection_id.to_string()),
+        ];
+        let value = self
+            .post_form(
+                "/v1/customers",
+                &fields,
+                Some(&format!("billing-connection:{connection_id}:customer:v1")),
+            )
+            .await?;
+        required_string(&value, "id")
+    }
+
+    pub async fn prepare_test_payment_method(
+        &self,
+        customer_id: &str,
+        idempotency_key: &str,
+        declines_charge: bool,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let payment_method = if declines_charge {
+            "pm_card_chargeCustomerFail"
+        } else {
+            "pm_card_visa"
+        };
+        let fields = vec![
+            ("customer", customer_id.to_string()),
+            ("payment_method_types[]", "card".to_string()),
+            ("usage", "off_session".to_string()),
+            ("payment_method", payment_method.to_string()),
+            ("confirm", "true".to_string()),
+        ];
+        let value = self
+            .post_form("/v1/setup_intents", &fields, Some(idempotency_key))
+            .await?;
+        if value.get("status").and_then(Value::as_str) != Some("succeeded") {
+            let code = value
+                .pointer("/last_setup_error/code")
+                .and_then(Value::as_str)
+                .unwrap_or("card_setup_failed");
+            return Err(BillingConnectorError {
+                code: code.to_string(),
+                message: "Stripe could not set up the supplied card".to_string(),
+                retryable: false,
+                outcome_uncertain: false,
+            });
+        }
+        prepared_payment_method(&value, customer_id)
+    }
+
+    pub async fn create_card_setup_intent(
+        &self,
+        customer_id: &str,
+        cardholder_name: &str,
+        card_number: &str,
+        exp_month: u8,
+        exp_year: u16,
+        cvc: &str,
+        idempotency_key: &str,
+    ) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+        let fields = vec![
+            ("customer", customer_id.to_string()),
+            ("usage", "off_session".to_string()),
+            ("payment_method_types[]", "card".to_string()),
+            ("payment_method_data[type]", "card".to_string()),
+            (
+                "payment_method_data[billing_details][name]",
+                cardholder_name.to_string(),
+            ),
+            ("payment_method_data[card][number]", card_number.to_string()),
+            (
+                "payment_method_data[card][exp_month]",
+                exp_month.to_string(),
+            ),
+            ("payment_method_data[card][exp_year]", exp_year.to_string()),
+            ("payment_method_data[card][cvc]", cvc.to_string()),
+            ("confirm", "true".to_string()),
+        ];
+        let value = self
+            .post_form("/v1/setup_intents", &fields, Some(idempotency_key))
+            .await?;
+        if value.get("status").and_then(Value::as_str) != Some("succeeded") {
+            let code = value
+                .pointer("/last_setup_error/code")
+                .and_then(Value::as_str)
+                .unwrap_or("card_setup_failed");
+            return Err(BillingConnectorError {
+                code: code.to_string(),
+                message: "Stripe could not set up the supplied card".to_string(),
+                retryable: false,
+                outcome_uncertain: false,
+            });
+        }
+        let returned_customer = value
+            .get("customer")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_response("SetupIntent.customer", "missing"))?;
+        let usage = value
+            .get("usage")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_response("SetupIntent.usage", "missing"))?;
+        let setup_intent_id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| id.starts_with("seti_"))
+            .ok_or_else(|| invalid_response("SetupIntent.id", "missing or unsupported"))?;
+        let payment_method_id = value
+            .get("payment_method")
+            .and_then(Value::as_str)
+            .filter(|id| id.starts_with("pm_"))
+            .ok_or_else(|| {
+                invalid_response("SetupIntent.payment_method", "missing or unsupported")
+            })?;
+        if returned_customer != customer_id || usage != "off_session" {
+            return Err(invalid_response(
+                "SetupIntent",
+                "customer or usage does not match the request",
+            ));
+        }
+        Ok(PreparedStripePaymentMethod {
+            setup_intent_id: setup_intent_id.to_string(),
+            payment_method_id: payment_method_id.to_string(),
+            customer_id: returned_customer.to_string(),
+            card: None,
+        })
+    }
+
+    pub async fn detach_payment_method(
+        &self,
+        payment_method_id: &str,
+    ) -> Result<(), BillingConnectorError> {
+        let mut request = self
+            .client
+            .post(format!(
+                "{}/v1/payment_methods/{payment_method_id}/detach",
+                self.api_base
+            ))
+            .basic_auth(&self.secret_key, Some(""))
+            .header(
+                "Idempotency-Key",
+                format!("subscription:payment-method-detach:{payment_method_id}"),
+            );
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(api_error(status.as_u16(), &body))
+    }
+
+    async fn post_form(
+        &self,
+        path: &str,
+        fields: &[(&str, String)],
+        idempotency_key: Option<&str>,
+    ) -> Result<Value, BillingConnectorError> {
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(fields.iter().map(|(key, value)| (*key, value.as_str())))
+            .finish()
+            .replace("%7BCHECKOUT_SESSION_ID%7D", "{CHECKOUT_SESSION_ID}");
+        let mut request = self
+            .client
+            .post(format!("{}{}", self.api_base, path))
+            .basic_auth(&self.secret_key, Some(""))
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body);
+        if let Some(key) = idempotency_key {
+            request = request.header("Idempotency-Key", key);
+        }
+        if let Some(account) = &self.connected_account {
+            request = request.header("Stripe-Account", account);
+        }
+        let response = request.send().await.map_err(transport_error)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport_error)?;
+        if status.is_success() {
+            return Ok(body);
+        }
+        Err(api_error(status.as_u16(), &body))
+    }
+}
+
+fn validate_checkout_session(
+    session: &Value,
+    expected_session_id: &str,
+    expected_customer: &str,
+    expected_client_reference: &str,
+    expected_connection_id: &str,
+) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+    let setup = session
+        .get("setup_intent")
+        .ok_or_else(|| invalid_response("CheckoutSession.setup_intent", &session.to_string()))?;
+    let shape_is_valid = required_string(session, "id")? == expected_session_id
+        && required_string(session, "mode")? == "setup"
+        && required_string(session, "status")? == "complete"
+        && required_string(session, "customer")? == expected_customer
+        && required_string(session, "client_reference_id")? == expected_client_reference
+        && session
+            .pointer("/metadata/billing_connection_id")
+            .and_then(Value::as_str)
+            == Some(expected_connection_id);
+    if !shape_is_valid {
+        return Err(invalid_response("CheckoutSession", &session.to_string()));
+    }
+    let prepared = prepared_payment_method(setup, expected_customer)?;
+    if setup.get("usage").and_then(Value::as_str) != Some("off_session") {
+        return Err(invalid_response("SetupIntent.usage", &setup.to_string()));
+    }
+    Ok(prepared)
+}
+
+fn prepared_payment_method(
+    value: &Value,
+    expected_customer: &str,
+) -> Result<PreparedStripePaymentMethod, BillingConnectorError> {
+    let status = required_string(value, "status")?;
+    let customer_id = required_string(value, "customer")?;
+    if status != "succeeded" || (!expected_customer.is_empty() && customer_id != expected_customer)
+    {
+        return Err(invalid_response("SetupIntent", &value.to_string()));
+    }
+    let payment_method = value
+        .get("payment_method")
+        .ok_or_else(|| invalid_response("SetupIntent.payment_method", &value.to_string()))?;
+    let payment_method_id = payment_method
+        .as_str()
+        .or_else(|| payment_method.get("id").and_then(Value::as_str))
+        .ok_or_else(|| invalid_response("SetupIntent.payment_method", &payment_method.to_string()))?
+        .to_string();
+    if !payment_method_id.starts_with("pm_") {
+        return Err(invalid_response(
+            "SetupIntent.payment_method",
+            &value.to_string(),
+        ));
+    }
+    Ok(PreparedStripePaymentMethod {
+        setup_intent_id: required_string(value, "id")?,
+        payment_method_id,
+        customer_id,
+        card: payment_method_card(Some(payment_method)),
+    })
+}
+
+fn payment_method_card(value: Option<&Value>) -> Option<StripeCardSummary> {
+    let card = value?.get("card")?;
+    let brand = card.get("brand")?.as_str()?;
+    let last_four = card.get("last4")?.as_str()?;
+    let exp_month = i32::try_from(card.get("exp_month")?.as_i64()?).ok()?;
+    let exp_year = i32::try_from(card.get("exp_year")?.as_i64()?).ok()?;
+    if brand.is_empty()
+        || last_four.len() != 4
+        || !last_four.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(StripeCardSummary {
+        brand: brand.to_string(),
+        last_four: last_four.to_string(),
+        exp_month,
+        exp_year,
+    })
+}
+
+impl BillingConnector for StripeConnector {
+    fn capabilities(&self) -> BillingCapabilities {
+        BillingCapabilities {
+            payment_methods: vec![BillingPaymentMethod::Card],
+            supports_setup_session: true,
+            supports_vault: true,
+            supports_off_session_charge: true,
+            supports_webhook: true,
+        }
+    }
+
+    fn start_collection<'a>(&'a self, command: &'a CollectionCommand) -> ConnectorFuture<'a> {
+        Box::pin(async move {
+            let amount = command.amount_minor.to_string();
+            let mut fields = vec![
+                ("amount", amount),
+                ("currency", command.currency.to_ascii_lowercase()),
+                ("payment_method", command.payment_method_reference.clone()),
+                ("confirm", "true".to_string()),
+                ("off_session", "true".to_string()),
+                (
+                    "metadata[collection_request_id]",
+                    collection_id_from_key(&command.provider_idempotency_key),
+                ),
+            ];
+            if let Some(customer) = &command.customer_reference {
+                fields.push(("customer", customer.clone()));
+            }
+            let value = self
+                .post_form(
+                    "/v1/payment_intents",
+                    &fields,
+                    Some(&command.provider_idempotency_key),
+                )
+                .await?;
+            collection_result(&value)
+        })
+    }
+
+    fn create_setup_session<'a>(
+        &'a self,
+        command: &'a SetupSessionCommand,
+    ) -> SetupSessionFuture<'a> {
+        Box::pin(async move {
+            let fields = vec![
+                ("mode", "setup".to_string()),
+                ("customer", command.customer_reference.clone()),
+                ("client_reference_id", command.client_reference_id.clone()),
+                (
+                    "metadata[billing_connection_id]",
+                    command.billing_connection_id.clone(),
+                ),
+                ("success_url", command.success_url.clone()),
+                ("cancel_url", command.cancel_url.clone()),
+                ("payment_method_types[]", "card".to_string()),
+            ];
+            let value = self
+                .post_form("/v1/checkout/sessions", &fields, None)
+                .await?;
+            Ok(SetupSessionResult {
+                provider_setup_id: required_string(&value, "id")?,
+                redirect_url: required_string(&value, "url")?,
+            })
+        })
+    }
+
+    fn create_hosted_payment_session<'a>(
+        &'a self,
+        command: &'a HostedPaymentSessionCommand,
+    ) -> HostedPaymentSessionFuture<'a> {
+        Box::pin(async move {
+            let mode = if command.is_subscription {
+                "subscription"
+            } else {
+                "payment"
+            };
+            let mut fields = vec![
+                ("mode", mode.to_string()),
+                ("customer", command.customer_reference.clone()),
+                ("client_reference_id", command.client_reference_id.clone()),
+                ("success_url", command.success_url.clone()),
+                ("cancel_url", command.cancel_url.clone()),
+                ("expires_at", command.expires_at.to_string()),
+                ("payment_method_types[]", "card".to_string()),
+                ("line_items[0][quantity]", "1".to_string()),
+                (
+                    "line_items[0][price_data][currency]",
+                    command.currency.to_ascii_lowercase(),
+                ),
+                (
+                    "line_items[0][price_data][unit_amount]",
+                    command.amount_minor.to_string(),
+                ),
+                (
+                    "line_items[0][price_data][product_data][name]",
+                    "Créditos".to_string(),
+                ),
+                (
+                    "metadata[collection_request_id]",
+                    command.collection_request_id.clone(),
+                ),
+                (
+                    "metadata[customer_plan_id]",
+                    command.customer_plan_id.clone(),
+                ),
+            ];
+            if command.is_subscription {
+                fields.push((
+                    "line_items[0][price_data][recurring][interval]",
+                    "month".to_string(),
+                ));
+                fields.push((
+                    "subscription_data[metadata][collection_request_id]",
+                    command.collection_request_id.clone(),
+                ));
+                fields.push((
+                    "subscription_data[metadata][customer_plan_id]",
+                    command.customer_plan_id.clone(),
+                ));
+            }
+            if command.allow_payment_method_save {
+                fields.push((
+                    "saved_payment_method_options[payment_method_save]",
+                    "enabled".to_string(),
+                ));
+            }
+            let value = self
+                .post_form(
+                    "/v1/checkout/sessions",
+                    &fields,
+                    Some(&command.provider_idempotency_key),
+                )
+                .await?;
+            Ok(HostedPaymentSessionResult {
+                provider_session_id: required_string(&value, "id")?,
+                redirect_url: required_string(&value, "url")?,
+            })
+        })
+    }
+}
+
+fn collection_result(value: &Value) -> Result<ConnectorCollectionResult, BillingConnectorError> {
+    let status = required_string(value, "status")?;
+    let state = match status.as_str() {
+        "requires_action" | "requires_source_action" => ConnectorCollectionState::RequiresAction,
+        "requires_payment_method" | "canceled" => ConnectorCollectionState::Failed,
+        "processing" | "requires_capture" | "succeeded" => ConnectorCollectionState::Pending,
+        other => return Err(invalid_response("status", other)),
+    };
+    let next_action_url = value
+        .pointer("/next_action/redirect_to_url/url")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(ConnectorCollectionResult {
+        provider_payment_id: Some(required_string(value, "id")?),
+        state,
+        failure_code: value
+            .pointer("/last_payment_error/code")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        next_action_url,
+    })
+}
+
+fn collection_id_from_key(key: &str) -> String {
+    key.strip_prefix("collection:")
+        .and_then(|value| value.strip_suffix(":attempt:1"))
+        .unwrap_or(key)
+        .to_string()
+}
+
+fn required_string(value: &Value, field: &str) -> Result<String, BillingConnectorError> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| invalid_response(field, &value.to_string()))
+}
+
+fn stripe_reference_id(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .or_else(|| value.get("id").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
+fn invalid_response(field: &str, value: &str) -> BillingConnectorError {
+    BillingConnectorError {
+        code: "stripe_invalid_response".to_string(),
+        message: format!("Stripe response field {field} has unsupported value {value:?}"),
+        retryable: false,
+        outcome_uncertain: false,
+    }
+}
+
+fn transport_error(error: reqwest::Error) -> BillingConnectorError {
+    BillingConnectorError {
+        code: "stripe_transport_error".to_string(),
+        message: error.to_string(),
+        retryable: true,
+        outcome_uncertain: error.is_timeout() || error.is_request(),
+    }
+}
+
+fn api_error(status: u16, body: &Value) -> BillingConnectorError {
+    let details = body.get("error").unwrap_or(body);
+    let code = details
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or("stripe_api_error");
+    let message = details
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("Stripe rejected the request");
+    let retryable = status == 409 || status == 429 || status >= 500;
+    BillingConnectorError {
+        code: code.to_string(),
+        message: message.to_string(),
+        retryable,
+        outcome_uncertain: retryable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::stripe_reference_id;
+
+    #[test]
+    fn stripe_reference_id_reads_string_and_expanded_customer_references() {
+        assert_eq!(
+            stripe_reference_id(&json!("cus_123")),
+            Some("cus_123".into())
+        );
+        assert_eq!(
+            stripe_reference_id(&json!({"id":"cus_456"})),
+            Some("cus_456".into())
+        );
+        assert_eq!(stripe_reference_id(&json!(null)), None);
+    }
+}

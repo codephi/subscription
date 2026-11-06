@@ -1,0 +1,3 @@
+DROP TRIGGER IF EXISTS trg_billing_credit_grant_references_append_only
+  ON billing_credit_grant_references;
+DROP TABLE IF EXISTS billing_credit_grant_references;

@@ -1,0 +1,13 @@
+DROP INDEX IF EXISTS idx_collection_requests_expiration;
+DROP INDEX IF EXISTS idx_collection_requests_scheduled;
+DROP TABLE IF EXISTS billing_webhook_inbox;
+DROP TRIGGER IF EXISTS trg_billing_payments_updated_at ON billing_payments;
+DROP TABLE IF EXISTS billing_payments;
+DROP TRIGGER IF EXISTS trg_collection_attempts_updated_at ON collection_attempts;
+DROP TABLE IF EXISTS collection_attempts;
+DROP TRIGGER IF EXISTS trg_collection_requests_updated_at ON collection_requests;
+DROP TABLE IF EXISTS collection_requests;
+DROP TRIGGER IF EXISTS trg_payment_method_bindings_updated_at ON payment_method_bindings;
+DROP TABLE IF EXISTS payment_method_bindings;
+DROP TRIGGER IF EXISTS trg_billing_connections_updated_at ON billing_connections;
+DROP TABLE IF EXISTS billing_connections;

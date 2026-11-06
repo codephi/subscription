@@ -1,0 +1,415 @@
+use sqlx::{Postgres, Row, Transaction};
+use uuid::Uuid;
+
+#[path = "credit_conflicts.rs"]
+mod credit_conflicts;
+
+use crate::{
+    dto::{
+        credits::{
+            AccountBillingConfigResponse, AccountTransactionResponse,
+            CreditLedgerReconciliationResponse, CustomerWalletStatementResponse,
+            DirectCreditRequest, DirectCreditResponse, PendingUsageTransactionResponse,
+            UpdateAccountBillingConfigRequest,
+        },
+        units::{CreditUnits, ItemUnitBoundary, ItemUnits},
+    },
+    error::{ApiError, ApiResult},
+    repositories::{
+        credit_rows::{billing_config_from_row, entry_from_row, entry_not_found, load_references},
+        credit_writes::{
+            complete_reservations, insert_credit_audit, insert_credit_lot, insert_credit_outbox,
+            insert_direct_credit_row, insert_entry, insert_references, update_wallet_balance,
+        },
+        database::DatabaseRepository,
+    },
+};
+
+impl DatabaseRepository {
+    pub async fn insert_direct_credit(
+        &self,
+        account_id: Uuid,
+        idempotency_key: &str,
+        request_hash: &str,
+        request: &DirectCreditRequest,
+    ) -> ApiResult<DirectCreditResponse> {
+        let mut transaction = self.pool().begin().await?;
+        let wallet = lock_active_customer_wallet(&mut transaction, account_id).await?;
+        ensure_direct_credit_enabled(&mut transaction, account_id).await?;
+        reserve_idempotency(
+            &mut transaction,
+            account_id,
+            idempotency_key,
+            request_hash,
+            "DIRECT_CREDIT",
+        )
+        .await?;
+        reserve_transaction(
+            &mut transaction,
+            account_id,
+            &request.transaction_id,
+            "DIRECT_CREDIT",
+        )
+        .await?;
+        let balance_after = wallet.balance.checked_add(request.credit_units)?;
+        let direct_credit_id = Uuid::new_v4();
+        let entry_id = Uuid::new_v4();
+        let lot_id = Uuid::new_v4();
+        insert_direct_credit_row(&mut transaction, account_id, direct_credit_id, request).await?;
+        let entry_row = insert_entry(
+            &mut transaction,
+            &wallet,
+            account_id,
+            entry_id,
+            balance_after,
+            request,
+        )
+        .await?;
+        update_wallet_balance(&mut transaction, wallet.wallet_id, balance_after).await?;
+        insert_credit_lot(
+            &mut transaction,
+            account_id,
+            lot_id,
+            entry_id,
+            request.credit_units,
+        )
+        .await?;
+        insert_references(
+            &mut transaction,
+            entry_id,
+            direct_credit_id,
+            lot_id,
+            request.external_reference.as_deref(),
+        )
+        .await?;
+        complete_reservations(
+            &mut transaction,
+            account_id,
+            idempotency_key,
+            &request.transaction_id,
+            direct_credit_id,
+        )
+        .await?;
+        insert_credit_outbox(
+            &mut transaction,
+            account_id,
+            wallet.wallet_id,
+            wallet.next_sequence,
+            entry_id,
+            request.credit_units,
+        )
+        .await?;
+        insert_credit_audit(&mut transaction, account_id, direct_credit_id, entry_id).await?;
+        transaction.commit().await?;
+        let references = load_references(&self.pool(), entry_id).await?;
+        Ok(DirectCreditResponse {
+            direct_credit_id,
+            credit_lot_id: lot_id,
+            entry: entry_from_row(&entry_row, references),
+        })
+    }
+
+    pub async fn find_customer_wallet_transaction(
+        &self,
+        account_id: Uuid,
+        transaction_id: &str,
+    ) -> ApiResult<AccountTransactionResponse> {
+        let row = sqlx::query(
+            "SELECT * FROM customer_wallet_entries WHERE customer_id=$1 AND transaction_id=$2",
+        )
+        .bind(account_id)
+        .bind(transaction_id)
+        .fetch_optional(&self.pool())
+        .await?;
+        if let Some(row) = row {
+            let entry_id = row.get("customer_wallet_entry_id");
+            let references = load_references(&self.pool(), entry_id).await?;
+            return Ok(AccountTransactionResponse::CustomerWalletEntry(
+                entry_from_row(&row, references),
+            ));
+        }
+        self.find_pending_usage_transaction(account_id, transaction_id)
+            .await
+    }
+
+    async fn find_pending_usage_transaction(
+        &self,
+        account_id: Uuid,
+        transaction_id: &str,
+    ) -> ApiResult<AccountTransactionResponse> {
+        let row = sqlx::query(
+            "SELECT u.transaction_id,u.usage_event_id,u.item_wallet_id,u.product_id,u.item_id, \
+             u.item_units,u.pending_item_units_after,u.metadata,u.accepted_at,e.item_wallet_entry_id \
+             FROM usage_events u JOIN item_wallet_entries e ON e.usage_event_id=u.usage_event_id \
+             WHERE u.customer_id=$1 AND u.transaction_id=$2 AND NOT EXISTS \
+             (SELECT 1 FROM debits d WHERE d.usage_event_id=u.usage_event_id)",
+        )
+        .bind(account_id)
+        .bind(transaction_id)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| entry_not_found(account_id, transaction_id))?;
+        Ok(AccountTransactionResponse::PendingUsage(
+            PendingUsageTransactionResponse {
+                transaction_id: row.get("transaction_id"),
+                usage_event_id: row.get("usage_event_id"),
+                item_wallet_entry_id: row.get("item_wallet_entry_id"),
+                item_wallet_id: row.get("item_wallet_id"),
+                product_id: row.get("product_id"),
+                item_id: row.get("item_id"),
+                received_item_units: ItemUnits::positive(row.get("item_units"))?,
+                pending_item_units_after: ItemUnitBoundary::non_negative(
+                    row.get("pending_item_units_after"),
+                )?,
+                metadata: row.get("metadata"),
+                accepted_at: row.get("accepted_at"),
+            },
+        ))
+    }
+
+    pub async fn list_customer_wallet_entries(
+        &self,
+        account_id: Uuid,
+        cursor: Option<i64>,
+        limit: i64,
+    ) -> ApiResult<CustomerWalletStatementResponse> {
+        let rows = sqlx::query(
+            "SELECT e.* FROM customer_wallet_entries e JOIN wallets w \
+             ON w.wallet_id=e.customer_wallet_id WHERE w.customer_id=$1 \
+             AND ($2::bigint IS NULL OR e.entry_sequence<$2) \
+             ORDER BY e.entry_sequence DESC LIMIT $3",
+        )
+        .bind(account_id)
+        .bind(cursor)
+        .bind(limit + 1)
+        .fetch_all(&self.pool())
+        .await?;
+        let has_more = rows.len() as i64 > limit;
+        let mut items = Vec::with_capacity(rows.len().min(limit as usize));
+        for row in rows.iter().take(limit as usize) {
+            let entry_id = row.get("customer_wallet_entry_id");
+            items.push(entry_from_row(
+                row,
+                load_references(&self.pool(), entry_id).await?,
+            ));
+        }
+        let next_cursor = has_more
+            .then(|| items.last().map(|entry| entry.sequence.to_string()))
+            .flatten();
+        Ok(CustomerWalletStatementResponse { items, next_cursor })
+    }
+
+    pub async fn reconcile_credit_ledger(
+        &self,
+        account_id: Uuid,
+    ) -> ApiResult<CreditLedgerReconciliationResponse> {
+        let row = sqlx::query(include_str!("credit_reconciliation.sql"))
+            .bind(account_id)
+            .fetch_optional(&self.pool())
+            .await?
+            .ok_or_else(|| {
+                ApiError::service_unavailable(
+                    "wallet_not_provisioned",
+                    format!("account {account_id} has no customer wallet"),
+                )
+            })?;
+        let wallet_balance: i64 = row.get("balance_credit_units");
+        let ledger_balance: i64 = row.get("ledger_balance");
+        let lot_balance: i64 = row.get("lot_balance");
+        Ok(CreditLedgerReconciliationResponse {
+            account_id,
+            wallet_balance_credit_units: CreditUnits::new(wallet_balance),
+            ledger_balance_credit_units: CreditUnits::new(ledger_balance),
+            available_lot_credit_units: CreditUnits::new(lot_balance),
+            consistent: wallet_balance == ledger_balance
+                && wallet_balance == lot_balance
+                && row.get::<bool, _>("ledger_chain_valid"),
+        })
+    }
+
+    pub async fn find_billing_config(
+        &self,
+        account_id: Uuid,
+    ) -> ApiResult<AccountBillingConfigResponse> {
+        let row = sqlx::query("SELECT * FROM account_billing_configs WHERE account_id=$1")
+            .bind(account_id)
+            .fetch_optional(&self.pool())
+            .await?
+            .ok_or_else(|| {
+                ApiError::not_found(
+                    "billing_config_not_found",
+                    format!("account {account_id} has no billing config"),
+                )
+            })?;
+        Ok(billing_config_from_row(&row))
+    }
+
+    pub async fn update_billing_config(
+        &self,
+        account_id: Uuid,
+        request: &UpdateAccountBillingConfigRequest,
+    ) -> ApiResult<AccountBillingConfigResponse> {
+        let row = sqlx::query(
+            "UPDATE account_billing_configs SET direct_credit_enabled=$2, \
+             recurring_credit_enabled=$3,version=version+1 WHERE account_id=$1 AND version=$4 \
+             RETURNING *",
+        )
+        .bind(account_id)
+        .bind(request.direct_credit_enabled)
+        .bind(request.recurring_credit_enabled)
+        .bind(request.expected_version)
+        .fetch_optional(&self.pool())
+        .await?
+        .ok_or_else(|| {
+            ApiError::conflict(
+                "billing_config_version_conflict",
+                format!(
+                    "account {account_id} billing config must be version {}",
+                    request.expected_version
+                ),
+            )
+        })?;
+        Ok(billing_config_from_row(&row))
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct LockedWallet {
+    pub(super) wallet_id: Uuid,
+    pub(super) balance: CreditUnits,
+    pub(super) next_sequence: i64,
+}
+
+pub(super) async fn lock_active_customer_wallet(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+) -> ApiResult<LockedWallet> {
+    let account = sqlx::query(
+        "SELECT operational_status,EXISTS(SELECT 1 FROM integration_inbox_quarantine q \
+         JOIN integration_inbox i ON i.event_id=q.event_id WHERE i.account_id=$1 \
+         AND q.replayed_at IS NULL) has_gap FROM account_projections WHERE account_id=$1 FOR UPDATE",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| ApiError::not_found("account_not_found", format!("account {account_id} does not exist")))?;
+    let status: String = account.get("operational_status");
+    if status != "ACTIVE" || account.get::<bool, _>("has_gap") {
+        return Err(ApiError::conflict(
+            "account_not_operational",
+            format!("account {account_id} must be ACTIVE without event gaps, found {status}"),
+        ));
+    }
+    let row = sqlx::query(
+        "SELECT cw.wallet_id,cw.balance_credit_units FROM customer_wallets cw \
+         JOIN wallets w ON w.wallet_id=cw.wallet_id JOIN wallet_effective_states s ON s.wallet_id=w.wallet_id \
+         JOIN catalog_scope_current c ON c.singleton JOIN wallet_provisioning p \
+           ON p.customer_id=w.customer_id AND p.scope_version=c.scope_version \
+         WHERE w.customer_id=$1 AND s.status='ACTIVE' AND p.status='ACTIVE' \
+           AND p.expected_item_wallets=p.materialized_item_wallets \
+         FOR UPDATE OF cw",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or_else(|| ApiError::service_unavailable(
+        "wallet_not_provisioned",
+        format!("account {account_id} wallet hierarchy is not active for the current scope"),
+    ))?;
+    super::wallets::wallet_readiness::ensure_hierarchy_ready(&mut **transaction, account_id)
+        .await?;
+    let wallet_id = row.get("wallet_id");
+    let next_sequence = sqlx::query_scalar(
+        "SELECT COALESCE(max(entry_sequence),0)+1 FROM customer_wallet_entries \
+         WHERE customer_wallet_id=$1",
+    )
+    .bind(wallet_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(LockedWallet {
+        wallet_id,
+        balance: CreditUnits::new(row.get("balance_credit_units")),
+        next_sequence,
+    })
+}
+
+async fn ensure_direct_credit_enabled(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+) -> ApiResult<()> {
+    let direct_enabled: bool = sqlx::query_scalar(
+        "SELECT direct_credit_enabled FROM account_billing_configs WHERE account_id=$1",
+    )
+    .bind(account_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if direct_enabled {
+        return Ok(());
+    }
+    Err(ApiError::conflict(
+        "direct_credit_disabled",
+        format!("account {account_id} has direct credits disabled"),
+    ))
+}
+
+pub(super) async fn reserve_idempotency(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    key: &str,
+    request_hash: &str,
+    operation_kind: &str,
+) -> ApiResult<()> {
+    let inserted = sqlx::query(
+        "INSERT INTO idempotency_records (account_id,idempotency_key,operation_kind,request_hash) \
+         VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+    )
+    .bind(account_id)
+    .bind(key)
+    .bind(operation_kind)
+    .bind(request_hash)
+    .execute(&mut **transaction)
+    .await?;
+    if inserted.rows_affected() == 1 {
+        return Ok(());
+    }
+    let conflict = ApiError::conflict(
+        "idempotency_key_already_used",
+        format!("Idempotency-Key {key:?} was already used in account {account_id}"),
+    );
+    Err(
+        credit_conflicts::attach_committed_operation(transaction, account_id, key, true, conflict)
+            .await?,
+    )
+}
+
+pub(super) async fn reserve_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    transaction_id: &str,
+    operation_kind: &str,
+) -> ApiResult<()> {
+    let inserted = sqlx::query(
+        "INSERT INTO transaction_reservations (account_id,transaction_id,operation_kind) \
+         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+    )
+    .bind(account_id)
+    .bind(transaction_id)
+    .bind(operation_kind)
+    .execute(&mut **transaction)
+    .await?;
+    if inserted.rows_affected() == 1 {
+        return Ok(());
+    }
+    let conflict = ApiError::conflict(
+        "transaction_already_exists",
+        format!("transaction_id {transaction_id:?} already exists in account {account_id}"),
+    );
+    Err(credit_conflicts::attach_committed_operation(
+        transaction,
+        account_id,
+        transaction_id,
+        false,
+        conflict,
+    )
+    .await?)
+}
